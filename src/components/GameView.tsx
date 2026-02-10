@@ -38,6 +38,7 @@ export default function GameView(): JSX.Element {
   const [isRemoteDetonateUnlocked, setIsRemoteDetonateUnlocked] = useState(false);
   const [joystickPressed, setJoystickPressed] = useState(false);
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
+  const [profileName, setProfileName] = useState<string>('—');
 
   const setMovementFromDirection = (direction: Direction | null): void => {
     controlsRef.current.up = direction === 'up';
@@ -63,6 +64,41 @@ export default function GameView(): JSX.Element {
     return () => {
       root.classList.remove('telegram-fullview');
     };
+  }, []);
+
+  useEffect(() => {
+    const runAuth = async () => {
+      try {
+        const tgInitData = (window as any)?.Telegram?.WebApp?.initData ?? '';
+        const authRes = await fetch('/api/auth/telegram', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initData: tgInitData }),
+        });
+
+        const authJson = await authRes.json();
+        if (!authJson?.ok) return;
+
+        const token = String(authJson.token ?? '');
+        if (!token) return;
+
+        localStorage.setItem('rift_session_token', token);
+
+        const meRes = await fetch('/api/profile/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const meJson = await meRes.json();
+        if (meJson?.ok) {
+          setProfileName(String(meJson.user?.displayName ?? '—'));
+        }
+      } catch {
+        // keep silent (dev may run without backend)
+      }
+    };
+
+    // TODO backend: in production handle auth errors + refresh/retry strategy
+    runAuth();
   }, []);
 
   useEffect(() => {
@@ -214,6 +250,7 @@ export default function GameView(): JSX.Element {
       <section className="hud">
         <h1>Rift Runners MVP</h1>
         <div className="stats-row">
+          <span>Player: {profileName}</span>
           <span>Stage: {campaign.stage}</span>
           <span>Zone: {campaign.zone}</span>
           <span>Bombs: {stats.placed}/{stats.capacity}</span>
