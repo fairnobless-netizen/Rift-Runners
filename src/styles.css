@@ -148,4 +148,13 @@ button {
   .controls {
     max-width: 400px;
   }
+  .zoom-slider--vertical {
+  /* делает range вертикальным в большинстве браузеров */
+  writing-mode: bt-lr;
+  -webkit-appearance: slider-vertical;
+
+  width: 22px;
+  height: 180px;
+}
+
 }
