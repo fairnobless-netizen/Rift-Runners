@@ -1,23 +1,34 @@
 import Phaser from 'phaser';
-import { createArena } from './arena';
-import { GAME_CONFIG, LAYERS } from './config';
+import {
+  canOccupyCell,
+  createArena,
+  destroyBreakable,
+  fromKey,
+  getExplosionResult,
+  isInsideArena,
+  maybeDropItem,
+  pickupItem,
+  placeBomb,
+  removeBomb,
+  setBombOwnerEscaped,
+  toKey,
+} from './arena';
+import { ASSET_REGISTRY, GAME_CONFIG, LAYERS } from './config';
 import { emitStats, EVENT_READY, gameEvents } from './gameEvents';
-import type { ControlsState, ItemType, PlayerStats, TileType } from './types';
+import type {
+  ControlsState,
+  Direction,
+  EntityKind,
+  EntityState,
+  Facing,
+  ItemModel,
+  PlayerModel,
+  PlayerStats,
+} from './types';
 
-interface BombData {
-  x: number;
-  y: number;
-  range: number;
-  sprite: Phaser.GameObjects.Rectangle;
-  fuseTimer: Phaser.Time.TimerEvent;
-  escapedByOwner: boolean;
-}
-
-interface ItemData {
-  x: number;
-  y: number;
-  type: ItemType;
-  sprite: Phaser.GameObjects.Rectangle;
+interface TimedDirection {
+  dir: Direction;
+  justPressed: boolean;
 }
 
 export class GameScene extends Phaser.Scene {
@@ -25,11 +36,17 @@ export class GameScene extends Phaser.Scene {
 
   private arena = createArena();
 
-  private player = {
-    x: 1,
-    y: 1,
-    moving: false,
-    sprite: undefined as Phaser.GameObjects.Rectangle | undefined,
+  private player: PlayerModel = {
+    gridX: 1,
+    gridY: 1,
+    targetX: null,
+    targetY: null,
+    moveFromX: 1,
+    moveFromY: 1,
+    moveStartedAt: 0,
+    facing: 'down',
+    state: 'idle',
+    graceBombKey: null,
   };
 
   private stats: PlayerStats = {
@@ -39,15 +56,23 @@ export class GameScene extends Phaser.Scene {
     score: 0,
   };
 
-  private bombs = new Map<string, BombData>();
+  private playerSprite?: Phaser.GameObjects.Rectangle;
 
-  private items = new Map<string, ItemData>();
+  private bombSprites = new Map<string, Phaser.GameObjects.Rectangle>();
 
-  private flames = new Map<string, Phaser.GameObjects.Rectangle>();
+  private itemSprites = new Map<string, Phaser.GameObjects.Rectangle>();
+
+  private flameSprites = new Map<string, Phaser.GameObjects.Rectangle>();
 
   private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
 
   private spaceKey?: Phaser.Input.Keyboard.Key;
+
+  private heldSince: Partial<Record<Direction, number>> = {};
+
+  private nextRepeatAt: Partial<Record<Direction, number>> = {};
+
+  private pendingDirection: Direction | null = null;
 
   constructor(controls: ControlsState) {
     super('GameScene');
@@ -63,10 +88,13 @@ export class GameScene extends Phaser.Scene {
     emitStats(this.stats);
   }
 
-  update(): void {
+  update(time: number): void {
     this.consumeKeyboard();
-    this.tryMoveFromControls();
-    this.tryPlaceBomb();
+    this.tickPlayerMovement(time);
+    this.consumeMovementIntent(time);
+    this.tryPlaceBomb(time);
+    this.processBombTimers(time);
+    this.cleanupExpiredFlames(time);
   }
 
   private setupCamera(): void {
@@ -75,7 +103,7 @@ export class GameScene extends Phaser.Scene {
     const worldHeight = gridHeight * tileSize;
 
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
-    this.cameras.main.startFollow(this.player.sprite!, true, 0.2, 0.2);
+    this.cameras.main.startFollow(this.playerSprite!, true, 0.2, 0.2);
     this.cameras.main.setZoom(startZoom);
 
     gameEvents.emit(EVENT_READY, {
@@ -110,6 +138,9 @@ export class GameScene extends Phaser.Scene {
 
         if (tile === 'BreakableBlock') {
           block.setStrokeStyle(2, 0xb78153, 0.8);
+          block.setData('breakable', true);
+          block.setData('gridX', x);
+          block.setData('gridY', y);
         }
       }
     }
@@ -117,15 +148,20 @@ export class GameScene extends Phaser.Scene {
 
   private createPlayer(): void {
     const { tileSize } = GAME_CONFIG;
-    this.player.sprite = this.add
+    const style = this.getAssetStyle('player', this.player.state, this.player.facing);
+    this.playerSprite = this.add
       .rectangle(
-        this.player.x * tileSize + tileSize / 2,
-        this.player.y * tileSize + tileSize / 2,
-        tileSize * 0.5,
-        tileSize * 0.5,
-        0x50d3ff,
+        this.player.gridX * tileSize + tileSize / 2,
+        this.player.gridY * tileSize + tileSize / 2,
+        tileSize * (style.scale ?? 0.5),
+        tileSize * (style.scale ?? 0.5),
+        style.fillColor,
       )
       .setDepth(LAYERS.player);
+
+    if (style.strokeColor) {
+      this.playerSprite.setStrokeStyle(2, style.strokeColor);
+    }
   }
 
   private setupInput(): void {
@@ -136,194 +172,183 @@ export class GameScene extends Phaser.Scene {
   private consumeKeyboard(): void {
     if (!this.cursors) return;
 
-    this.controls.up = this.controls.up || !!this.cursors.up.isDown;
-    this.controls.down = this.controls.down || !!this.cursors.down.isDown;
-    this.controls.left = this.controls.left || !!this.cursors.left.isDown;
-    this.controls.right = this.controls.right || !!this.cursors.right.isDown;
-
     if (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
       this.controls.placeBombRequested = true;
     }
   }
 
-  private tryMoveFromControls(): void {
-    if (this.player.moving) return;
+  private tickPlayerMovement(time: number): void {
+    if (this.player.targetX === null || this.player.targetY === null || !this.playerSprite) return;
 
-    if (this.controls.up) this.tryMove(0, -1);
-    else if (this.controls.down) this.tryMove(0, 1);
-    else if (this.controls.left) this.tryMove(-1, 0);
-    else if (this.controls.right) this.tryMove(1, 0);
+    const duration = GAME_CONFIG.moveDurationMs;
+    const progress = Phaser.Math.Clamp((time - this.player.moveStartedAt) / duration, 0, 1);
 
-    this.controls.up = false;
-    this.controls.down = false;
-    this.controls.left = false;
-    this.controls.right = false;
-  }
+    const { tileSize } = GAME_CONFIG;
+    const px = Phaser.Math.Linear(this.player.moveFromX, this.player.targetX, progress);
+    const py = Phaser.Math.Linear(this.player.moveFromY, this.player.targetY, progress);
 
-  private tryMove(dx: number, dy: number): void {
-    const nx = this.player.x + dx;
-    const ny = this.player.y + dy;
+    this.playerSprite.setPosition(px * tileSize + tileSize / 2, py * tileSize + tileSize / 2);
 
-    if (!this.isInside(nx, ny)) return;
-    const tile = this.tileAt(nx, ny);
-    if (tile === 'HardWall' || tile === 'BreakableBlock') return;
+    if (progress < 1) return;
 
-    const bomb = this.getBomb(nx, ny);
-    if (bomb) {
-      const isOwnerTile = this.player.x === bomb.x && this.player.y === bomb.y;
-      if (!(isOwnerTile && !bomb.escapedByOwner)) return;
+    const oldKey = toKey(this.player.moveFromX, this.player.moveFromY);
+    this.player.gridX = this.player.targetX;
+    this.player.gridY = this.player.targetY;
+    this.player.targetX = null;
+    this.player.targetY = null;
+    this.player.state = 'idle';
+
+    if (this.player.graceBombKey === oldKey) {
+      setBombOwnerEscaped(this.arena, oldKey);
+      this.player.graceBombKey = null;
     }
 
-    this.player.moving = true;
-    const { tileSize, moveDurationMs } = GAME_CONFIG;
-    this.tweens.add({
-      targets: this.player.sprite,
-      x: nx * tileSize + tileSize / 2,
-      y: ny * tileSize + tileSize / 2,
-      duration: moveDurationMs,
-      ease: 'Sine.out',
-      onComplete: () => {
-        const oldX = this.player.x;
-        const oldY = this.player.y;
-        this.player.x = nx;
-        this.player.y = ny;
-        this.player.moving = false;
-        this.markBombEscape(oldX, oldY, nx, ny);
-        this.tryPickupItem(nx, ny);
-      },
-    });
+    this.tryPickupItem(this.player.gridX, this.player.gridY);
+    this.updatePlayerVisual();
   }
 
-  private markBombEscape(oldX: number, oldY: number, newX: number, newY: number): void {
-    if (oldX === newX && oldY === newY) return;
-    const bomb = this.getBomb(oldX, oldY);
-    if (bomb) {
-      bomb.escapedByOwner = true;
+  private consumeMovementIntent(time: number): void {
+    const intent = this.pendingDirection ?? this.getDirectionIntent(time)?.dir;
+    this.pendingDirection = null;
+    if (!intent) return;
+
+    if (this.player.targetX !== null) {
+      this.pendingDirection = intent;
+      return;
     }
+
+    this.startMove(intent, time);
   }
 
-  private tryPlaceBomb(): void {
+  private getDirectionIntent(time: number): TimedDirection | null {
+    const ordered: Direction[] = ['up', 'down', 'left', 'right'];
+    const held = ordered.filter((dir) => this.isDirectionHeld(dir));
+
+    if (held.length === 0) {
+      for (const dir of ordered) {
+        this.heldSince[dir] = undefined;
+        this.nextRepeatAt[dir] = undefined;
+      }
+      return null;
+    }
+
+    const intents: TimedDirection[] = [];
+    for (const dir of held) {
+      const heldSince = this.heldSince[dir];
+      if (heldSince === undefined) {
+        this.heldSince[dir] = time;
+        this.nextRepeatAt[dir] = time + GAME_CONFIG.moveRepeatDelayMs;
+        intents.push({ dir, justPressed: true });
+        continue;
+      }
+
+      const repeatAt = this.nextRepeatAt[dir] ?? Number.POSITIVE_INFINITY;
+      if (time >= repeatAt) {
+        this.nextRepeatAt[dir] = repeatAt + GAME_CONFIG.moveRepeatIntervalMs;
+        intents.push({ dir, justPressed: false });
+      }
+    }
+
+    if (intents.length === 0) return null;
+    const fresh = intents.find((intent) => intent.justPressed);
+    return fresh ?? intents[0];
+  }
+
+  private startMove(direction: Direction, time: number): void {
+    const offset = this.toDelta(direction);
+    const nx = this.player.gridX + offset.dx;
+    const ny = this.player.gridY + offset.dy;
+    this.player.facing = direction;
+
+    if (!isInsideArena(nx, ny)) {
+      this.updatePlayerVisual();
+      return;
+    }
+
+    if (!canOccupyCell(this.arena, nx, ny)) {
+      this.updatePlayerVisual();
+      return;
+    }
+
+    this.player.moveFromX = this.player.gridX;
+    this.player.moveFromY = this.player.gridY;
+    this.player.targetX = nx;
+    this.player.targetY = ny;
+    this.player.moveStartedAt = time;
+    this.player.state = 'move';
+    this.updatePlayerVisual();
+  }
+
+  private tryPlaceBomb(time: number): void {
     if (!this.controls.placeBombRequested) return;
     this.controls.placeBombRequested = false;
 
     if (this.stats.placed >= this.stats.capacity) return;
-    if (this.getBomb(this.player.x, this.player.y)) return;
 
-    const { tileSize, bombFuseMs } = GAME_CONFIG;
-    const bombSprite = this.add
-      .rectangle(
-        this.player.x * tileSize + tileSize / 2,
-        this.player.y * tileSize + tileSize / 2,
-        tileSize * 0.46,
-        tileSize * 0.46,
-        0x222222,
-      )
-      .setDepth(LAYERS.bomb)
-      .setStrokeStyle(2, 0xbac2d7);
+    const x = this.player.gridX;
+    const y = this.player.gridY;
+    const bomb = placeBomb(this.arena, x, y, this.stats.range, 'player-1', time + GAME_CONFIG.bombFuseMs);
+    if (!bomb) return;
 
-    const key = this.key(this.player.x, this.player.y);
-    const bomb: BombData = {
-      x: this.player.x,
-      y: this.player.y,
-      range: this.stats.range,
-      sprite: bombSprite,
-      escapedByOwner: false,
-      fuseTimer: this.time.delayedCall(bombFuseMs, () => this.detonateBomb(key)),
-    };
-
-    this.bombs.set(key, bomb);
+    this.player.state = 'placeBomb';
+    this.player.graceBombKey = bomb.key;
     this.stats.placed += 1;
+    this.renderBomb(bomb.key);
+    this.updatePlayerVisual();
     emitStats(this.stats);
   }
 
-  private detonateBomb(key: string): void {
-    const bomb = this.bombs.get(key);
-    if (!bomb) return;
+  private processBombTimers(time: number): void {
+    const dueBombs = [...this.arena.bombs.values()]
+      .filter((bomb) => time >= bomb.detonateAt)
+      .map((bomb) => bomb.key);
 
-    bomb.fuseTimer.remove(false);
-    bomb.sprite.destroy();
-    this.bombs.delete(key);
-    this.stats.placed -= 1;
+    for (const key of dueBombs) {
+      this.detonateBomb(key, time);
+    }
+  }
 
-    const impacted = new Set<string>([this.key(bomb.x, bomb.y)]);
+  private detonateBomb(startKey: string, time: number): void {
+    const queue = [startKey];
+    const visited = new Set<string>();
 
-    const directions: Array<[number, number]> = [
-      [0, -1],
-      [0, 1],
-      [-1, 0],
-      [1, 0],
-    ];
+    while (queue.length > 0) {
+      const key = queue.shift();
+      if (!key || visited.has(key)) continue;
 
-    for (const [dx, dy] of directions) {
-      for (let step = 1; step <= bomb.range; step += 1) {
-        const tx = bomb.x + dx * step;
-        const ty = bomb.y + dy * step;
-        if (!this.isInside(tx, ty)) break;
+      visited.add(key);
+      const bomb = removeBomb(this.arena, key);
+      if (!bomb) continue;
 
-        const tile = this.tileAt(tx, ty);
-        if (tile === 'HardWall') break;
+      this.destroyBombSprite(key);
+      this.stats.placed = Math.max(0, this.stats.placed - 1);
 
-        impacted.add(this.key(tx, ty));
-        if (tile === 'BreakableBlock') {
-          this.destroyBreakable(tx, ty);
-          break;
-        }
+      const result = getExplosionResult(this.arena, bomb);
+      for (const block of result.destroyedBreakables) {
+        destroyBreakable(this.arena, block.x, block.y);
+        this.destroyBreakableSprite(block.x, block.y);
+        this.stats.score += 10;
+
+        const dropped = maybeDropItem(this.arena, block.x, block.y, Math.random(), Math.random());
+        if (dropped) this.renderItem(dropped);
+      }
+
+      for (const impactedKey of result.impactedKeys) {
+        const pos = fromKey(impactedKey);
+        this.spawnFlame(pos.x, pos.y, time + GAME_CONFIG.flameLifetimeMs);
+        this.hitPlayerAt(pos.x, pos.y);
+      }
+
+      for (const chainKey of result.chainBombKeys) {
+        queue.push(chainKey);
       }
     }
 
-    impacted.forEach((coordKey) => {
-      const [x, y] = coordKey.split(',').map(Number);
-      this.spawnFlame(x, y);
-      this.triggerBombAt(x, y);
-      this.hitPlayerAt(x, y);
-    });
-
     emitStats(this.stats);
   }
 
-  private destroyBreakable(x: number, y: number): void {
-    this.arena.tiles[y][x] = 'Floor';
-    this.stats.score += 10;
-
-    const found = this.children
-      .list.filter((child) => child instanceof Phaser.GameObjects.Rectangle)
-      .find(
-        (child) =>
-          Math.round((child.x - GAME_CONFIG.tileSize / 2) / GAME_CONFIG.tileSize) === x &&
-          Math.round((child.y - GAME_CONFIG.tileSize / 2) / GAME_CONFIG.tileSize) === y &&
-          child.depth === LAYERS.breakable,
-      );
-
-    if (found) {
-      found.destroy();
-    }
-
-    if (Math.random() <= GAME_CONFIG.itemDropChance) {
-      const type: ItemType = Math.random() < 0.5 ? 'BombUp' : 'FireUp';
-      this.spawnItem(x, y, type);
-    }
-  }
-
-  private spawnItem(x: number, y: number, type: ItemType): void {
-    const { tileSize } = GAME_CONFIG;
-    const color = type === 'BombUp' ? 0x77ff9a : 0xffc457;
-    const sprite = this.add
-      .rectangle(
-        x * tileSize + tileSize / 2,
-        y * tileSize + tileSize / 2,
-        tileSize * 0.3,
-        tileSize * 0.3,
-        color,
-      )
-      .setDepth(LAYERS.item)
-      .setStrokeStyle(2, 0x101010, 0.7);
-
-    this.items.set(this.key(x, y), { x, y, type, sprite });
-  }
-
   private tryPickupItem(x: number, y: number): void {
-    const key = this.key(x, y);
-    const item = this.items.get(key);
+    const item = pickupItem(this.arena, x, y);
     if (!item) return;
 
     if (item.type === 'BombUp') {
@@ -333,67 +358,190 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.stats.score += 25;
-    item.sprite.destroy();
-    this.items.delete(key);
+    this.destroyItemSprite(item.key);
     emitStats(this.stats);
   }
 
-  private spawnFlame(x: number, y: number): void {
-    const key = this.key(x, y);
-    if (this.flames.has(key)) return;
+  private renderBomb(key: string): void {
+    const bomb = this.arena.bombs.get(key);
+    if (!bomb) return;
 
-    const { tileSize, flameLifetimeMs } = GAME_CONFIG;
+    const style = this.getAssetStyle('bomb', 'active', 'none');
+    const { tileSize } = GAME_CONFIG;
+    const sprite = this.add
+      .rectangle(
+        bomb.x * tileSize + tileSize / 2,
+        bomb.y * tileSize + tileSize / 2,
+        tileSize * (style.scale ?? 0.46),
+        tileSize * (style.scale ?? 0.46),
+        style.fillColor,
+      )
+      .setDepth(LAYERS.bomb);
+
+    if (style.strokeColor) sprite.setStrokeStyle(2, style.strokeColor);
+    this.bombSprites.set(key, sprite);
+  }
+
+  private destroyBombSprite(key: string): void {
+    const sprite = this.bombSprites.get(key);
+    if (!sprite) return;
+    sprite.destroy();
+    this.bombSprites.delete(key);
+  }
+
+  private renderItem(item: ItemModel): void {
+    const style = this.getAssetStyle('item', 'active', 'none');
+    const color = item.type === 'BombUp' ? 0x77ff9a : style.fillColor;
+    const { tileSize } = GAME_CONFIG;
+    const sprite = this.add
+      .rectangle(
+        item.x * tileSize + tileSize / 2,
+        item.y * tileSize + tileSize / 2,
+        tileSize * (style.scale ?? 0.3),
+        tileSize * (style.scale ?? 0.3),
+        color,
+      )
+      .setDepth(LAYERS.item);
+
+    if (style.strokeColor) sprite.setStrokeStyle(2, style.strokeColor, 0.7);
+    this.itemSprites.set(item.key, sprite);
+  }
+
+  private destroyItemSprite(key: string): void {
+    const sprite = this.itemSprites.get(key);
+    if (!sprite) return;
+    sprite.destroy();
+    this.itemSprites.delete(key);
+  }
+
+  private spawnFlame(x: number, y: number, expiresAt: number): void {
+    const key = toKey(x, y);
+    if (this.flameSprites.has(key)) return;
+
+    const style = this.getAssetStyle('flame', 'active', 'none');
+    const { tileSize } = GAME_CONFIG;
     const flame = this.add
       .rectangle(
         x * tileSize + tileSize / 2,
         y * tileSize + tileSize / 2,
-        tileSize * 0.68,
-        tileSize * 0.68,
-        0xff6a3d,
+        tileSize * (style.scale ?? 0.68),
+        tileSize * (style.scale ?? 0.68),
+        style.fillColor,
       )
       .setDepth(LAYERS.flame)
-      .setAlpha(0.95);
+      .setAlpha(style.alpha ?? 1);
 
-    this.flames.set(key, flame);
-    this.time.delayedCall(flameLifetimeMs, () => {
-      flame.destroy();
-      this.flames.delete(key);
-    });
+    flame.setData('expiresAt', expiresAt);
+    this.flameSprites.set(key, flame);
   }
 
-  private triggerBombAt(x: number, y: number): void {
-    const key = this.key(x, y);
-    if (this.bombs.has(key)) {
-      this.detonateBomb(key);
+  private cleanupExpiredFlames(time: number): void {
+    for (const [key, flame] of this.flameSprites.entries()) {
+      const expiresAt = flame.getData('expiresAt') as number;
+      if (time < expiresAt) continue;
+      flame.destroy();
+      this.flameSprites.delete(key);
     }
   }
 
+  private destroyBreakableSprite(x: number, y: number): void {
+    const match = this.children.list.find((child) => {
+      if (!(child instanceof Phaser.GameObjects.Rectangle)) return false;
+      if (!child.getData('breakable')) return false;
+      return child.getData('gridX') === x && child.getData('gridY') === y;
+    });
+
+    match?.destroy();
+  }
+
   private hitPlayerAt(x: number, y: number): void {
-    if (this.player.x !== x || this.player.y !== y) return;
+    const playerOnCell =
+      this.player.targetX === null
+        ? this.player.gridX === x && this.player.gridY === y
+        : this.player.targetX === x && this.player.targetY === y;
+
+    if (!playerOnCell) return;
 
     this.stats.score = Math.max(0, this.stats.score - 50);
-    this.player.x = 1;
-    this.player.y = 1;
+    this.player.gridX = 1;
+    this.player.gridY = 1;
+    this.player.targetX = null;
+    this.player.targetY = null;
+    this.player.state = 'idle';
+    this.player.graceBombKey = null;
+
     const { tileSize } = GAME_CONFIG;
-    this.player.sprite?.setPosition(
-      this.player.x * tileSize + tileSize / 2,
-      this.player.y * tileSize + tileSize / 2,
+    this.playerSprite?.setPosition(
+      this.player.gridX * tileSize + tileSize / 2,
+      this.player.gridY * tileSize + tileSize / 2,
+    );
+
+    this.updatePlayerVisual();
+  }
+
+  private updatePlayerVisual(): void {
+    if (!this.playerSprite) return;
+
+    const style = this.getAssetStyle('player', this.player.state, this.player.facing);
+    const { tileSize } = GAME_CONFIG;
+    this.playerSprite
+      .setFillStyle(style.fillColor)
+      .setSize(tileSize * (style.scale ?? 0.5), tileSize * (style.scale ?? 0.5));
+
+    if (style.strokeColor) {
+      this.playerSprite.setStrokeStyle(2, style.strokeColor);
+    } else {
+      this.playerSprite.setStrokeStyle(0, 0, 0);
+    }
+
+    if (this.player.state === 'placeBomb') {
+      this.time.delayedCall(70, () => {
+        if (this.player.state === 'placeBomb') {
+          this.player.state = 'idle';
+          this.updatePlayerVisual();
+        }
+      });
+    }
+  }
+
+  private getAssetStyle(kind: EntityKind, state: EntityState, facing: Facing | 'none') {
+    return (
+      ASSET_REGISTRY[kind]?.[state]?.[facing] ??
+      ASSET_REGISTRY[kind]?.idle?.[facing] ??
+      ASSET_REGISTRY[kind]?.active?.none ?? { fillColor: 0xffffff }
     );
   }
 
-  private getBomb(x: number, y: number): BombData | undefined {
-    return this.bombs.get(this.key(x, y));
+  private toDelta(direction: Direction): { dx: number; dy: number } {
+    switch (direction) {
+      case 'up':
+        return { dx: 0, dy: -1 };
+      case 'down':
+        return { dx: 0, dy: 1 };
+      case 'left':
+        return { dx: -1, dy: 0 };
+      case 'right':
+        return { dx: 1, dy: 0 };
+      default:
+        return { dx: 0, dy: 0 };
+    }
   }
 
-  private isInside(x: number, y: number): boolean {
-    return x >= 0 && y >= 0 && x < GAME_CONFIG.gridWidth && y < GAME_CONFIG.gridHeight;
-  }
+  private isDirectionHeld(direction: Direction): boolean {
+    if (this.controls[direction]) return true;
+    if (!this.cursors) return false;
 
-  private tileAt(x: number, y: number): TileType {
-    return this.arena.tiles[y][x];
-  }
-
-  private key(x: number, y: number): string {
-    return `${x},${y}`;
+    switch (direction) {
+      case 'up':
+        return this.cursors.up.isDown;
+      case 'down':
+        return this.cursors.down.isDown;
+      case 'left':
+        return this.cursors.left.isDown;
+      case 'right':
+        return this.cursors.right.isDown;
+      default:
+        return false;
+    }
   }
 }
