@@ -2,7 +2,8 @@ import Phaser, { type Scene } from 'phaser';
 import { isInsideArena, toKey, type ExplosionImpact } from '../arena';
 import { GAME_CONFIG } from '../config';
 import { BossEntity } from './BossEntity';
-import type { BossConfig, BossControllerDeps, BossFightContext, BossHazard } from './BossTypes';
+import { getBossProfile } from './bossProfiles';
+import type { BossConfig, BossControllerDeps, BossFightContext, BossHazard, BossLifecycleState } from './BossTypes';
 
 const DIRECTIONS: Array<{ dx: number; dy: number }> = [
   { dx: 0, dy: -1 },
@@ -14,6 +15,9 @@ const DIRECTIONS: Array<{ dx: number; dy: number }> = [
 export class BossController {
   private boss?: BossEntity;
   private context?: BossFightContext;
+  private profile = getBossProfile(1);
+  private lifecycleState: BossLifecycleState = 'hidden';
+  private spawnAt = 0;
   private nextChaseAt = 0;
   private nextRangedAt = 0;
   private nextSummonAt = 0;
@@ -28,20 +32,15 @@ export class BossController {
   ) {}
 
   isBossLevel(levelIndex: number): boolean {
-    return levelIndex === this.config.triggerLevelIndex;
+    const zoneInStage = levelIndex % this.config.zonesPerStage;
+    return zoneInStage === this.config.triggerZoneInStage;
   }
 
   reset(context: BossFightContext): void {
     this.context = context;
     this.clear();
-
-    if (!context.isBossLevel) return;
-
-    this.boss = new BossEntity(this.scene, Math.floor(GAME_CONFIG.gridWidth / 2), Math.floor(GAME_CONFIG.gridHeight / 2), this.config.maxHp);
-    this.boss.spawn();
-    this.nextChaseAt = this.scene.time.now + 300;
-    this.nextRangedAt = this.scene.time.now + this.config.rangedIntervalMs;
-    this.nextSummonAt = this.scene.time.now + this.config.summonIntervalMs;
+    this.lifecycleState = context.isBossLevel ? 'hidden' : 'defeated';
+    this.profile = getBossProfile(context.playerCount);
   }
 
   clear(): void {
@@ -52,37 +51,59 @@ export class BossController {
     this.activeHazards.clear();
   }
 
+  revealBoss(): void {
+    if (!this.context?.isBossLevel) return;
+    if (this.lifecycleState !== 'hidden') return;
+    this.lifecycleState = 'revealing';
+    this.spawnAt = this.scene.time.now + this.config.revealSpawnDelayMs;
+    this.deps.onBossReveal();
+    this.scene.cameras.main.shake(this.config.revealShakeMs, 0.005);
+  }
+
+  isDefeated(): boolean {
+    return this.lifecycleState === 'defeated';
+  }
+
   update(time: number): void {
-    if (!this.boss) return;
+    if (this.lifecycleState === 'revealing' && time >= this.spawnAt) {
+      this.spawnBoss(time);
+    }
+
+    if (!this.boss || this.lifecycleState !== 'active') return;
+    this.boss.closeVulnerability(time);
     this.boss.syncSprite();
     this.cleanupHazards(time);
     this.checkHazardPlayerCollision();
 
     if (time >= this.nextChaseAt) {
       this.executeChase();
-      this.nextChaseAt = time + this.config.chaseIntervalMs;
+      this.nextChaseAt = time + Math.floor(900 / this.profile.speedMultiplier);
     }
 
     if (time >= this.nextRangedAt) {
       this.executeRangedAttack(time);
-      this.nextRangedAt = time + this.config.rangedIntervalMs;
+      this.openVulnerableWindow(time);
+      this.nextRangedAt = time + this.profile.attackIntervalMs;
     }
 
     if (time >= this.nextSummonAt) {
       this.executeSummon();
-      this.nextSummonAt = time + this.config.summonIntervalMs;
+      this.nextSummonAt = time + this.profile.summonIntervalMs;
     }
   }
 
   applyExplosionDamage(impacts: ExplosionImpact[]): void {
-    if (!this.boss) return;
+    if (!this.boss || this.lifecycleState !== 'active') return;
     const model = this.boss.getModel();
     if (!model.isAlive) return;
 
     let damage = 0;
     for (const impact of impacts) {
       if (impact.x !== model.gridX || impact.y !== model.gridY) continue;
-      damage = Math.max(damage, impact.distance === 0 ? this.config.centerExplosionDamage : this.config.explosionDamage);
+      if (impact.distance === 0) {
+        this.openVulnerableWindow(this.scene.time.now);
+      }
+      damage = Math.max(damage, impact.distance === 0 ? 2 : 1);
     }
 
     if (damage <= 0) return;
@@ -95,8 +116,29 @@ export class BossController {
       this.boss.destroy();
       this.boss = undefined;
       this.clearHazards();
+      this.lifecycleState = 'defeated';
       this.deps.onBossDefeated();
     }
+  }
+
+  private spawnBoss(time: number): void {
+    this.lifecycleState = 'active';
+    this.boss = new BossEntity(
+      this.scene,
+      Math.floor(GAME_CONFIG.gridWidth / 2),
+      Math.floor(GAME_CONFIG.gridHeight / 2),
+      this.profile.hp,
+      this.profile.phaseCount,
+    );
+    this.boss.spawn();
+    this.nextChaseAt = time + 300;
+    this.nextRangedAt = time + this.profile.attackIntervalMs;
+    this.nextSummonAt = time + this.profile.summonIntervalMs;
+    this.deps.onBossSpawned(this.profile);
+  }
+
+  private openVulnerableWindow(now: number): void {
+    this.boss?.setVulnerable(now + this.config.vulnerableWindowMs);
   }
 
   private executeChase(): void {
@@ -138,8 +180,8 @@ export class BossController {
       if (!isInsideArena(x, y)) break;
       const tile = this.context.arena.tiles[y]?.[x];
       if (tile === 'HardWall') break;
-      this.spawnHazardTile(x, y, time + this.config.hazardDurationMs);
-      if (tile === 'BreakableBlock') break;
+      this.spawnHazardTile(x, y, time + 700);
+      if (tile === 'BreakableBlock' || tile === 'ANOMALOUS_STONE') break;
     }
   }
 
@@ -148,7 +190,7 @@ export class BossController {
     const boss = this.boss.getModel();
     let spawned = 0;
     for (const dir of DIRECTIONS) {
-      if (spawned >= this.config.summonCount) break;
+      if (spawned >= this.profile.summonCount) break;
       const x = boss.gridX + dir.dx;
       const y = boss.gridY + dir.dy;
       if (!isInsideArena(x, y)) continue;

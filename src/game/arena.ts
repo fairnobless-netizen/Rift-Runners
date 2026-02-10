@@ -136,7 +136,7 @@ export function tileAt(arena: ArenaModel, x: number, y: number): TileType {
 export function canOccupyCell(arena: ArenaModel, x: number, y: number): boolean {
   if (!isInsideArena(x, y)) return false;
   const tile = tileAt(arena, x, y);
-  if (tile === 'HardWall' || tile === 'BreakableBlock') return false;
+  if (tile === 'HardWall' || tile === 'BreakableBlock' || tile === 'ANOMALOUS_STONE') return false;
   return !arena.bombs.has(toKey(x, y));
 }
 
@@ -193,7 +193,7 @@ export function getExplosionResult(arena: ArenaModel, bomb: BombModel): Explosio
         chainBombs.add(key);
       }
 
-      if (tile === 'BreakableBlock') {
+      if (tile === 'BreakableBlock' || tile === 'ANOMALOUS_STONE') {
         destroyedBreakables.push({ x: tx, y: ty });
         break;
       }

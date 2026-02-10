@@ -1,18 +1,20 @@
 import type { ArenaModel, ExplosionImpact } from '../arena';
+import type { BossProfile } from './bossProfiles';
 
 export type BossAttackKind = 'chase' | 'ranged' | 'summon';
+export type BossLifecycleState = 'hidden' | 'revealing' | 'active' | 'defeated';
 
 export interface BossConfig {
-  triggerLevelIndex: number;
-  maxHp: number;
-  explosionDamage: number;
-  centerExplosionDamage: number;
-  chaseIntervalMs: number;
-  rangedIntervalMs: number;
-  summonIntervalMs: number;
-  hazardDurationMs: number;
-  summonCount: number;
+  zonesPerStage: number;
+  stagesTotal: number;
+  triggerZoneInStage: number;
+  anomalousStoneCount: number;
+  revealShakeMs: number;
+  revealFlashMs: number;
+  revealSpawnDelayMs: number;
+  vulnerableWindowMs: number;
   defeatScoreReward: number;
+  rewardTrophyAmount: number;
 }
 
 export interface BossModel {
@@ -22,6 +24,10 @@ export interface BossModel {
   hp: number;
   maxHp: number;
   isAlive: boolean;
+  phase: number;
+  totalPhases: number;
+  isVulnerable: boolean;
+  vulnerableUntil: number;
 }
 
 export interface BossHazard {
@@ -38,12 +44,15 @@ export interface BossControllerDeps {
   onPlayerHit: () => void;
   onBossDefeated: () => void;
   onBossDamaged: (hp: number, maxHp: number) => void;
+  onBossReveal: () => void;
+  onBossSpawned: (profile: BossProfile) => void;
   getPlayerCell: () => { x: number; y: number };
 }
 
 export interface BossFightContext {
   arena: ArenaModel;
   isBossLevel: boolean;
+  playerCount: number;
 }
 
 export interface BossExplosionDamageInput {

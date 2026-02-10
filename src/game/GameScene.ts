@@ -44,6 +44,7 @@ import { DoorController } from './DoorController';
 import { createDeterministicRng, type DeterministicRng } from './rng';
 import { BossController } from './boss/BossController';
 import { createBossArena } from './boss/BossArena';
+import { generateBossNodeStones } from './level/bossNode';
 import type {
   ControlsState,
   Direction,
@@ -68,7 +69,7 @@ interface TimedDirection {
 }
 
 const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
-const LEVELS_PER_ZONE = 3;
+const LEVELS_PER_ZONE = BOSS_CONFIG.zonesPerStage;
 
 export class GameScene extends Phaser.Scene {
   private controls: ControlsState;
@@ -81,6 +82,10 @@ export class GameScene extends Phaser.Scene {
   private zoneIndex = 0;
   private levelInZone = 0;
   private isBossLevel = false;
+
+  private bossAnchorKey: string | null = null;
+  private progressionUnlockedStages = new Set<number>([0]);
+  private trophies = 0;
 
   private doorRevealed = false;
   private doorEntered = false;
@@ -99,6 +104,8 @@ export class GameScene extends Phaser.Scene {
       onPlayerHit: () => this.restartLevelAfterDeath(),
       onBossDefeated: () => this.handleBossDefeated(),
       onBossDamaged: (hp: number, maxHp: number) => this.emitSimulation('boss.damaged', this.time.now, { hp, maxHp }),
+      onBossReveal: () => this.emitSimulation('boss.reveal', this.time.now, { ...this.getLevelProgressModel() }),
+      onBossSpawned: (profile) => this.emitSimulation('boss.spawned', this.time.now, { profile }),
       getPlayerCell: () => ({ x: this.player.gridX, y: this.player.gridY }),
     },
   );
@@ -273,6 +280,11 @@ export class GameScene extends Phaser.Scene {
   private startLevel(levelIndex: number, keepScore: boolean): void {
     this.levelIndex = Math.max(0, levelIndex);
     this.zoneIndex = Math.floor(this.levelIndex / LEVELS_PER_ZONE);
+    const clampedZone = Math.min(this.zoneIndex, BOSS_CONFIG.stagesTotal - 1);
+    if (!this.progressionUnlockedStages.has(clampedZone)) {
+      this.levelIndex = clampedZone * LEVELS_PER_ZONE;
+      this.zoneIndex = clampedZone;
+    }
     this.levelInZone = this.levelIndex % LEVELS_PER_ZONE;
     this.isBossLevel = this.bossController.isBossLevel(this.levelIndex);
     // TODO(module-c): route to dedicated boss-level flow when zone milestones are added.
@@ -286,10 +298,15 @@ export class GameScene extends Phaser.Scene {
     this.doorEnterStartedAt = null;
     this.waveSequence = 0;
     this.enemySequence = 0;
+    this.bossAnchorKey = null;
     this.doorController.reset();
     this.clearDynamicSprites();
 
     this.arena = this.isBossLevel ? createBossArena() : createArena(this.levelIndex, this.rng);
+    if (this.isBossLevel) {
+      const bossNode = generateBossNodeStones(this.arena, this.rng, BOSS_CONFIG.anomalousStoneCount);
+      this.bossAnchorKey = bossNode.anchorKey || null;
+    }
     this.activeFlames.clear();
     this.enemies.clear();
     this.enemyNextMoveAt.clear();
@@ -297,7 +314,7 @@ export class GameScene extends Phaser.Scene {
     this.rebuildArenaTiles();
     this.spawnPlayer();
     this.spawnEnemies();
-    this.bossController.reset({ arena: this.arena, isBossLevel: this.isBossLevel });
+    this.bossController.reset({ arena: this.arena, isBossLevel: this.isBossLevel, playerCount: 1 });
 
     if (!keepScore) {
       this.stats = {
@@ -352,7 +369,7 @@ export class GameScene extends Phaser.Scene {
           .setDepth(spec.depth ?? (tile === 'Floor' ? 0 : DEPTH_BREAKABLE))
           .setData('arenaTile', true);
 
-        if (tile === 'BreakableBlock') {
+        if (tile === 'BreakableBlock' || tile === 'ANOMALOUS_STONE') {
           block.setData('breakable', true);
           block.setData('gridX', x);
           block.setData('gridY', y);
@@ -378,6 +395,7 @@ export class GameScene extends Phaser.Scene {
 
   private tryEnterDoor(time: number): void {
     if (!this.doorRevealed) return;
+    if (this.isBossLevel && !this.bossController.isDefeated()) return;
     if (this.player.targetX !== null || this.player.targetY !== null) {
       this.doorEnterStartedAt = null;
       return;
@@ -600,12 +618,17 @@ export class GameScene extends Phaser.Scene {
       const waveId = this.createWaveId();
 
       for (const block of result.destroyedBreakables) {
+        const blockKey = toKey(block.x, block.y);
+        const wasAnomalous = this.arena.tiles[block.y][block.x] === 'ANOMALOUS_STONE';
         destroyBreakable(this.arena, block.x, block.y);
         this.destroyBreakableSprite(block.x, block.y);
         this.stats.score += 10;
-        const dropped = maybeDropItem(this.arena, block.x, block.y, this.randomFloat(), this.randomFloat());
+        const dropped = wasAnomalous ? null : maybeDropItem(this.arena, block.x, block.y, this.randomFloat(), this.randomFloat());
+        if (this.isBossLevel && wasAnomalous && this.bossAnchorKey === blockKey) {
+          this.bossController.revealBoss();
+        }
         if (toKey(block.x, block.y) === this.arena.hiddenDoorKey) this.revealDoor(time);
-        this.emitSimulation('breakable.destroyed', time, { x: block.x, y: block.y, item: dropped?.type ?? null });
+        this.emitSimulation('breakable.destroyed', time, { x: block.x, y: block.y, item: dropped?.type ?? null, anomalous: wasAnomalous, isBossAnchor: this.bossAnchorKey === blockKey });
       }
 
       this.bossController.applyExplosionDamage(result.impacts);
@@ -1062,8 +1085,16 @@ export class GameScene extends Phaser.Scene {
 
   private handleBossDefeated(): void {
     this.stats.score += BOSS_CONFIG.defeatScoreReward;
+    this.trophies += BOSS_CONFIG.rewardTrophyAmount;
+    const currentStage = Math.floor(this.levelIndex / LEVELS_PER_ZONE);
+    const nextStage = Math.min(currentStage + 1, BOSS_CONFIG.stagesTotal - 1);
+    this.progressionUnlockedStages.add(nextStage);
     emitStats(this.stats);
-    this.emitSimulation('boss.defeated', this.time.now, { reward: BOSS_CONFIG.defeatScoreReward });
+    this.emitSimulation('BOSS_DEFEATED', this.time.now, {
+      reward: BOSS_CONFIG.defeatScoreReward,
+      trophy: BOSS_CONFIG.rewardTrophyAmount,
+      unlockedStage: nextStage,
+    });
     this.revealDoor(this.time.now);
   }
 

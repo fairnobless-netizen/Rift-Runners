@@ -1,4 +1,4 @@
-export type TileType = 'Floor' | 'HardWall' | 'BreakableBlock';
+export type TileType = 'Floor' | 'HardWall' | 'BreakableBlock' | 'ANOMALOUS_STONE';
 
 export type ItemType = 'BombUp' | 'FireUp';
 
