@@ -71,6 +71,7 @@ interface TimedDirection {
 
 const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
 const LEVELS_PER_ZONE = BOSS_CONFIG.zonesPerStage;
+const PRE_BOSS_LEVEL_IN_ZONE = Math.max(0, BOSS_CONFIG.triggerZoneInStage - 1);
 
 export class GameScene extends Phaser.Scene {
   private controls: ControlsState;
@@ -420,7 +421,7 @@ export class GameScene extends Phaser.Scene {
     this.emitSimulation(LEVEL_CLEARED, time, { ...this.getLevelProgressModel() });
 
     let nextLevelIndex = this.levelIndex + 1;
-    if (!this.isBossLevel && this.levelInZone === 8) {
+    if (!this.isBossLevel && this.levelInZone === PRE_BOSS_LEVEL_IN_ZONE) {
       nextLevelIndex = this.zoneIndex * LEVELS_PER_ZONE + BOSS_CONFIG.triggerZoneInStage;
     }
     if (this.isBossLevel) {
@@ -482,8 +483,8 @@ export class GameScene extends Phaser.Scene {
     if (this.doorRevealed) return;
     this.doorRevealed = true;
     this.doorSprite?.setVisible(true);
-    this.doorIconSprite?.setVisible(this.levelInZone === 8 && !this.isBossLevel);
-    if (this.levelInZone === 8) {
+    this.doorIconSprite?.setVisible(this.levelInZone === PRE_BOSS_LEVEL_IN_ZONE && !this.isBossLevel);
+    if (this.levelInZone === PRE_BOSS_LEVEL_IN_ZONE) {
       this.emitSimulation(PREBOSS_DOOR_REVEALED, time, { ...this.getLevelProgressModel() });
     }
     this.emitSimulation(DOOR_REVEALED, time, { ...this.getLevelProgressModel() });
@@ -1147,7 +1148,7 @@ export class GameScene extends Phaser.Scene {
 
   private updateDoorVisual(time: number): void {
     if (!this.doorSprite || !this.doorRevealed) return;
-    const isPreBossLevel = this.levelInZone === 8;
+    const isPreBossLevel = this.levelInZone === PRE_BOSS_LEVEL_IN_ZONE;
     if (this.isBossLevel) {
       this.doorSprite.setFillStyle(0x4a66cc, 1);
       this.doorSprite.setScale(1);
