@@ -202,11 +202,6 @@ export default function GameView(): JSX.Element {
     zoomApiRef.current?.setZoom(clamped);
   };
 
-  const resetZoom = (): void => {
-    setZoom(GAME_CONFIG.startZoom);
-    zoomApiRef.current?.resetZoom();
-  };
-
   return (
     <main className="page">
       <section className="hud">
@@ -264,9 +259,10 @@ export default function GameView(): JSX.Element {
 
         <section className="game-shell">
           <div className="game-canvas" ref={mountRef} />
+        </section>
 
-          <aside className="zoom-panel">
-            <label htmlFor="zoom">Zoom</label>
+        <aside className="control-column control-column--right" aria-label="Action controls">
+          <div className="right-panel right-panel--zoom" aria-label="Zoom panel">
             <input
               id="zoom"
               type="range"
@@ -277,31 +273,29 @@ export default function GameView(): JSX.Element {
               value={zoom}
               onChange={(event) => onZoomInput(Number(event.target.value))}
             />
+          </div>
 
-            <button type="button" onClick={resetZoom}>Reset</button>
-          </aside>
-        </section>
-
-        <aside className="control-column control-column--right" aria-label="Action controls">
-          <div className="boost-slot" aria-hidden="true">Boost</div>
-          <button
-            type="button"
-            className="bomb-btn"
-            onTouchStart={requestBomb}
-            onMouseDown={requestBomb}
-          >
-            Bomb
-          </button>
-          <button
-            type="button"
-            className="detonate-btn"
-            onTouchStart={requestDetonate}
-            onMouseDown={requestDetonate}
-            disabled={!isRemoteDetonateUnlocked}
-          >
-            Detonate
-          </button>
-          <div className="boost-slot" aria-hidden="true">Boost</div>
+          <div className="right-panel right-panel--actions" aria-label="Action buttons">
+            <div className="boost-slot" aria-hidden="true">Boost</div>
+            <button
+              type="button"
+              className="bomb-btn"
+              onTouchStart={requestBomb}
+              onMouseDown={requestBomb}
+            >
+              Bomb
+            </button>
+            <button
+              type="button"
+              className="detonate-btn"
+              onTouchStart={requestDetonate}
+              onMouseDown={requestDetonate}
+              disabled={!isRemoteDetonateUnlocked}
+            >
+              Detonate
+            </button>
+            <div className="boost-slot" aria-hidden="true">Boost</div>
+          </div>
         </aside>
       </section>
     </main>

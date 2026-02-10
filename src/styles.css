@@ -87,8 +87,25 @@ body {
 
 .control-column--right {
   flex-direction: column;
-  justify-content: space-between;
-  gap: 0.8rem;
+  justify-content: flex-start;
+  gap: 0.6rem;
+}
+
+.right-panel {
+  width: min(112px, 100%);
+  background: #0f1630cc;
+  border: 1px solid #27335c;
+  border-radius: 12px;
+  padding: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.right-panel--zoom {
+  padding: 0.5rem 0.55rem;
+  gap: 0.25rem;
 }
 
 .boost-slot {
@@ -123,27 +140,8 @@ body {
   background: #0a0f1c;
 }
 
-.zoom-panel {
-  position: absolute;
-  right: 0.45rem;
-  bottom: 0.45rem;
-  display: grid;
-  justify-items: center;
-  gap: 0.35rem;
-  background: #0f1630dd;
-  border: 1px solid #27335c;
-  border-radius: 10px;
-  padding: 0.35rem 0.45rem;
-  min-width: 90px;
-}
-
-.zoom-panel label {
-  font-size: 0.75rem;
-  color: #cad3f0;
-}
-
 .zoom-slider {
-  width: 80px;
+  width: 100%;
 }
 
 button {
@@ -249,11 +247,6 @@ button:disabled {
   .game-canvas {
     width: min(100%, calc(100vw - var(--safe-left) - var(--safe-right) - 1.6rem));
     max-height: calc(100vh - var(--safe-top) - var(--safe-bottom) - var(--tg-top-overlay) - 250px);
-  }
-
-  .zoom-panel {
-    right: calc(0.55rem + var(--safe-right));
-    bottom: calc(0.55rem + var(--safe-bottom));
   }
 
   .joystick-pad {
