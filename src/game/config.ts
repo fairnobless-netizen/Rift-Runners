@@ -46,16 +46,16 @@ export const DOOR_CONFIG = {
 } as const;
 
 export const BOSS_CONFIG = {
-  triggerLevelIndex: 2,
-  maxHp: 10,
-  explosionDamage: 1,
-  centerExplosionDamage: 2,
-  chaseIntervalMs: 900,
-  rangedIntervalMs: 2200,
-  summonIntervalMs: 3600,
-  hazardDurationMs: 700,
-  summonCount: 2,
+  zonesPerStage: 10,
+  stagesTotal: 7,
+  triggerZoneInStage: 9,
+  anomalousStoneCount: 8,
+  revealShakeMs: 260,
+  revealFlashMs: 220,
+  revealSpawnDelayMs: 420,
+  vulnerableWindowMs: 800,
   defeatScoreReward: 500,
+  rewardTrophyAmount: 1,
 } as const;
 
 export const BOMB_PULSE_CONFIG = {
@@ -96,6 +96,15 @@ export const ASSET_REGISTRY: AssetRegistry = {
       },
     },
     BreakableBlock: {
+      none: {
+        textureKey: 'tile-breakable',
+        path: '/assets/sprites/tile-breakable.svg',
+        origin: { x: 0.5, y: 0.5 },
+        scale: 1,
+        depth: DEPTH_BREAKABLE,
+      },
+    },
+    ANOMALOUS_STONE: {
       none: {
         textureKey: 'tile-breakable',
         path: '/assets/sprites/tile-breakable.svg',

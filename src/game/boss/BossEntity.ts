@@ -9,14 +9,18 @@ export class BossEntity {
   private hpBarFill?: Phaser.GameObjects.Rectangle;
   private readonly model: BossModel;
 
-  constructor(private readonly scene: Scene, x: number, y: number, hp: number) {
+  constructor(private readonly scene: Scene, x: number, y: number, hp: number, totalPhases: number) {
     this.model = {
-      key: 'boss-m1',
+      key: 'boss-m4',
       gridX: x,
       gridY: y,
       hp,
       maxHp: hp,
       isAlive: true,
+      phase: 1,
+      totalPhases,
+      isVulnerable: false,
+      vulnerableUntil: 0,
     };
   }
 
@@ -49,10 +53,29 @@ export class BossEntity {
     this.syncSprite();
   }
 
+  setVulnerable(until: number): void {
+    this.model.isVulnerable = true;
+    this.model.vulnerableUntil = until;
+    this.syncSprite();
+  }
+
+  closeVulnerability(now: number): void {
+    if (!this.model.isVulnerable) return;
+    if (now < this.model.vulnerableUntil) return;
+    this.model.isVulnerable = false;
+    this.syncSprite();
+  }
+
   applyDamage(damage: number): boolean {
-    if (!this.model.isAlive || damage <= 0) return false;
+    if (!this.model.isAlive || damage <= 0 || !this.model.isVulnerable) return false;
     this.model.hp = Math.max(0, this.model.hp - damage);
-    if (this.model.hp === 0) this.model.isAlive = false;
+    if (this.model.hp === 0) {
+      this.model.isAlive = false;
+    } else {
+      const remainingRatio = this.model.maxHp <= 0 ? 0 : this.model.hp / this.model.maxHp;
+      const phase = Math.min(this.model.totalPhases, Math.max(1, Math.ceil((1 - remainingRatio) * this.model.totalPhases)));
+      this.model.phase = phase;
+    }
     this.syncSprite();
     return true;
   }
@@ -60,7 +83,10 @@ export class BossEntity {
   syncSprite(): void {
     if (!this.sprite) return;
     const { tileSize } = GAME_CONFIG;
-    this.sprite.setPosition(this.model.gridX * tileSize + tileSize / 2, this.model.gridY * tileSize + tileSize / 2);
+    this.sprite
+      .setPosition(this.model.gridX * tileSize + tileSize / 2, this.model.gridY * tileSize + tileSize / 2)
+      .setFillStyle(this.model.isVulnerable ? 0xff76ff : 0x8f2cff, 1);
+
     if (this.hpBarBg) {
       this.hpBarBg.setPosition(this.sprite.x, this.sprite.y - tileSize * 0.62);
     }
