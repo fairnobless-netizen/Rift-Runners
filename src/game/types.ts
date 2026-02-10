@@ -52,6 +52,14 @@ export interface FlameModel extends GridPosition {
   axis?: FlameArmAxis;
 }
 
+export interface EnemyModel {
+  key: string;
+  gridX: number;
+  gridY: number;
+  facing: Facing;
+  state: Extract<EntityState, 'idle' | 'move'>;
+}
+
 export interface PlayerStats {
   capacity: number;
   placed: number;

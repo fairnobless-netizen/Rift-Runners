@@ -23,16 +23,31 @@ export function fromKey(key: string): GridPosition {
   return { x, y };
 }
 
-export function createArena(): ArenaModel {
+function getBreakableDensity(levelIndex: number): number {
+  const next = GAME_CONFIG.levelBreakableDensityStart + levelIndex * GAME_CONFIG.levelBreakableDensityStep;
+  return Math.min(GAME_CONFIG.levelBreakableDensityMax, Math.max(0, next));
+}
+
+function getSpawnSafeSet(): Set<string> {
+  return new Set(['1,1', '1,2', '2,1', '2,2']);
+}
+
+export function getEnemyCountForLevel(levelIndex: number): number {
+  return Math.max(1, Math.min(GAME_CONFIG.maxEnemyCount, GAME_CONFIG.baseEnemyCount + levelIndex));
+}
+
+function getEnemyReserveSafeCells(enemyCount: number): Set<string> {
+  const reserveCandidates = ['5,5', '5,4', '4,5', '3,5', '5,3', '1,5', '5,1', '3,1', '1,3'];
+  return new Set(reserveCandidates.slice(0, Math.max(enemyCount + 2, 3)));
+}
+
+export function createArena(levelIndex = 0): ArenaModel {
   const { gridWidth, gridHeight } = GAME_CONFIG;
   const tiles: TileType[][] = [];
-
-  const spawnSafe = new Set(['1,1', '1,2', '2,1']);
-  const enemySpawnSafe = new Set([
-    `${gridWidth - 2},${gridHeight - 2}`,
-    `${gridWidth - 2},${gridHeight - 3}`,
-    `${gridWidth - 3},${gridHeight - 2}`,
-  ]);
+  const spawnSafe = getSpawnSafeSet();
+  const enemyCount = getEnemyCountForLevel(levelIndex);
+  const enemyReserve = getEnemyReserveSafeCells(enemyCount);
+  const breakableDensity = getBreakableDensity(levelIndex);
 
   for (let y = 0; y < gridHeight; y += 1) {
     const row: TileType[] = [];
@@ -45,8 +60,12 @@ export function createArena(): ArenaModel {
       }
 
       const key = toKey(x, y);
-      const keepFloor = spawnSafe.has(key) || enemySpawnSafe.has(key);
-      row.push(keepFloor ? 'Floor' : 'BreakableBlock');
+      if (spawnSafe.has(key) || enemyReserve.has(key)) {
+        row.push('Floor');
+        continue;
+      }
+
+      row.push(Math.random() < breakableDensity ? 'BreakableBlock' : 'Floor');
     }
     tiles.push(row);
   }
@@ -57,6 +76,21 @@ export function createArena(): ArenaModel {
     items: new Map<string, ItemModel>(),
     isSpawnCell: (x: number, y: number) => spawnSafe.has(toKey(x, y)),
   };
+}
+
+export function getEnemySpawnCells(arena: ArenaModel): GridPosition[] {
+  const spawnSafe = getSpawnSafeSet();
+  const cells: GridPosition[] = [];
+
+  for (let y = 1; y < GAME_CONFIG.gridHeight - 1; y += 1) {
+    for (let x = 1; x < GAME_CONFIG.gridWidth - 1; x += 1) {
+      if (spawnSafe.has(toKey(x, y))) continue;
+      if (tileAt(arena, x, y) !== 'Floor') continue;
+      cells.push({ x, y });
+    }
+  }
+
+  return cells;
 }
 
 export function isInsideArena(x: number, y: number): boolean {
