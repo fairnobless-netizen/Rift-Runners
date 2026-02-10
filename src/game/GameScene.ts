@@ -93,6 +93,7 @@ export class GameScene extends Phaser.Scene {
   private doorEntered = false;
   private isLevelCleared = false;
   private doorSprite?: Phaser.GameObjects.Rectangle;
+  private doorIconSprite?: Phaser.GameObjects.Text;
   private doorEnterStartedAt: number | null = null;
   private waveSequence = 0;
   private enemySequence = 0;
@@ -279,6 +280,7 @@ export class GameScene extends Phaser.Scene {
       const parsed = JSON.parse(raw) as {
         unlockedStages?: number[];
         trophies?: number;
+        score?: number;
         stats?: { score?: number };
         levelIndex?: number;
       };
@@ -294,8 +296,13 @@ export class GameScene extends Phaser.Scene {
       }
 
       this.trophies = typeof parsed.trophies === 'number' && Number.isFinite(parsed.trophies) ? Math.max(0, Math.floor(parsed.trophies)) : 0;
-      this.stats.score =
-        typeof parsed.stats?.score === 'number' && Number.isFinite(parsed.stats.score) ? Math.max(0, Math.floor(parsed.stats.score)) : 0;
+      const parsedScore =
+        typeof parsed.score === 'number' && Number.isFinite(parsed.score)
+          ? parsed.score
+          : typeof parsed.stats?.score === 'number' && Number.isFinite(parsed.stats.score)
+            ? parsed.stats.score
+            : 0;
+      this.stats.score = Math.max(0, Math.floor(parsedScore));
 
       const requestedLevelIndex =
         typeof parsed.levelIndex === 'number' && Number.isInteger(parsed.levelIndex) && parsed.levelIndex >= 0 ? parsed.levelIndex : fallbackLevelIndex;
@@ -315,7 +322,7 @@ export class GameScene extends Phaser.Scene {
     const payload = {
       unlockedStages,
       trophies: this.trophies,
-      stats: { score: this.stats.score },
+      score: this.stats.score,
       levelIndex: Math.max(0, Math.floor(levelIndex)),
     };
 
@@ -413,6 +420,9 @@ export class GameScene extends Phaser.Scene {
     this.emitSimulation(LEVEL_CLEARED, time, { ...this.getLevelProgressModel() });
 
     let nextLevelIndex = this.levelIndex + 1;
+    if (!this.isBossLevel && this.levelInZone === 8) {
+      nextLevelIndex = this.zoneIndex * LEVELS_PER_ZONE + BOSS_CONFIG.triggerZoneInStage;
+    }
     if (this.isBossLevel) {
       const currentStage = Math.floor(this.levelIndex / LEVELS_PER_ZONE);
       const nextStage = Math.min(currentStage + 1, BOSS_CONFIG.stagesTotal - 1);
@@ -449,10 +459,22 @@ export class GameScene extends Phaser.Scene {
 
     this.bossController.clear();
     this.doorSprite?.destroy();
+    this.doorIconSprite?.destroy();
     const doorPos = fromKey(this.arena.hiddenDoorKey);
     this.doorSprite = this.add
       .rectangle(doorPos.x * tileSize + tileSize / 2, doorPos.y * tileSize + tileSize / 2, tileSize - 8, tileSize - 8, 0x4a66cc)
       .setDepth(DEPTH_ITEM)
+      .setVisible(false);
+    this.doorIconSprite = this.add
+      .text(doorPos.x * tileSize + tileSize / 2, doorPos.y * tileSize + tileSize / 2, '⚑', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: `${Math.floor(tileSize * 0.34)}px`,
+        color: '#f7f2ff',
+        stroke: '#2a1c4f',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setDepth(DEPTH_ITEM + 1)
       .setVisible(false);
   }
 
@@ -460,6 +482,7 @@ export class GameScene extends Phaser.Scene {
     if (this.doorRevealed) return;
     this.doorRevealed = true;
     this.doorSprite?.setVisible(true);
+    this.doorIconSprite?.setVisible(this.levelInZone === 8 && !this.isBossLevel);
     if (this.levelInZone === 8) {
       this.emitSimulation(PREBOSS_DOOR_REVEALED, time, { ...this.getLevelProgressModel() });
     }
@@ -918,6 +941,8 @@ export class GameScene extends Phaser.Scene {
     this.bossController.clear();
     this.doorSprite?.destroy();
     this.doorSprite = undefined;
+    this.doorIconSprite?.destroy();
+    this.doorIconSprite = undefined;
   }
 
   private destroyBreakableSprite(x: number, y: number): void {
@@ -1126,6 +1151,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isBossLevel) {
       this.doorSprite.setFillStyle(0x4a66cc, 1);
       this.doorSprite.setScale(1);
+      this.doorIconSprite?.setVisible(false);
       return;
     }
     if (isPreBossLevel) {
@@ -1139,8 +1165,16 @@ export class GameScene extends Phaser.Scene {
       const color = Phaser.Display.Color.GetColor(tint.r, tint.g, tint.b);
       this.doorSprite.setFillStyle(color, 1);
       this.doorSprite.setScale(1 + pulse * 0.06);
+      if (this.doorIconSprite) {
+        this.doorIconSprite
+          .setVisible(true)
+          .setPosition(this.doorSprite.x, this.doorSprite.y)
+          .setScale(1 + pulse * 0.04)
+          .setAlpha(0.8 + pulse * 0.2);
+      }
       return;
     }
+    this.doorIconSprite?.setVisible(false);
     const doorState = this.doorController.getDoorState();
     if (!doorState.isTelegraphing) {
       this.doorSprite.setFillStyle(0x4a66cc, 1);
