@@ -27,6 +27,7 @@ import {
   DEPTH_PLAYER,
   FLAME_SEGMENT_SCALE,
   GAME_CONFIG,
+  DOOR_CONFIG,
 } from './config';
 import {
   DOOR_REVEALED,
@@ -38,10 +39,12 @@ import {
   emitStats,
   gameEvents,
 } from './gameEvents';
+import { DoorController } from './DoorController';
 import { createDeterministicRng, type DeterministicRng } from './rng';
 import type {
   ControlsState,
   Direction,
+  EnemyKind,
   EnemyModel,
   EntityKind,
   EntityState,
@@ -79,6 +82,21 @@ export class GameScene extends Phaser.Scene {
   private doorEntered = false;
   private isLevelCleared = false;
   private doorSprite?: Phaser.GameObjects.Rectangle;
+  private doorEnterStartedAt: number | null = null;
+  private waveSequence = 0;
+  private enemySequence = 0;
+  private doorController = new DoorController(
+    DOOR_CONFIG,
+    {
+      spawnNormalDoorWave: (count: number) => this.spawnDoorWave(count, 'normal', true),
+      spawnEliteDoorWave: (count: number) => this.spawnDoorWave(count, 'elite', true),
+      spawnPressureWave: (eliteCount: number, normalCount: number) => {
+        this.spawnDoorWave(eliteCount, 'elite', false);
+        this.spawnDoorWave(normalCount, 'normal', false);
+      },
+    },
+    () => this.randomFloat(),
+  );
 
   private player: PlayerModel = {
     gridX: 1,
@@ -161,6 +179,8 @@ export class GameScene extends Phaser.Scene {
     this.syncSpritesFromArena(time);
     this.checkPlayerEnemyCollision();
     this.tryEnterDoor(time);
+    this.doorController.update(time, this.isLevelCleared);
+    this.updateDoorVisual(time);
   }
 
   private setupCamera(): void {
@@ -238,6 +258,10 @@ export class GameScene extends Phaser.Scene {
     this.isLevelCleared = false;
     this.doorRevealed = false;
     this.doorEntered = false;
+    this.doorEnterStartedAt = null;
+    this.waveSequence = 0;
+    this.enemySequence = 0;
+    this.doorController.reset();
     this.clearDynamicSprites();
 
     this.arena = createArena(this.levelIndex, this.rng);
@@ -326,10 +350,25 @@ export class GameScene extends Phaser.Scene {
 
   private tryEnterDoor(time: number): void {
     if (!this.doorRevealed) return;
-    if (this.player.targetX !== null || this.player.targetY !== null) return;
+    if (this.player.targetX !== null || this.player.targetY !== null) {
+      this.doorEnterStartedAt = null;
+      return;
+    }
+
     const playerKey = toKey(this.player.gridX, this.player.gridY);
-    if (playerKey !== this.arena.hiddenDoorKey) return;
-    this.advanceToNextLevel(time);
+    if (playerKey !== this.arena.hiddenDoorKey) {
+      this.doorEnterStartedAt = null;
+      return;
+    }
+
+    if (this.doorEnterStartedAt === null) {
+      this.doorEnterStartedAt = time;
+      return;
+    }
+
+    if (time - this.doorEnterStartedAt >= DOOR_CONFIG.exitHoldMs) {
+      this.advanceToNextLevel(time);
+    }
   }
 
   private spawnPlayer(): void {
@@ -367,6 +406,8 @@ export class GameScene extends Phaser.Scene {
         gridY: cell.y,
         facing: 'left',
         state: 'idle',
+        kind: 'normal',
+        moveIntervalMs: GAME_CONFIG.enemyMoveIntervalMs,
       });
       this.enemyNextMoveAt.set(key, 0);
     }
@@ -488,26 +529,30 @@ export class GameScene extends Phaser.Scene {
   }
 
   private processBombTimers(time: number): void {
-    const dueBombs = [...this.arena.bombs.values()].filter((bomb) => time >= bomb.detonateAt);
-    for (const bomb of dueBombs) {
-      this.resolveBombDetonation(bomb.key, time);
+    while (true) {
+      const dueBomb = [...this.arena.bombs.values()]
+        .filter((bomb) => time >= bomb.detonateAt)
+        .sort((a, b) => a.detonateAt - b.detonateAt || a.key.localeCompare(b.key))[0];
+
+      if (!dueBomb) break;
+      this.resolveBombDetonation(dueBomb.key, time);
     }
   }
 
   private resolveBombDetonation(startKey: string, time: number): void {
     const queue: string[] = [startKey];
-    const seen = new Set<string>();
+    const queued = new Set<string>(queue);
 
     while (queue.length > 0) {
       const key = queue.shift();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
+      if (!key) continue;
 
       const bomb = removeBomb(this.arena, key);
       if (!bomb) continue;
 
       this.stats.placed = Math.max(0, this.stats.placed - 1);
       const result = getExplosionResult(this.arena, bomb);
+      const waveId = this.createWaveId();
 
       for (const block of result.destroyedBreakables) {
         destroyBreakable(this.arena, block.x, block.y);
@@ -518,19 +563,39 @@ export class GameScene extends Phaser.Scene {
         this.emitSimulation('breakable.destroyed', time, { x: block.x, y: block.y, item: dropped?.type ?? null });
       }
 
-      for (const impactedKey of result.impactedKeys) {
-        const pos = fromKey(impactedKey);
-        const segment: FlameSegmentKind = impactedKey === bomb.key ? 'center' : 'arm';
-        const axis: FlameArmAxis | undefined = segment === 'arm' ? (pos.x === bomb.x ? 'vertical' : 'horizontal') : undefined;
-        this.spawnFlame(pos.x, pos.y, time + GAME_CONFIG.flameLifetimeMs, segment, axis);
-        this.hitEntitiesAt(pos.x, pos.y);
+      for (const impact of result.impacts) {
+        const segment: FlameSegmentKind = impact.key === bomb.key ? 'center' : 'arm';
+        const axis: FlameArmAxis | undefined = segment === 'arm' ? (impact.x === bomb.x ? 'vertical' : 'horizontal') : undefined;
+        this.spawnFlame(impact.x, impact.y, time + GAME_CONFIG.flameLifetimeMs, segment, axis);
+        this.hitEntitiesAt(impact.x, impact.y);
+        this.tryRegisterDoorWaveHit(impact.x, impact.y, waveId, time);
       }
 
-      for (const chainKey of result.chainBombKeys) queue.push(chainKey);
+      for (const chainKey of result.chainBombKeys) {
+        if (queued.has(chainKey)) continue;
+        queue.push(chainKey);
+        queued.add(chainKey);
+      }
+
+      this.emitSimulation('bomb.wave', time, { waveId, sourceBombKey: bomb.key, impactedTiles: result.impacts.length });
     }
 
     emitStats(this.stats);
     this.emitSimulation('bomb.detonated', time, { key: startKey });
+  }
+
+  private createWaveId(): string {
+    this.waveSequence += 1;
+    return `wave-${this.levelIndex}-${this.simulationTick}-${this.waveSequence}`;
+  }
+
+  private tryRegisterDoorWaveHit(x: number, y: number, waveId: string, time: number): void {
+    if (!this.doorRevealed) return;
+    if (toKey(x, y) !== this.arena.hiddenDoorKey) return;
+    const accepted = this.doorController.handleExplosionWaveHit(waveId, time);
+    if (!accepted) return;
+    const doorState = this.doorController.getDoorState();
+    this.emitSimulation('door.hit', time, { waveId, doorHits: doorState.doorHits });
   }
 
   private tryPickupItem(x: number, y: number): void {
@@ -566,7 +631,7 @@ export class GameScene extends Phaser.Scene {
 
       const direction = this.chooseEnemyDirection(enemy);
       if (!direction) {
-        this.enemyNextMoveAt.set(enemy.key, time + GAME_CONFIG.enemyMoveIntervalMs);
+        this.enemyNextMoveAt.set(enemy.key, time + enemy.moveIntervalMs);
         enemy.state = 'idle';
         continue;
       }
@@ -583,8 +648,61 @@ export class GameScene extends Phaser.Scene {
         enemy.state = 'idle';
       }
 
-      this.enemyNextMoveAt.set(enemy.key, time + GAME_CONFIG.enemyMoveIntervalMs);
+      this.enemyNextMoveAt.set(enemy.key, time + enemy.moveIntervalMs);
     }
+  }
+
+
+
+  private getDoorSpawnCells(limit: number): Array<{ x: number; y: number }> {
+    const origin = fromKey(this.arena.hiddenDoorKey);
+    const visited = new Set<string>([toKey(origin.x, origin.y)]);
+    const queue: Array<{ x: number; y: number }> = [{ x: origin.x, y: origin.y }];
+    const result: Array<{ x: number; y: number }> = [];
+
+    while (queue.length > 0 && result.length < limit) {
+      const node = queue.shift();
+      if (!node) break;
+      for (const dir of DIRECTIONS) {
+        const { dx, dy } = this.toDelta(dir);
+        const nx = node.x + dx;
+        const ny = node.y + dy;
+        const key = toKey(nx, ny);
+        if (visited.has(key)) continue;
+        visited.add(key);
+        if (!isInsideArena(nx, ny)) continue;
+        queue.push({ x: nx, y: ny });
+        if (!this.canEnemyOccupy(nx, ny, '__spawn__')) continue;
+        result.push({ x: nx, y: ny });
+        if (result.length >= limit) break;
+      }
+    }
+
+    return result;
+  }
+
+  private spawnDoorWave(count: number, kind: EnemyKind, fanOut: boolean): void {
+    if (count <= 0) return;
+    const cells = fanOut ? this.getDoorSpawnCells(count) : this.getShuffledEnemySpawnCells().slice(0, count);
+    for (const cell of cells) {
+      this.spawnEnemy(cell.x, cell.y, kind);
+    }
+    this.emitSimulation('door.spawn.wave', this.time.now, { kind, count: cells.length, requested: count, fanOut });
+  }
+
+  private spawnEnemy(x: number, y: number, kind: EnemyKind): void {
+    this.enemySequence += 1;
+    const key = `enemy-live-${this.levelIndex}-${this.enemySequence}-${x}-${y}`;
+    this.enemies.set(key, {
+      key,
+      gridX: x,
+      gridY: y,
+      facing: 'left',
+      state: 'idle',
+      kind,
+      moveIntervalMs: kind === 'elite' ? Math.max(120, Math.floor(GAME_CONFIG.enemyMoveIntervalMs * 0.7)) : GAME_CONFIG.enemyMoveIntervalMs,
+    });
+    this.enemyNextMoveAt.set(key, this.time.now);
   }
 
   private chooseEnemyDirection(enemy: EnemyModel): Direction | null {
@@ -852,6 +970,29 @@ export class GameScene extends Phaser.Scene {
     }
 
     return axis === 'horizontal' ? FLAME_SEGMENT_SCALE.armHorizontal : FLAME_SEGMENT_SCALE.armVertical;
+  }
+
+
+
+  private updateDoorVisual(time: number): void {
+    if (!this.doorSprite || !this.doorRevealed) return;
+    const doorState = this.doorController.getDoorState();
+    if (!doorState.isTelegraphing) {
+      this.doorSprite.setFillStyle(0x4a66cc, 1);
+      this.doorSprite.setScale(1);
+      return;
+    }
+
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.03);
+    const tint = Phaser.Display.Color.Interpolate.ColorWithColor(
+      Phaser.Display.Color.ValueToColor(0x4a66cc),
+      Phaser.Display.Color.ValueToColor(0xff4d4d),
+      100,
+      Math.floor(pulse * 100),
+    );
+    const color = Phaser.Display.Color.GetColor(tint.r, tint.g, tint.b);
+    this.doorSprite.setFillStyle(color, 1);
+    this.doorSprite.setScale(1 + pulse * 0.08);
   }
 
   private ensureFallbackTexture(): void {

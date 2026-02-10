@@ -10,8 +10,15 @@ export interface ArenaModel {
   isSpawnCell: (x: number, y: number) => boolean;
 }
 
+export interface ExplosionImpact {
+  key: string;
+  x: number;
+  y: number;
+  distance: number;
+}
+
 export interface ExplosionResult {
-  impactedKeys: string[];
+  impacts: ExplosionImpact[];
   destroyedBreakables: GridPosition[];
   chainBombKeys: string[];
 }
@@ -79,7 +86,6 @@ export function createArena(levelIndex = 0, rng?: DeterministicRng): ArenaModel 
   }
 
   if (breakableCells.length === 0) {
-    // Ensure there is always exactly one hidden door host block in normal levels.
     for (let y = 1; y < gridHeight - 1; y += 1) {
       for (let x = 1; x < gridWidth - 1; x += 1) {
         const key = toKey(x, y);
@@ -134,27 +140,11 @@ export function canOccupyCell(arena: ArenaModel, x: number, y: number): boolean 
   return !arena.bombs.has(toKey(x, y));
 }
 
-export function placeBomb(
-  arena: ArenaModel,
-  x: number,
-  y: number,
-  range: number,
-  ownerId: string,
-  detonateAt: number,
-): BombModel | null {
+export function placeBomb(arena: ArenaModel, x: number, y: number, range: number, ownerId: string, detonateAt: number): BombModel | null {
   const key = toKey(x, y);
   if (arena.bombs.has(key)) return null;
 
-  const bomb: BombModel = {
-    key,
-    x,
-    y,
-    range,
-    ownerId,
-    escapedByOwner: false,
-    detonateAt,
-  };
-
+  const bomb: BombModel = { key, x, y, range, ownerId, escapedByOwner: false, detonateAt };
   arena.bombs.set(key, bomb);
   return bomb;
 }
@@ -173,7 +163,8 @@ export function setBombOwnerEscaped(arena: ArenaModel, key: string): void {
 }
 
 export function getExplosionResult(arena: ArenaModel, bomb: BombModel): ExplosionResult {
-  const impacted = new Set<string>([bomb.key]);
+  const impactsByKey = new Map<string, ExplosionImpact>();
+  impactsByKey.set(bomb.key, { key: bomb.key, x: bomb.x, y: bomb.y, distance: 0 });
   const destroyedBreakables: GridPosition[] = [];
   const chainBombs = new Set<string>();
 
@@ -194,7 +185,9 @@ export function getExplosionResult(arena: ArenaModel, bomb: BombModel): Explosio
       const tile = tileAt(arena, tx, ty);
       if (tile === 'HardWall') break;
 
-      impacted.add(key);
+      if (!impactsByKey.has(key)) {
+        impactsByKey.set(key, { key, x: tx, y: ty, distance: step });
+      }
 
       if (arena.bombs.has(key) && key !== bomb.key) {
         chainBombs.add(key);
@@ -207,8 +200,10 @@ export function getExplosionResult(arena: ArenaModel, bomb: BombModel): Explosio
     }
   }
 
+  const impacts = [...impactsByKey.values()].sort((a, b) => a.distance - b.distance || a.y - b.y || a.x - b.x);
+
   return {
-    impactedKeys: [...impacted],
+    impacts,
     destroyedBreakables,
     chainBombKeys: [...chainBombs],
   };
@@ -218,14 +213,7 @@ export function destroyBreakable(arena: ArenaModel, x: number, y: number): void 
   arena.tiles[y][x] = 'Floor';
 }
 
-export function maybeDropItem(
-  arena: ArenaModel,
-  x: number,
-  y: number,
-  dropRoll: number,
-  typeRoll: number,
-): ItemModel | null {
-  // dropRoll + typeRoll are supplied by the caller so item generation remains deterministic.
+export function maybeDropItem(arena: ArenaModel, x: number, y: number, dropRoll: number, typeRoll: number): ItemModel | null {
   if (dropRoll > GAME_CONFIG.itemDropChance) return null;
   const key = toKey(x, y);
   const type: ItemType = typeRoll < 0.5 ? 'BombUp' : 'FireUp';
