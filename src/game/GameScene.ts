@@ -32,6 +32,7 @@ import {
 } from './config';
 import {
   DOOR_REVEALED,
+  PREBOSS_DOOR_REVEALED,
   EVENT_READY,
   LEVEL_CLEARED,
   LEVEL_FAILED,
@@ -82,6 +83,7 @@ export class GameScene extends Phaser.Scene {
   private zoneIndex = 0;
   private levelInZone = 0;
   private isBossLevel = false;
+  private readonly progressStorageKey = 'rift_runners_progress_v1';
 
   private bossAnchorKey: string | null = null;
   private progressionUnlockedStages = new Set<number>([0]);
@@ -188,7 +190,8 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#0f1220');
     this.setupInput();
     this.setupCamera();
-    this.startLevel(0, false);
+    const initialLevelIndex = this.loadProgress();
+    this.startLevel(initialLevelIndex, false);
   }
 
   update(time: number): void {
@@ -264,6 +267,63 @@ export class GameScene extends Phaser.Scene {
   private mixLevelSeed(levelIndex: number): number {
     const mixed = (this.baseSeed ^ Math.imul(levelIndex + 1, 0x9e3779b1) ^ Math.imul(this.runId, 0x85ebca6b)) >>> 0;
     return mixed === 0 ? 0x6d2b79f5 : mixed;
+  }
+
+  private loadProgress(): number {
+    const fallbackLevelIndex = 0;
+    this.progressionUnlockedStages = new Set<number>([0]);
+
+    try {
+      const raw = window.localStorage.getItem(this.progressStorageKey);
+      if (!raw) return fallbackLevelIndex;
+      const parsed = JSON.parse(raw) as {
+        unlockedStages?: number[];
+        trophies?: number;
+        stats?: { score?: number };
+        levelIndex?: number;
+      };
+
+      const unlockedStages = Array.isArray(parsed.unlockedStages)
+        ? parsed.unlockedStages
+            .filter((stage): stage is number => Number.isInteger(stage) && stage >= 0 && stage < BOSS_CONFIG.stagesTotal)
+            .sort((a, b) => a - b)
+        : [];
+
+      if (unlockedStages.length > 0) {
+        this.progressionUnlockedStages = new Set<number>(unlockedStages);
+      }
+
+      this.trophies = typeof parsed.trophies === 'number' && Number.isFinite(parsed.trophies) ? Math.max(0, Math.floor(parsed.trophies)) : 0;
+      this.stats.score =
+        typeof parsed.stats?.score === 'number' && Number.isFinite(parsed.stats.score) ? Math.max(0, Math.floor(parsed.stats.score)) : 0;
+
+      const requestedLevelIndex =
+        typeof parsed.levelIndex === 'number' && Number.isInteger(parsed.levelIndex) && parsed.levelIndex >= 0 ? parsed.levelIndex : fallbackLevelIndex;
+      const requestedStage = Math.floor(requestedLevelIndex / LEVELS_PER_ZONE);
+      const highestUnlockedStage = Math.max(...this.progressionUnlockedStages);
+      const clampedStage = Math.min(requestedStage, highestUnlockedStage);
+      const stageLevelInZone = Phaser.Math.Clamp(requestedLevelIndex % LEVELS_PER_ZONE, 0, LEVELS_PER_ZONE - 1);
+
+      return clampedStage * LEVELS_PER_ZONE + stageLevelInZone;
+    } catch {
+      return fallbackLevelIndex;
+    }
+  }
+
+  private saveProgress(levelIndex: number = this.levelIndex): void {
+    const unlockedStages = [...this.progressionUnlockedStages].sort((a, b) => a - b);
+    const payload = {
+      unlockedStages,
+      trophies: this.trophies,
+      stats: { score: this.stats.score },
+      levelIndex: Math.max(0, Math.floor(levelIndex)),
+    };
+
+    try {
+      window.localStorage.setItem(this.progressStorageKey, JSON.stringify(payload));
+    } catch {
+      // Ignore write failures (e.g., privacy mode / quota).
+    }
   }
 
   private getShuffledEnemySpawnCells() {
@@ -344,13 +404,23 @@ export class GameScene extends Phaser.Scene {
       reason: 'player_death',
     });
     this.startLevel(this.levelIndex, true);
+    this.saveProgress(this.levelIndex);
   }
 
   private advanceToNextLevel(time: number): void {
     this.doorEntered = true;
     this.isLevelCleared = true;
     this.emitSimulation(LEVEL_CLEARED, time, { ...this.getLevelProgressModel() });
-    this.startLevel(this.levelIndex + 1, true);
+
+    let nextLevelIndex = this.levelIndex + 1;
+    if (this.isBossLevel) {
+      const currentStage = Math.floor(this.levelIndex / LEVELS_PER_ZONE);
+      const nextStage = Math.min(currentStage + 1, BOSS_CONFIG.stagesTotal - 1);
+      nextLevelIndex = nextStage * LEVELS_PER_ZONE;
+    }
+
+    this.saveProgress(nextLevelIndex);
+    this.startLevel(nextLevelIndex, true);
   }
 
   private rebuildArenaTiles(): void {
@@ -390,6 +460,9 @@ export class GameScene extends Phaser.Scene {
     if (this.doorRevealed) return;
     this.doorRevealed = true;
     this.doorSprite?.setVisible(true);
+    if (this.levelInZone === 8) {
+      this.emitSimulation(PREBOSS_DOOR_REVEALED, time, { ...this.getLevelProgressModel() });
+    }
     this.emitSimulation(DOOR_REVEALED, time, { ...this.getLevelProgressModel() });
   }
 
@@ -1049,9 +1122,23 @@ export class GameScene extends Phaser.Scene {
 
   private updateDoorVisual(time: number): void {
     if (!this.doorSprite || !this.doorRevealed) return;
+    const isPreBossLevel = this.levelInZone === 8;
     if (this.isBossLevel) {
       this.doorSprite.setFillStyle(0x4a66cc, 1);
       this.doorSprite.setScale(1);
+      return;
+    }
+    if (isPreBossLevel) {
+      const pulse = 0.5 + 0.5 * Math.sin(time * 0.02);
+      const tint = Phaser.Display.Color.Interpolate.ColorWithColor(
+        Phaser.Display.Color.ValueToColor(0x7b3fe4),
+        Phaser.Display.Color.ValueToColor(0xbd7dff),
+        100,
+        Math.floor(pulse * 100),
+      );
+      const color = Phaser.Display.Color.GetColor(tint.r, tint.g, tint.b);
+      this.doorSprite.setFillStyle(color, 1);
+      this.doorSprite.setScale(1 + pulse * 0.06);
       return;
     }
     const doorState = this.doorController.getDoorState();
@@ -1096,6 +1183,7 @@ export class GameScene extends Phaser.Scene {
       unlockedStage: nextStage,
     });
     this.revealDoor(this.time.now);
+    this.saveProgress();
   }
 
   private ensureFallbackTexture(): void {
