@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
-import { EVENT_READY, EVENT_STATS, gameEvents, type ReadyPayload } from '../game/gameEvents';
+import { EVENT_CAMPAIGN_STATE, EVENT_READY, EVENT_STATS, gameEvents, type ReadyPayload } from '../game/gameEvents';
+import { loadCampaignState, type CampaignState } from '../game/campaign';
 import type { ControlsState, Direction, PlayerStats } from '../game/types';
 
 const defaultStats: PlayerStats = {
@@ -32,6 +33,7 @@ export default function GameView(): JSX.Element {
 
   const zoomApiRef = useRef<ReadyPayload | null>(null);
   const [stats, setStats] = useState<PlayerStats>(defaultStats);
+  const [campaign, setCampaign] = useState<CampaignState>(() => loadCampaignState());
   const [zoom, setZoom] = useState<number>(GAME_CONFIG.startZoom);
   const [isRemoteDetonateUnlocked, setIsRemoteDetonateUnlocked] = useState(false);
   const [joystickPressed, setJoystickPressed] = useState(false);
@@ -72,13 +74,18 @@ export default function GameView(): JSX.Element {
       zoomApiRef.current = payload;
       payload.setZoom(zoom);
     };
+    const onCampaignState = (nextCampaign: CampaignState): void => {
+      setCampaign({ ...nextCampaign });
+    };
 
     gameEvents.on(EVENT_STATS, onStats);
     gameEvents.on(EVENT_READY, onReady);
+    gameEvents.on(EVENT_CAMPAIGN_STATE, onCampaignState);
 
     return () => {
       gameEvents.off(EVENT_STATS, onStats);
       gameEvents.off(EVENT_READY, onReady);
+      gameEvents.off(EVENT_CAMPAIGN_STATE, onCampaignState);
     };
   }, [zoom]);
 
@@ -207,6 +214,8 @@ export default function GameView(): JSX.Element {
       <section className="hud">
         <h1>Rift Runners MVP</h1>
         <div className="stats-row">
+          <span>Stage: {campaign.stage}</span>
+          <span>Zone: {campaign.zone}</span>
           <span>Bombs: {stats.placed}/{stats.capacity}</span>
           <span>Range: {stats.range}</span>
           <span>Score: {stats.score}</span>

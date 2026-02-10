@@ -58,6 +58,26 @@ export const BOSS_CONFIG = {
   rewardTrophyAmount: 1,
 } as const;
 
+export type ZoneExitType = 'normal' | 'boss_gate' | 'boss_exit';
+
+export interface ZoneConfig {
+  id: number;
+  exitType: ZoneExitType;
+}
+
+export const CAMPAIGN_ZONES: ZoneConfig[] = [
+  { id: 1, exitType: 'normal' },
+  { id: 2, exitType: 'normal' },
+  { id: 3, exitType: 'normal' },
+  { id: 4, exitType: 'normal' },
+  { id: 5, exitType: 'normal' },
+  { id: 6, exitType: 'normal' },
+  { id: 7, exitType: 'normal' },
+  { id: 8, exitType: 'normal' },
+  { id: 9, exitType: 'boss_gate' },
+  { id: 10, exitType: 'boss_exit' },
+] as const;
+
 export const BOMB_PULSE_CONFIG = {
   warningThresholdMs: 900,
   pulseMinScale: 0.88,
