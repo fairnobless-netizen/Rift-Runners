@@ -28,6 +28,7 @@ import {
   FLAME_SEGMENT_SCALE,
   GAME_CONFIG,
   DOOR_CONFIG,
+  BOSS_CONFIG,
 } from './config';
 import {
   DOOR_REVEALED,
@@ -41,6 +42,8 @@ import {
 } from './gameEvents';
 import { DoorController } from './DoorController';
 import { createDeterministicRng, type DeterministicRng } from './rng';
+import { BossController } from './boss/BossController';
+import { createBossArena } from './boss/BossArena';
 import type {
   ControlsState,
   Direction,
@@ -77,6 +80,7 @@ export class GameScene extends Phaser.Scene {
   private levelIndex = 0;
   private zoneIndex = 0;
   private levelInZone = 0;
+  private isBossLevel = false;
 
   private doorRevealed = false;
   private doorEntered = false;
@@ -85,6 +89,20 @@ export class GameScene extends Phaser.Scene {
   private doorEnterStartedAt: number | null = null;
   private waveSequence = 0;
   private enemySequence = 0;
+  private bossController = new BossController(
+    this,
+    BOSS_CONFIG,
+    {
+      canOccupy: (x: number, y: number) => this.canBossOccupy(x, y),
+      canSpawnMinion: (x: number, y: number) => this.canEnemyOccupy(x, y, '__boss-summon__'),
+      spawnMinion: (x: number, y: number) => this.spawnEnemy(x, y, 'normal'),
+      onPlayerHit: () => this.restartLevelAfterDeath(),
+      onBossDefeated: () => this.handleBossDefeated(),
+      onBossDamaged: (hp: number, maxHp: number) => this.emitSimulation('boss.damaged', this.time.now, { hp, maxHp }),
+      getPlayerCell: () => ({ x: this.player.gridX, y: this.player.gridY }),
+    },
+  );
+
   private doorController = new DoorController(
     DOOR_CONFIG,
     {
@@ -178,11 +196,14 @@ export class GameScene extends Phaser.Scene {
     this.processBombTimers(time);
     this.cleanupExpiredFlames(time);
     this.tickEnemies(time);
+    this.bossController.update(time);
     this.updatePlayerStateFromTimers(time);
     this.syncSpritesFromArena(time);
     this.checkPlayerEnemyCollision();
     this.tryEnterDoor(time);
-    this.doorController.update(time, this.isLevelCleared);
+    if (!this.isBossLevel) {
+      this.doorController.update(time, this.isLevelCleared);
+    }
     this.updateDoorVisual(time);
   }
 
@@ -207,7 +228,7 @@ export class GameScene extends Phaser.Scene {
       zoneIndex: this.zoneIndex,
       levelInZone: this.levelInZone,
       levelIndex: this.levelIndex,
-      isBossLevel: false,
+      isBossLevel: this.isBossLevel,
       isEndless: false,
       doorRevealed: this.doorRevealed,
       doorEntered: this.doorEntered,
@@ -253,6 +274,7 @@ export class GameScene extends Phaser.Scene {
     this.levelIndex = Math.max(0, levelIndex);
     this.zoneIndex = Math.floor(this.levelIndex / LEVELS_PER_ZONE);
     this.levelInZone = this.levelIndex % LEVELS_PER_ZONE;
+    this.isBossLevel = this.bossController.isBossLevel(this.levelIndex);
     // TODO(module-c): route to dedicated boss-level flow when zone milestones are added.
     // TODO(module-c): replace with endless progression branch when campaign is complete.
 
@@ -267,7 +289,7 @@ export class GameScene extends Phaser.Scene {
     this.doorController.reset();
     this.clearDynamicSprites();
 
-    this.arena = createArena(this.levelIndex, this.rng);
+    this.arena = this.isBossLevel ? createBossArena() : createArena(this.levelIndex, this.rng);
     this.activeFlames.clear();
     this.enemies.clear();
     this.enemyNextMoveAt.clear();
@@ -275,6 +297,7 @@ export class GameScene extends Phaser.Scene {
     this.rebuildArenaTiles();
     this.spawnPlayer();
     this.spawnEnemies();
+    this.bossController.reset({ arena: this.arena, isBossLevel: this.isBossLevel });
 
     if (!keepScore) {
       this.stats = {
@@ -337,6 +360,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    this.bossController.clear();
     this.doorSprite?.destroy();
     const doorPos = fromKey(this.arena.hiddenDoorKey);
     this.doorSprite = this.add
@@ -398,6 +422,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnEnemies(): void {
+    if (this.isBossLevel) return;
     const spawnCells = this.getShuffledEnemySpawnCells();
     const targetCount = Math.min(spawnCells.length, getEnemyCountForLevel(this.levelIndex));
 
@@ -583,6 +608,8 @@ export class GameScene extends Phaser.Scene {
         this.emitSimulation('breakable.destroyed', time, { x: block.x, y: block.y, item: dropped?.type ?? null });
       }
 
+      this.bossController.applyExplosionDamage(result.impacts);
+
       for (const impact of result.impacts) {
         const segment: FlameSegmentKind = impact.key === bomb.key ? 'center' : 'arm';
         const axis: FlameArmAxis | undefined = segment === 'arm' ? (impact.x === bomb.x ? 'vertical' : 'horizontal') : undefined;
@@ -610,6 +637,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private tryRegisterDoorWaveHit(x: number, y: number, waveId: string, time: number): void {
+    if (this.isBossLevel) return;
     if (!this.doorRevealed) return;
     if (toKey(x, y) !== this.arena.hiddenDoorKey) return;
     const accepted = this.doorController.handleExplosionWaveHit(waveId, time);
@@ -791,6 +819,7 @@ export class GameScene extends Phaser.Scene {
       for (const sprite of group.values()) sprite.destroy();
       group.clear();
     }
+    this.bossController.clear();
     this.doorSprite?.destroy();
     this.doorSprite = undefined;
   }
@@ -997,6 +1026,11 @@ export class GameScene extends Phaser.Scene {
 
   private updateDoorVisual(time: number): void {
     if (!this.doorSprite || !this.doorRevealed) return;
+    if (this.isBossLevel) {
+      this.doorSprite.setFillStyle(0x4a66cc, 1);
+      this.doorSprite.setScale(1);
+      return;
+    }
     const doorState = this.doorController.getDoorState();
     if (!doorState.isTelegraphing) {
       this.doorSprite.setFillStyle(0x4a66cc, 1);
@@ -1014,6 +1048,23 @@ export class GameScene extends Phaser.Scene {
     const color = Phaser.Display.Color.GetColor(tint.r, tint.g, tint.b);
     this.doorSprite.setFillStyle(color, 1);
     this.doorSprite.setScale(1 + pulse * 0.08);
+  }
+
+
+  private canBossOccupy(x: number, y: number): boolean {
+    if (!isInsideArena(x, y) || !canOccupyCell(this.arena, x, y)) return false;
+    if (this.player.gridX === x && this.player.gridY === y) return false;
+    for (const enemy of this.enemies.values()) {
+      if (enemy.gridX === x && enemy.gridY === y) return false;
+    }
+    return true;
+  }
+
+  private handleBossDefeated(): void {
+    this.stats.score += BOSS_CONFIG.defeatScoreReward;
+    emitStats(this.stats);
+    this.emitSimulation('boss.defeated', this.time.now, { reward: BOSS_CONFIG.defeatScoreReward });
+    this.revealDoor(this.time.now);
   }
 
   private ensureFallbackTexture(): void {

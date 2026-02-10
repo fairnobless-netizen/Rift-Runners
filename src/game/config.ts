@@ -45,6 +45,19 @@ export const DOOR_CONFIG = {
   exitHoldMs: 1000,
 } as const;
 
+export const BOSS_CONFIG = {
+  triggerLevelIndex: 2,
+  maxHp: 10,
+  explosionDamage: 1,
+  centerExplosionDamage: 2,
+  chaseIntervalMs: 900,
+  rangedIntervalMs: 2200,
+  summonIntervalMs: 3600,
+  hazardDurationMs: 700,
+  summonCount: 2,
+  defeatScoreReward: 500,
+} as const;
+
 export const BOMB_PULSE_CONFIG = {
   warningThresholdMs: 900,
   pulseMinScale: 0.88,
