@@ -3,7 +3,7 @@ import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
 import { EVENT_CAMPAIGN_STATE, EVENT_READY, EVENT_STATS, gameEvents, type ReadyPayload } from '../game/gameEvents';
-import { loadCampaignState, type CampaignState } from '../game/campaign';
+import { fetchCampaignFromBackend, loadCampaignState, saveCampaignState, type CampaignState } from '../game/campaign';
 import type { ControlsState, Direction, PlayerStats } from '../game/types';
 
 const defaultStats: PlayerStats = {
@@ -83,6 +83,24 @@ export default function GameView(): JSX.Element {
         if (!token) return;
 
         localStorage.setItem('rift_session_token', token);
+
+        // M5d: backend is source of truth for campaign progress
+        try {
+          const remote = await fetchCampaignFromBackend();
+
+          if (remote?.ok) {
+            if (remote.hasProgress) {
+              // backend wins → overwrite local cache
+              saveCampaignState(remote.campaignState);
+            } else {
+              // backend empty → seed it from local cache once
+              const local = loadCampaignState();
+              saveCampaignState(local); // this will POST best-effort now that token exists
+            }
+          }
+        } catch {
+          // ignore
+        }
 
         const meRes = await fetch('/api/profile/me', {
           headers: { Authorization: `Bearer ${token}` },
