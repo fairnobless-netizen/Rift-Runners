@@ -19,6 +19,21 @@ export const GAME_CONFIG = {
   startZoom: 1.25,
 } as const;
 
+
+export const BOMB_PULSE_CONFIG = {
+  warningThresholdMs: 900,
+  pulseMinScale: 0.88,
+  pulseMaxScale: 1.15,
+  minAlpha: 0.6,
+  maxAlpha: 1,
+} as const;
+
+export const FLAME_SEGMENT_SCALE = {
+  center: 0.68,
+  armHorizontal: { width: 0.8, height: 0.38 },
+  armVertical: { width: 0.38, height: 0.8 },
+} as const;
+
 export const LAYERS = {
   floor: 0,
   breakable: 1,
@@ -32,21 +47,21 @@ export const ASSET_REGISTRY: AssetRegistry = {
   player: {
     idle: {
       up: { fillColor: 0x50d3ff, strokeColor: 0x0b1a2e, scale: 0.5 },
-      down: { fillColor: 0x50d3ff, strokeColor: 0x0b1a2e, scale: 0.5 },
-      left: { fillColor: 0x50d3ff, strokeColor: 0x0b1a2e, scale: 0.5 },
-      right: { fillColor: 0x50d3ff, strokeColor: 0x0b1a2e, scale: 0.5 },
+      down: { fillColor: 0x2bb1e7, strokeColor: 0x0b1a2e, scale: 0.5 },
+      left: { fillColor: 0x7bc8ff, strokeColor: 0x0b1a2e, scale: 0.5 },
+      right: { fillColor: 0x2fdefa, strokeColor: 0x0b1a2e, scale: 0.5 },
     },
     move: {
       up: { fillColor: 0x7de2ff, strokeColor: 0x0b1a2e, scale: 0.52 },
-      down: { fillColor: 0x7de2ff, strokeColor: 0x0b1a2e, scale: 0.52 },
-      left: { fillColor: 0x7de2ff, strokeColor: 0x0b1a2e, scale: 0.52 },
-      right: { fillColor: 0x7de2ff, strokeColor: 0x0b1a2e, scale: 0.52 },
+      down: { fillColor: 0x67ccee, strokeColor: 0x0b1a2e, scale: 0.52 },
+      left: { fillColor: 0x98eaff, strokeColor: 0x0b1a2e, scale: 0.52 },
+      right: { fillColor: 0x56e0ff, strokeColor: 0x0b1a2e, scale: 0.52 },
     },
     placeBomb: {
       up: { fillColor: 0x8de9ff, strokeColor: 0x0b1a2e, scale: 0.5 },
-      down: { fillColor: 0x8de9ff, strokeColor: 0x0b1a2e, scale: 0.5 },
-      left: { fillColor: 0x8de9ff, strokeColor: 0x0b1a2e, scale: 0.5 },
-      right: { fillColor: 0x8de9ff, strokeColor: 0x0b1a2e, scale: 0.5 },
+      down: { fillColor: 0x6ad6f4, strokeColor: 0x0b1a2e, scale: 0.5 },
+      left: { fillColor: 0x9eeeff, strokeColor: 0x0b1a2e, scale: 0.5 },
+      right: { fillColor: 0x6ce8ff, strokeColor: 0x0b1a2e, scale: 0.5 },
     },
   },
   bomb: {
@@ -60,6 +75,9 @@ export const ASSET_REGISTRY: AssetRegistry = {
   flame: {
     active: {
       none: { fillColor: 0xff6a3d, alpha: 0.95, scale: 0.68 },
+    },
+    idle: {
+      none: { fillColor: 0xffb15c, alpha: 0.9, scale: 0.6 },
     },
   },
   item: {
