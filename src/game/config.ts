@@ -28,6 +28,23 @@ export const GAME_CONFIG = {
   startZoom: 1.25,
 } as const;
 
+
+
+export const DOOR_CONFIG = {
+  maxHits: 3,
+  hitLockMs: 400,
+  telegraphMinMs: 600,
+  telegraphMaxMs: 1200,
+  pressureIntervalMinMs: 20000,
+  pressureIntervalMaxMs: 30000,
+  firstHitSpawnCount: 5,
+  secondHitSpawnCount: 8,
+  eliteWaveCount: 4,
+  pressureNormalCount: 2,
+  pressureEliteCount: 1,
+  exitHoldMs: 1000,
+} as const;
+
 export const BOMB_PULSE_CONFIG = {
   warningThresholdMs: 900,
   pulseMinScale: 0.88,
