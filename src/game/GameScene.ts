@@ -17,7 +17,8 @@ import {
   type ArenaModel,
 } from './arena';
 import { ASSET_REGISTRY, BOMB_PULSE_CONFIG, FLAME_SEGMENT_SCALE, GAME_CONFIG, LAYERS } from './config';
-import { emitStats, EVENT_READY, gameEvents } from './gameEvents';
+import { emitSimulationEvent, emitStats, EVENT_READY, gameEvents } from './gameEvents';
+import { createDeterministicRng, type DeterministicRng } from './rng';
 import type {
   ControlsState,
   Direction,
@@ -30,6 +31,7 @@ import type {
   FlameSegmentKind,
   PlayerModel,
   PlayerStats,
+  SimulationEvent,
 } from './types';
 
 interface TimedDirection {
@@ -41,7 +43,9 @@ const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
 
 export class GameScene extends Phaser.Scene {
   private controls: ControlsState;
-  private arena: ArenaModel = createArena(0);
+  private readonly rng: DeterministicRng = createDeterministicRng(0x52494654);
+  private simulationTick = 0;
+  private arena: ArenaModel = createArena(0, this.rng);
   private levelIndex = 0;
 
   private player: PlayerModel = {
@@ -99,6 +103,7 @@ export class GameScene extends Phaser.Scene {
   update(time: number): void {
     if (this.isLevelCleared) return;
 
+    this.simulationTick += 1;
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
     this.consumeMovementIntent(time);
@@ -127,13 +132,44 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+
+  private emitSimulation(type: string, timeMs: number, payload: Record<string, unknown>): void {
+    const event: SimulationEvent = {
+      type,
+      tick: this.simulationTick,
+      timeMs,
+      payload,
+    };
+    emitSimulationEvent(event);
+  }
+
+  private randomFloat(): number {
+    return this.rng.nextFloat();
+  }
+
+  private randomInt(maxExclusive: number): number {
+    return this.rng.nextInt(maxExclusive);
+  }
+
+  private getShuffledEnemySpawnCells() {
+    // Deterministic Fisher-Yates to keep enemy spawn order stable per seed.
+    const cells = [...getEnemySpawnCells(this.arena)];
+    for (let i = cells.length - 1; i > 0; i -= 1) {
+      const j = this.randomInt(i + 1);
+      const temp = cells[i];
+      cells[i] = cells[j];
+      cells[j] = temp;
+    }
+    return cells;
+  }
+
   private startLevel(levelIndex: number, keepScore: boolean): void {
     this.levelIndex = Math.max(0, levelIndex);
     this.isLevelCleared = false;
     this.clearLevelOverlay();
     this.clearDynamicSprites();
 
-    this.arena = createArena(this.levelIndex);
+    this.arena = createArena(this.levelIndex, this.rng);
     this.activeFlames.clear();
     this.enemies.clear();
     this.enemyNextMoveAt.clear();
@@ -159,6 +195,7 @@ export class GameScene extends Phaser.Scene {
 
   private restartLevelAfterDeath(): void {
     this.stats.score = Math.max(0, this.stats.score - GAME_CONFIG.playerDeathPenalty);
+    this.emitSimulation('player.death', this.time.now, { level: this.levelIndex });
     this.startLevel(this.levelIndex, true);
   }
 
@@ -214,7 +251,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnEnemies(): void {
-    const spawnCells = Phaser.Utils.Array.Shuffle(getEnemySpawnCells(this.arena));
+    const spawnCells = this.getShuffledEnemySpawnCells();
     const targetCount = Math.min(spawnCells.length, getEnemyCountForLevel(this.levelIndex));
 
     for (let i = 0; i < targetCount; i += 1) {
@@ -327,6 +364,7 @@ export class GameScene extends Phaser.Scene {
     this.player.targetY = ny;
     this.player.moveStartedAt = time;
     this.player.state = 'move';
+    this.emitSimulation('player.move.start', time, { from: { x: this.player.moveFromX, y: this.player.moveFromY }, to: { x: nx, y: ny } });
   }
 
   private tryPlaceBomb(time: number): void {
@@ -349,6 +387,7 @@ export class GameScene extends Phaser.Scene {
     this.player.graceBombKey = bomb.key;
     this.stats.placed += 1;
     emitStats(this.stats);
+    this.emitSimulation('bomb.placed', time, { key: bomb.key, x: bomb.x, y: bomb.y, range: bomb.range });
   }
 
   private processBombTimers(time: number): void {
@@ -375,7 +414,8 @@ export class GameScene extends Phaser.Scene {
         destroyBreakable(this.arena, block.x, block.y);
         this.destroyBreakableSprite(block.x, block.y);
         this.stats.score += 10;
-        maybeDropItem(this.arena, block.x, block.y, Math.random(), Math.random());
+        const dropped = maybeDropItem(this.arena, block.x, block.y, this.randomFloat(), this.randomFloat());
+        this.emitSimulation('breakable.destroyed', time, { x: block.x, y: block.y, item: dropped?.type ?? null });
       }
 
       for (const impactedKey of result.impactedKeys) {
@@ -390,6 +430,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     emitStats(this.stats);
+    this.emitSimulation('bomb.detonated', time, { key: startKey });
   }
 
   private tryPickupItem(x: number, y: number): void {
@@ -404,6 +445,7 @@ export class GameScene extends Phaser.Scene {
 
     this.stats.score += 25;
     emitStats(this.stats);
+    this.emitSimulation('item.picked', this.time.now, { key: item.key, type: item.type, x, y });
   }
 
   private spawnFlame(
@@ -459,11 +501,11 @@ export class GameScene extends Phaser.Scene {
 
     if (valid.length === 0) return null;
 
-    if (valid.includes(enemy.facing) && Math.random() < GAME_CONFIG.enemyForwardBias) {
+    if (valid.includes(enemy.facing) && this.randomFloat() < GAME_CONFIG.enemyForwardBias) {
       return enemy.facing;
     }
 
-    return Phaser.Utils.Array.GetRandom(valid);
+    return valid[this.randomInt(valid.length)] ?? null;
   }
 
   private canEnemyOccupy(x: number, y: number, selfKey: string): boolean {
@@ -485,6 +527,7 @@ export class GameScene extends Phaser.Scene {
       this.enemySprites.get(enemy.key)?.destroy();
       this.enemySprites.delete(enemy.key);
       this.stats.score += GAME_CONFIG.enemyScore;
+      this.emitSimulation('enemy.defeated', this.time.now, { key: enemy.key, x, y });
       scoreChanged = true;
     }
     if (scoreChanged) emitStats(this.stats);

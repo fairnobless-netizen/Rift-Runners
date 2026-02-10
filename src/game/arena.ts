@@ -1,4 +1,5 @@
 import { GAME_CONFIG } from './config';
+import type { DeterministicRng } from './rng';
 import type { BombModel, GridPosition, ItemModel, ItemType, TileType } from './types';
 
 export interface ArenaModel {
@@ -41,7 +42,7 @@ function getEnemyReserveSafeCells(enemyCount: number): Set<string> {
   return new Set(reserveCandidates.slice(0, Math.max(enemyCount + 2, 3)));
 }
 
-export function createArena(levelIndex = 0): ArenaModel {
+export function createArena(levelIndex = 0, rng?: DeterministicRng): ArenaModel {
   const { gridWidth, gridHeight } = GAME_CONFIG;
   const tiles: TileType[][] = [];
   const spawnSafe = getSpawnSafeSet();
@@ -65,7 +66,8 @@ export function createArena(levelIndex = 0): ArenaModel {
         continue;
       }
 
-      row.push(Math.random() < breakableDensity ? 'BreakableBlock' : 'Floor');
+      const roll = rng?.nextFloat() ?? Math.random();
+      row.push(roll < breakableDensity ? 'BreakableBlock' : 'Floor');
     }
     tiles.push(row);
   }
@@ -199,6 +201,7 @@ export function maybeDropItem(
   dropRoll: number,
   typeRoll: number,
 ): ItemModel | null {
+  // dropRoll + typeRoll are supplied by the caller so item generation remains deterministic.
   if (dropRoll > GAME_CONFIG.itemDropChance) return null;
   const key = toKey(x, y);
   const type: ItemType = typeRoll < 0.5 ? 'BombUp' : 'FireUp';

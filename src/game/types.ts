@@ -83,3 +83,24 @@ export interface AssetStyle {
 }
 
 export type AssetRegistry = Partial<Record<EntityKind, Partial<Record<EntityState, Partial<Record<Facing | 'none', AssetStyle>>>>>>;
+
+
+/**
+ * Backend-relevant simulation tick snapshot.
+ * This is safe to serialize for deterministic replay/debug tooling.
+ */
+export interface SimulationTickModel {
+  tick: number;
+  timeMs: number;
+}
+
+/**
+ * Backend-relevant event envelope emitted from the simulation loop.
+ * UI can subscribe to these events without owning arena mutation.
+ */
+export interface SimulationEvent<TPayload = Record<string, unknown>> {
+  type: string;
+  tick: number;
+  timeMs: number;
+  payload: TPayload;
+}
