@@ -43,7 +43,9 @@ const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
 
 export class GameScene extends Phaser.Scene {
   private controls: ControlsState;
-  private readonly rng: DeterministicRng = createDeterministicRng(0x52494654);
+  private readonly baseSeed = 0x52494654;
+  private readonly runId = 1;
+  private rng: DeterministicRng = createDeterministicRng(this.baseSeed);
   private simulationTick = 0;
   private arena: ArenaModel = createArena(0, this.rng);
   private levelIndex = 0;
@@ -151,6 +153,12 @@ export class GameScene extends Phaser.Scene {
     return this.rng.nextInt(maxExclusive);
   }
 
+  private mixLevelSeed(levelIndex: number): number {
+    // backend-relevant: stable seed mix keeps level generation + drops reproducible for the same run seed.
+    const mixed = (this.baseSeed ^ Math.imul(levelIndex + 1, 0x9e3779b1) ^ Math.imul(this.runId, 0x85ebca6b)) >>> 0;
+    return mixed === 0 ? 0x6d2b79f5 : mixed;
+  }
+
   private getShuffledEnemySpawnCells() {
     // Deterministic Fisher-Yates to keep enemy spawn order stable per seed.
     const cells = [...getEnemySpawnCells(this.arena)];
@@ -165,6 +173,9 @@ export class GameScene extends Phaser.Scene {
 
   private startLevel(levelIndex: number, keepScore: boolean): void {
     this.levelIndex = Math.max(0, levelIndex);
+    // backend-relevant: reset simulation timeline and RNG state for deterministic level restarts.
+    this.simulationTick = 0;
+    this.rng = createDeterministicRng(this.mixLevelSeed(this.levelIndex));
     this.isLevelCleared = false;
     this.clearLevelOverlay();
     this.clearDynamicSprites();
