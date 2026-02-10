@@ -1,10 +1,12 @@
 import Phaser from 'phaser';
 import type { PlayerStats, SimulationEvent } from './types';
+import type { CampaignState } from './campaign';
 
 export const gameEvents = new Phaser.Events.EventEmitter();
 
 export const EVENT_STATS = 'stats';
 export const EVENT_READY = 'ready';
+export const EVENT_CAMPAIGN_STATE = 'campaign_state';
 
 export const EVENT_SIMULATION = 'simulation';
 
@@ -25,4 +27,8 @@ export function emitStats(stats: PlayerStats): void {
 
 export function emitSimulationEvent(event: SimulationEvent): void {
   gameEvents.emit(EVENT_SIMULATION, event);
+}
+
+export function emitCampaignState(campaignState: CampaignState): void {
+  gameEvents.emit(EVENT_CAMPAIGN_STATE, campaignState);
 }
