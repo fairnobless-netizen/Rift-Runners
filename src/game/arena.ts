@@ -6,6 +6,7 @@ export interface ArenaModel {
   tiles: TileType[][];
   bombs: Map<string, BombModel>;
   items: Map<string, ItemModel>;
+  hiddenDoorKey: string;
   isSpawnCell: (x: number, y: number) => boolean;
 }
 
@@ -49,6 +50,7 @@ export function createArena(levelIndex = 0, rng?: DeterministicRng): ArenaModel 
   const enemyCount = getEnemyCountForLevel(levelIndex);
   const enemyReserve = getEnemyReserveSafeCells(enemyCount);
   const breakableDensity = getBreakableDensity(levelIndex);
+  const breakableCells: GridPosition[] = [];
 
   for (let y = 0; y < gridHeight; y += 1) {
     const row: TileType[] = [];
@@ -66,16 +68,38 @@ export function createArena(levelIndex = 0, rng?: DeterministicRng): ArenaModel 
         continue;
       }
 
-      const roll = rng?.nextFloat() ?? Math.random();
-      row.push(roll < breakableDensity ? 'BreakableBlock' : 'Floor');
+      const roll = rng?.nextFloat() ?? 0.5;
+      const tile: TileType = roll < breakableDensity ? 'BreakableBlock' : 'Floor';
+      row.push(tile);
+      if (tile === 'BreakableBlock') {
+        breakableCells.push({ x, y });
+      }
     }
     tiles.push(row);
   }
+
+  if (breakableCells.length === 0) {
+    // Ensure there is always exactly one hidden door host block in normal levels.
+    for (let y = 1; y < gridHeight - 1; y += 1) {
+      for (let x = 1; x < gridWidth - 1; x += 1) {
+        const key = toKey(x, y);
+        if (spawnSafe.has(key) || enemyReserve.has(key)) continue;
+        if (tiles[y][x] !== 'Floor') continue;
+        tiles[y][x] = 'BreakableBlock';
+        breakableCells.push({ x, y });
+        break;
+      }
+      if (breakableCells.length > 0) break;
+    }
+  }
+
+  const hiddenDoorCell = breakableCells[rng?.nextInt(breakableCells.length) ?? 0] ?? { x: 1, y: 1 };
 
   return {
     tiles,
     bombs: new Map<string, BombModel>(),
     items: new Map<string, ItemModel>(),
+    hiddenDoorKey: toKey(hiddenDoorCell.x, hiddenDoorCell.y),
     isSpawnCell: (x: number, y: number) => spawnSafe.has(toKey(x, y)),
   };
 }

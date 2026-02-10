@@ -109,6 +109,18 @@ export type AssetRegistry = EntityAssetRegistry & {
  * Backend-relevant simulation tick snapshot.
  * This is safe to serialize for deterministic replay/debug tooling.
  */
+
+export interface LevelProgressModel {
+  zoneIndex: number;
+  levelInZone: number;
+  levelIndex: number;
+  isBossLevel: boolean;
+  isEndless: boolean;
+  doorRevealed: boolean;
+  doorEntered: boolean;
+  levelCleared: boolean;
+}
+
 export interface SimulationTickModel {
   tick: number;
   timeMs: number;
