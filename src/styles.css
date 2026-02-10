@@ -1,0 +1,151 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: #ecf1ff;
+  background: #080b14;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #13192c, #070a12 60%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0.8rem;
+}
+
+.hud {
+  background: #0f1630cc;
+  border: 1px solid #29345d;
+  border-radius: 12px;
+  padding: 0.75rem;
+}
+
+.hud h1 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.95rem;
+}
+
+.game-shell {
+  display: flex;
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.game-canvas {
+  flex: 1;
+  min-height: min(70vw, 510px);
+  border: 2px solid #27335c;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0a0f1c;
+}
+
+.zoom-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  background: #0f1630cc;
+  border: 1px solid #27335c;
+  border-radius: 12px;
+  padding: 0.5rem;
+  min-width: 64px;
+}
+
+.zoom-panel input[type='range'] {
+  writing-mode: bt-lr;
+  -webkit-appearance: slider-vertical;
+  width: 22px;
+  height: 180px;
+}
+
+button {
+  border: none;
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  background: #2f3f72;
+  color: #ecf1ff;
+  font-weight: 700;
+}
+
+.controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 54px);
+  grid-template-rows: repeat(3, 54px);
+  gap: 0.3rem;
+}
+
+.dpad-btn {
+  background: #253358;
+  touch-action: none;
+}
+
+.dpad-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.dpad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.dpad-down {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.dpad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.bomb-btn {
+  width: 96px;
+  height: 96px;
+  border-radius: 999px;
+  font-size: 1.1rem;
+  background: #9c3e3e;
+  touch-action: manipulation;
+}
+
+@media (min-width: 900px) {
+  .page {
+    padding: 1.25rem;
+  }
+
+  .controls {
+    max-width: 400px;
+  }
+}
