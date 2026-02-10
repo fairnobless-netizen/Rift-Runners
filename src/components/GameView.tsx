@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
 import { EVENT_READY, EVENT_STATS, gameEvents, type ReadyPayload } from '../game/gameEvents';
-import type { ControlsState, PlayerStats } from '../game/types';
+import type { ControlsState, Direction, PlayerStats } from '../game/types';
 
 const defaultStats: PlayerStats = {
   capacity: GAME_CONFIG.defaultBombCapacity,
@@ -13,9 +13,14 @@ const defaultStats: PlayerStats = {
   remoteDetonateUnlocked: false,
 };
 
+const JOYSTICK_RADIUS = 56;
+const JOYSTICK_KNOB_RADIUS = 22;
+const JOYSTICK_DEADZONE = 10;
+
 export default function GameView(): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
+  const joystickPadRef = useRef<HTMLDivElement | null>(null);
   const controlsRef = useRef<ControlsState>({
     up: false,
     down: false,
@@ -29,18 +34,29 @@ export default function GameView(): JSX.Element {
   const [stats, setStats] = useState<PlayerStats>(defaultStats);
   const [zoom, setZoom] = useState<number>(GAME_CONFIG.startZoom);
   const [isRemoteDetonateUnlocked, setIsRemoteDetonateUnlocked] = useState(false);
+  const [joystickPressed, setJoystickPressed] = useState(false);
+  const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
 
+  const setMovementFromDirection = (direction: Direction | null): void => {
+    controlsRef.current.up = direction === 'up';
+    controlsRef.current.down = direction === 'down';
+    controlsRef.current.left = direction === 'left';
+    controlsRef.current.right = direction === 'right';
+  };
+
+  const clearMovement = (): void => {
+    setMovementFromDirection(null);
+  };
 
   useEffect(() => {
     const root = document.documentElement;
     root.classList.add('telegram-fullview');
 
-    const webApp = (window as Window & { Telegram?: { WebApp?: { ready?: () => void; expand?: () => void; requestFullscreen?: () => void; isExpanded?: boolean } } }).Telegram?.WebApp;
+    const webApp = (window as Window & { Telegram?: { WebApp?: { ready?: () => void; expand?: () => void } } }).Telegram?.WebApp;
     if (!webApp) return () => root.classList.remove('telegram-fullview');
 
     webApp.ready?.();
     webApp.expand?.();
-    webApp.requestFullscreen?.();
 
     return () => {
       root.classList.remove('telegram-fullview');
@@ -94,18 +110,81 @@ export default function GameView(): JSX.Element {
     };
   }, []);
 
-  const controls = useMemo(
-    () => [
-      { key: 'up', label: '↑' },
-      { key: 'left', label: '←' },
-      { key: 'down', label: '↓' },
-      { key: 'right', label: '→' },
-    ] as const,
+  useEffect(
+    () => () => {
+      clearMovement();
+    },
     [],
   );
 
-  const setDirection = (direction: 'up' | 'down' | 'left' | 'right', active: boolean): void => {
-    controlsRef.current[direction] = active;
+  const setDirection = (direction: Direction, active: boolean): void => {
+    if (active) {
+      setMovementFromDirection(direction);
+      return;
+    }
+
+    if (controlsRef.current[direction]) {
+      clearMovement();
+    }
+  };
+
+  const updateJoystickFromPointer = (clientX: number, clientY: number): void => {
+    const pad = joystickPadRef.current;
+    if (!pad) return;
+
+    const rect = pad.getBoundingClientRect();
+    const centerX = rect.left + (rect.width / 2);
+    const centerY = rect.top + (rect.height / 2);
+    const dx = clientX - centerX;
+    const dy = clientY - centerY;
+    const distance = Math.hypot(dx, dy);
+
+    const clampedScale = distance > JOYSTICK_RADIUS ? JOYSTICK_RADIUS / distance : 1;
+    const clampedX = dx * clampedScale;
+    const clampedY = dy * clampedScale;
+    setJoystickOffset({ x: clampedX, y: clampedY });
+
+    if (distance < JOYSTICK_DEADZONE) {
+      clearMovement();
+      return;
+    }
+
+    let direction: Direction;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      direction = dx >= 0 ? 'right' : 'left';
+    } else {
+      direction = dy >= 0 ? 'down' : 'up';
+    }
+
+    setMovementFromDirection(direction);
+  };
+
+  const onJoystickPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const pad = joystickPadRef.current;
+    if (!pad) return;
+
+    pad.setPointerCapture(event.pointerId);
+    setJoystickPressed(true);
+    updateJoystickFromPointer(event.clientX, event.clientY);
+  };
+
+  const onJoystickPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!joystickPressed) return;
+    updateJoystickFromPointer(event.clientX, event.clientY);
+  };
+
+  const releaseJoystick = (pointerId?: number): void => {
+    const pad = joystickPadRef.current;
+    if (pad && pointerId !== undefined && pad.hasPointerCapture(pointerId)) {
+      pad.releasePointerCapture(pointerId);
+    }
+    setJoystickPressed(false);
+    setJoystickOffset({ x: 0, y: 0 });
+    clearMovement();
+  };
+
+  const onJoystickPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
+    releaseJoystick(event.pointerId);
   };
 
   const requestBomb = (): void => {
@@ -141,19 +220,43 @@ export default function GameView(): JSX.Element {
 
       <section className="playfield-shell">
         <aside className="control-column control-column--left" aria-label="Movement controls">
-          <div className="dpad">
-            {controls.map((control) => (
+          <div
+            ref={joystickPadRef}
+            className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}
+            onPointerDown={onJoystickPointerDown}
+            onPointerMove={onJoystickPointerMove}
+            onPointerUp={onJoystickPointerUp}
+            onPointerCancel={onJoystickPointerUp}
+            onPointerLeave={() => {
+              if (!joystickPressed) return;
+              releaseJoystick();
+            }}
+            role="application"
+            aria-label="Virtual joystick"
+          >
+            <div
+              className="joystick-knob"
+              style={{
+                transform: `translate(calc(-50% + ${joystickOffset.x}px), calc(-50% + ${joystickOffset.y}px))`,
+                width: `${JOYSTICK_KNOB_RADIUS * 2}px`,
+                height: `${JOYSTICK_KNOB_RADIUS * 2}px`,
+              }}
+            />
+          </div>
+
+          <div className="landscape-fallback-dpad" aria-hidden="true">
+            {(['up', 'left', 'down', 'right'] as const).map((direction) => (
               <button
-                key={control.key}
+                key={direction}
                 type="button"
-                className={`dpad-btn dpad-${control.key}`}
-                onTouchStart={() => setDirection(control.key, true)}
-                onTouchEnd={() => setDirection(control.key, false)}
-                onMouseDown={() => setDirection(control.key, true)}
-                onMouseUp={() => setDirection(control.key, false)}
-                onMouseLeave={() => setDirection(control.key, false)}
+                className={`dpad-btn dpad-${direction}`}
+                onTouchStart={() => setDirection(direction, true)}
+                onTouchEnd={() => setDirection(direction, false)}
+                onMouseDown={() => setDirection(direction, true)}
+                onMouseUp={() => setDirection(direction, false)}
+                onMouseLeave={() => setDirection(direction, false)}
               >
-                {control.label}
+                {direction === 'up' ? '↑' : direction === 'left' ? '←' : direction === 'down' ? '↓' : '→'}
               </button>
             ))}
           </div>
@@ -167,7 +270,7 @@ export default function GameView(): JSX.Element {
             <input
               id="zoom"
               type="range"
-              className="zoom-slider zoom-slider--vertical"
+              className="zoom-slider"
               min={GAME_CONFIG.minZoom}
               max={GAME_CONFIG.maxZoom}
               step={0.05}
@@ -180,6 +283,7 @@ export default function GameView(): JSX.Element {
         </section>
 
         <aside className="control-column control-column--right" aria-label="Action controls">
+          <div className="boost-slot" aria-hidden="true">Boost</div>
           <button
             type="button"
             className="bomb-btn"
@@ -197,6 +301,7 @@ export default function GameView(): JSX.Element {
           >
             Detonate
           </button>
+          <div className="boost-slot" aria-hidden="true">Boost</div>
         </aside>
       </section>
     </main>

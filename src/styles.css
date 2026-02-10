@@ -6,11 +6,11 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
-  --telegram-overlay-top: 56px;
+  --tg-top-overlay: 0px;
 }
 
 html.telegram-fullview {
-  --telegram-overlay-top: 20px;
+  --tg-top-overlay: 20px;
 }
 
 * {
@@ -31,10 +31,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   min-height: 100vh;
-  padding-top: calc(0.8rem + var(--safe-top) + var(--telegram-overlay-top));
+  padding-top: calc(0.8rem + var(--safe-top) + var(--tg-top-overlay));
   padding-right: calc(0.8rem + var(--safe-right));
   padding-bottom: calc(0.8rem + var(--safe-bottom));
   padding-left: calc(0.8rem + var(--safe-left));
@@ -63,10 +63,11 @@ body {
 
 .playfield-shell {
   display: grid;
-  grid-template-columns: minmax(96px, 1fr) minmax(0, 70%) minmax(96px, 1fr);
+  grid-template-columns: minmax(82px, 15%) minmax(0, 70%) minmax(82px, 15%);
   align-items: stretch;
-  gap: 0.75rem;
+  gap: 0.6rem;
   flex: 1;
+  min-height: 0;
 }
 
 .control-column {
@@ -77,23 +78,45 @@ body {
   border: 1px solid #27335c;
   border-radius: 12px;
   padding: 0.6rem;
+  min-height: 0;
+}
+
+.control-column--left {
+  flex-direction: column;
 }
 
 .control-column--right {
   flex-direction: column;
+  justify-content: space-between;
   gap: 0.8rem;
 }
 
+.boost-slot {
+  width: min(110px, 100%);
+  min-height: 42px;
+  border-radius: 10px;
+  border: 1px dashed #425180;
+  color: #a6b2d8;
+  display: grid;
+  place-items: center;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .game-shell {
+  position: relative;
   display: flex;
-  gap: 0.75rem;
-  align-items: stretch;
+  justify-content: center;
+  align-items: center;
   min-width: 0;
+  min-height: 0;
 }
 
 .game-canvas {
-  flex: 1;
-  min-height: min(72vw, 70vh, 680px);
+  width: min(100%, calc((100vh - var(--safe-top) - var(--safe-bottom) - var(--tg-top-overlay) - 220px)));
+  aspect-ratio: 1 / 1;
+  max-height: 100%;
   border: 2px solid #27335c;
   border-radius: 12px;
   overflow: hidden;
@@ -101,25 +124,26 @@ body {
 }
 
 .zoom-panel {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 0.5rem;
-  background: #0f1630cc;
+  position: absolute;
+  right: 0.45rem;
+  bottom: 0.45rem;
+  display: grid;
+  justify-items: center;
+  gap: 0.35rem;
+  background: #0f1630dd;
   border: 1px solid #27335c;
-  border-radius: 12px;
-  padding: 0.5rem;
-  min-width: 64px;
+  border-radius: 10px;
+  padding: 0.35rem 0.45rem;
+  min-width: 90px;
 }
 
-.zoom-slider--vertical {
-  writing-mode: vertical-lr;
-  direction: rtl;
-  -webkit-appearance: slider-vertical;
-  appearance: slider-vertical;
-  width: 22px;
-  height: 180px;
+.zoom-panel label {
+  font-size: 0.75rem;
+  color: #cad3f0;
+}
+
+.zoom-slider {
+  width: 80px;
 }
 
 button {
@@ -135,42 +159,45 @@ button:disabled {
   opacity: 0.55;
 }
 
-.dpad {
-  display: grid;
-  grid-template-columns: repeat(3, 54px);
-  grid-template-rows: repeat(3, 54px);
-  gap: 0.3rem;
-}
-
-.dpad-btn {
-  background: #253358;
+.joystick-pad {
+  position: relative;
+  width: min(160px, 100%);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  border: 2px solid #425180;
+  background: radial-gradient(circle at 30% 30%, #25345f, #162240 70%);
   touch-action: none;
 }
 
-.dpad-up {
-  grid-column: 2;
-  grid-row: 1;
+.joystick-pad::after {
+  content: '';
+  position: absolute;
+  inset: 24%;
+  border-radius: 50%;
+  border: 1px solid #7f91ca66;
 }
 
-.dpad-left {
-  grid-column: 1;
-  grid-row: 2;
+.joystick-pad--active {
+  border-color: #89a4eb;
 }
 
-.dpad-down {
-  grid-column: 2;
-  grid-row: 2;
+.joystick-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #d3deff, #8295d2 75%);
+  box-shadow: 0 0 0 2px #223157, 0 4px 16px #02040a80;
 }
 
-.dpad-right {
-  grid-column: 3;
-  grid-row: 2;
+.landscape-fallback-dpad {
+  display: none;
 }
 
 .bomb-btn,
 .detonate-btn {
   width: min(112px, 100%);
-  min-height: 80px;
+  min-height: 74px;
   border-radius: 999px;
   font-size: 1rem;
   touch-action: manipulation;
@@ -187,27 +214,76 @@ button:disabled {
 @media (orientation: portrait) {
   .playfield-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto;
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
   .control-column--left,
   .control-column--right {
-    min-height: 108px;
+    min-height: auto;
+  }
+
+  .control-column--left {
+    order: 2;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 0.5rem;
   }
 
   .control-column--right {
-    flex-direction: row;
-    justify-content: space-evenly;
+    order: 2;
+    position: fixed;
+    right: calc(0.8rem + var(--safe-right));
+    bottom: calc(0.8rem + var(--safe-bottom));
+    width: min(120px, 32vw);
+    z-index: 4;
+    padding: 0.45rem;
+    background: #0f1630f0;
+  }
+
+  .game-shell {
+    order: 1;
+    align-items: center;
+    justify-content: center;
   }
 
   .game-canvas {
-    min-height: min(72vw, 66vh);
+    width: min(100%, calc(100vw - var(--safe-left) - var(--safe-right) - 1.6rem));
+    max-height: calc(100vh - var(--safe-top) - var(--safe-bottom) - var(--tg-top-overlay) - 250px);
+  }
+
+  .zoom-panel {
+    right: calc(0.55rem + var(--safe-right));
+    bottom: calc(0.55rem + var(--safe-bottom));
+  }
+
+  .joystick-pad {
+    width: min(168px, 42vw);
+  }
+
+  .control-column--left {
+    position: fixed;
+    left: calc(0.8rem + var(--safe-left));
+    bottom: calc(0.8rem + var(--safe-bottom));
+    width: min(180px, 42vw);
+    z-index: 4;
+    background: #0f1630f0;
+  }
+
+  .boost-slot {
+    min-height: 34px;
+    font-size: 0.68rem;
+  }
+
+  .bomb-btn,
+  .detonate-btn {
+    min-height: 58px;
+    font-size: 0.9rem;
   }
 }
 
 @media (min-width: 900px) {
   .page {
-    padding-top: calc(1.25rem + var(--safe-top) + var(--telegram-overlay-top));
+    padding-top: calc(1.25rem + var(--safe-top) + var(--tg-top-overlay));
     padding-right: calc(1.25rem + var(--safe-right));
     padding-bottom: calc(1.25rem + var(--safe-bottom));
     padding-left: calc(1.25rem + var(--safe-left));
