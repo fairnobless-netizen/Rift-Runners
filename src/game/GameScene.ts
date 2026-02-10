@@ -24,12 +24,20 @@ import {
   DEPTH_ENEMY,
   DEPTH_FLAME,
   DEPTH_ITEM,
-  DEPTH_OVERLAY,
   DEPTH_PLAYER,
   FLAME_SEGMENT_SCALE,
   GAME_CONFIG,
 } from './config';
-import { emitSimulationEvent, emitStats, EVENT_READY, gameEvents } from './gameEvents';
+import {
+  DOOR_REVEALED,
+  EVENT_READY,
+  LEVEL_CLEARED,
+  LEVEL_FAILED,
+  LEVEL_STARTED,
+  emitSimulationEvent,
+  emitStats,
+  gameEvents,
+} from './gameEvents';
 import { createDeterministicRng, type DeterministicRng } from './rng';
 import type {
   ControlsState,
@@ -38,13 +46,14 @@ import type {
   EntityKind,
   EntityState,
   Facing,
-  TileType,
   FlameArmAxis,
   FlameModel,
   FlameSegmentKind,
+  LevelProgressModel,
   PlayerModel,
   PlayerStats,
   SimulationEvent,
+  TileType,
 } from './types';
 
 interface TimedDirection {
@@ -53,6 +62,7 @@ interface TimedDirection {
 }
 
 const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
+const LEVELS_PER_ZONE = 3;
 
 export class GameScene extends Phaser.Scene {
   private controls: ControlsState;
@@ -62,6 +72,13 @@ export class GameScene extends Phaser.Scene {
   private simulationTick = 0;
   private arena: ArenaModel = createArena(0, this.rng);
   private levelIndex = 0;
+  private zoneIndex = 0;
+  private levelInZone = 0;
+
+  private doorRevealed = false;
+  private doorEntered = false;
+  private isLevelCleared = false;
+  private doorSprite?: Phaser.GameObjects.Rectangle;
 
   private player: PlayerModel = {
     gridX: 1,
@@ -93,9 +110,6 @@ export class GameScene extends Phaser.Scene {
   private flameSprites = new Map<string, Phaser.GameObjects.Image>();
   private activeFlames = new Map<string, FlameModel>();
 
-  private levelClearContainer?: Phaser.GameObjects.Container;
-  private isLevelCleared = false;
-
   private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
   private spaceKey?: Phaser.Input.Keyboard.Key;
   private heldSince: Partial<Record<Direction, number>> = {};
@@ -109,7 +123,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload(): void {
-    // Keep registry-driven loading centralized so scene render logic stays data-driven.
     this.ensureFallbackTexture();
     const seen = new Set<string>();
 
@@ -147,6 +160,7 @@ export class GameScene extends Phaser.Scene {
     this.updatePlayerStateFromTimers(time);
     this.syncSpritesFromArena(time);
     this.checkPlayerEnemyCollision();
+    this.tryEnterDoor(time);
   }
 
   private setupCamera(): void {
@@ -165,6 +179,18 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  private getLevelProgressModel(): LevelProgressModel {
+    return {
+      zoneIndex: this.zoneIndex,
+      levelInZone: this.levelInZone,
+      levelIndex: this.levelIndex,
+      isBossLevel: false,
+      isEndless: false,
+      doorRevealed: this.doorRevealed,
+      doorEntered: this.doorEntered,
+      levelCleared: this.isLevelCleared,
+    };
+  }
 
   private emitSimulation(type: string, timeMs: number, payload: Record<string, unknown>): void {
     const event: SimulationEvent = {
@@ -185,13 +211,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private mixLevelSeed(levelIndex: number): number {
-    // backend-relevant: stable seed mix keeps level generation + drops reproducible for the same run seed.
     const mixed = (this.baseSeed ^ Math.imul(levelIndex + 1, 0x9e3779b1) ^ Math.imul(this.runId, 0x85ebca6b)) >>> 0;
     return mixed === 0 ? 0x6d2b79f5 : mixed;
   }
 
   private getShuffledEnemySpawnCells() {
-    // Deterministic Fisher-Yates to keep enemy spawn order stable per seed.
     const cells = [...getEnemySpawnCells(this.arena)];
     for (let i = cells.length - 1; i > 0; i -= 1) {
       const j = this.randomInt(i + 1);
@@ -204,11 +228,16 @@ export class GameScene extends Phaser.Scene {
 
   private startLevel(levelIndex: number, keepScore: boolean): void {
     this.levelIndex = Math.max(0, levelIndex);
-    // backend-relevant: reset simulation timeline and RNG state for deterministic level restarts.
+    this.zoneIndex = Math.floor(this.levelIndex / LEVELS_PER_ZONE);
+    this.levelInZone = this.levelIndex % LEVELS_PER_ZONE;
+    // TODO(module-c): route to dedicated boss-level flow when zone milestones are added.
+    // TODO(module-c): replace with endless progression branch when campaign is complete.
+
     this.simulationTick = 0;
     this.rng = createDeterministicRng(this.mixLevelSeed(this.levelIndex));
     this.isLevelCleared = false;
-    this.clearLevelOverlay();
+    this.doorRevealed = false;
+    this.doorEntered = false;
     this.clearDynamicSprites();
 
     this.arena = createArena(this.levelIndex, this.rng);
@@ -233,12 +262,27 @@ export class GameScene extends Phaser.Scene {
 
     emitStats(this.stats);
     if (this.playerSprite) this.cameras.main.startFollow(this.playerSprite, true, 0.2, 0.2);
+
+    this.emitSimulation(LEVEL_STARTED, this.time.now, {
+      ...this.getLevelProgressModel(),
+      hiddenDoorKey: this.arena.hiddenDoorKey,
+    });
   }
 
   private restartLevelAfterDeath(): void {
     this.stats.score = Math.max(0, this.stats.score - GAME_CONFIG.playerDeathPenalty);
-    this.emitSimulation('player.death', this.time.now, { level: this.levelIndex });
+    this.emitSimulation(LEVEL_FAILED, this.time.now, {
+      ...this.getLevelProgressModel(),
+      reason: 'player_death',
+    });
     this.startLevel(this.levelIndex, true);
+  }
+
+  private advanceToNextLevel(time: number): void {
+    this.doorEntered = true;
+    this.isLevelCleared = true;
+    this.emitSimulation(LEVEL_CLEARED, time, { ...this.getLevelProgressModel() });
+    this.startLevel(this.levelIndex + 1, true);
   }
 
   private rebuildArenaTiles(): void {
@@ -253,7 +297,6 @@ export class GameScene extends Phaser.Scene {
         const block = this.add
           .image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, this.getTextureKey(spec))
           .setOrigin(spec.origin?.x ?? 0.5, spec.origin?.y ?? 0.5)
-          // Why: display size keeps world-space dimensions deterministic even with mixed source image sizes.
           .setDisplaySize(tileSize - 2, tileSize - 2)
           .setDepth(spec.depth ?? (tile === 'Floor' ? 0 : DEPTH_BREAKABLE))
           .setData('arenaTile', true);
@@ -265,6 +308,28 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
+
+    this.doorSprite?.destroy();
+    const doorPos = fromKey(this.arena.hiddenDoorKey);
+    this.doorSprite = this.add
+      .rectangle(doorPos.x * tileSize + tileSize / 2, doorPos.y * tileSize + tileSize / 2, tileSize - 8, tileSize - 8, 0x4a66cc)
+      .setDepth(DEPTH_ITEM)
+      .setVisible(false);
+  }
+
+  private revealDoor(time: number): void {
+    if (this.doorRevealed) return;
+    this.doorRevealed = true;
+    this.doorSprite?.setVisible(true);
+    this.emitSimulation(DOOR_REVEALED, time, { ...this.getLevelProgressModel() });
+  }
+
+  private tryEnterDoor(time: number): void {
+    if (!this.doorRevealed) return;
+    if (this.player.targetX !== null || this.player.targetY !== null) return;
+    const playerKey = toKey(this.player.gridX, this.player.gridY);
+    if (playerKey !== this.arena.hiddenDoorKey) return;
+    this.advanceToNextLevel(time);
   }
 
   private spawnPlayer(): void {
@@ -411,14 +476,7 @@ export class GameScene extends Phaser.Scene {
     this.controls.placeBombRequested = false;
     if (this.stats.placed >= this.stats.capacity) return;
 
-    const bomb = placeBomb(
-      this.arena,
-      this.player.gridX,
-      this.player.gridY,
-      this.stats.range,
-      'player-1',
-      time + GAME_CONFIG.bombFuseMs,
-    );
+    const bomb = placeBomb(this.arena, this.player.gridX, this.player.gridY, this.stats.range, 'player-1', time + GAME_CONFIG.bombFuseMs);
     if (!bomb) return;
 
     this.player.state = 'placeBomb';
@@ -430,18 +488,20 @@ export class GameScene extends Phaser.Scene {
   }
 
   private processBombTimers(time: number): void {
-    const dueBombs = [...this.arena.bombs.values()].filter((bomb) => time >= bomb.detonateAt).map((bomb) => bomb.key);
-    for (const key of dueBombs) this.detonateBomb(key, time);
+    const dueBombs = [...this.arena.bombs.values()].filter((bomb) => time >= bomb.detonateAt);
+    for (const bomb of dueBombs) {
+      this.resolveBombDetonation(bomb.key, time);
+    }
   }
 
-  private detonateBomb(startKey: string, time: number): void {
-    const queue = [startKey];
-    const visited = new Set<string>();
+  private resolveBombDetonation(startKey: string, time: number): void {
+    const queue: string[] = [startKey];
+    const seen = new Set<string>();
 
     while (queue.length > 0) {
       const key = queue.shift();
-      if (!key || visited.has(key)) continue;
-      visited.add(key);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
 
       const bomb = removeBomb(this.arena, key);
       if (!bomb) continue;
@@ -454,6 +514,7 @@ export class GameScene extends Phaser.Scene {
         this.destroyBreakableSprite(block.x, block.y);
         this.stats.score += 10;
         const dropped = maybeDropItem(this.arena, block.x, block.y, this.randomFloat(), this.randomFloat());
+        if (toKey(block.x, block.y) === this.arena.hiddenDoorKey) this.revealDoor(time);
         this.emitSimulation('breakable.destroyed', time, { x: block.x, y: block.y, item: dropped?.type ?? null });
       }
 
@@ -487,13 +548,7 @@ export class GameScene extends Phaser.Scene {
     this.emitSimulation('item.picked', this.time.now, { key: item.key, type: item.type, x, y });
   }
 
-  private spawnFlame(
-    x: number,
-    y: number,
-    expiresAt: number,
-    segment: FlameSegmentKind,
-    axis?: FlameArmAxis,
-  ): void {
+  private spawnFlame(x: number, y: number, expiresAt: number, segment: FlameSegmentKind, axis?: FlameArmAxis): void {
     const key = toKey(x, y);
     this.activeFlames.set(key, { key, x, y, expiresAt, segment, axis });
   }
@@ -570,7 +625,6 @@ export class GameScene extends Phaser.Scene {
       scoreChanged = true;
     }
     if (scoreChanged) emitStats(this.stats);
-    if (this.enemies.size === 0) this.showLevelClearOverlay();
   }
 
   private hitPlayerAt(x: number, y: number): void {
@@ -592,56 +646,14 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private showLevelClearOverlay(): void {
-    if (this.isLevelCleared || this.levelClearContainer) return;
-    this.isLevelCleared = true;
-
-    const worldWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
-    const worldHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
-
-    const bg = this.add
-      .rectangle(worldWidth / 2, worldHeight / 2, worldWidth, worldHeight, 0x000000, 0.5)
-      .setDepth(DEPTH_OVERLAY)
-      .setScrollFactor(0);
-    const text = this.add
-      .text(worldWidth / 2, worldHeight / 2 - 36, 'LEVEL CLEAR', {
-        color: '#ffffff',
-        fontSize: '30px',
-        fontStyle: 'bold',
-      })
-      .setOrigin(0.5)
-      .setDepth(DEPTH_OVERLAY + 1)
-      .setScrollFactor(0);
-
-    const nextButton = this.add
-      .rectangle(worldWidth / 2, worldHeight / 2 + 34, 132, 44, 0x2f3f72)
-      .setDepth(DEPTH_OVERLAY + 1)
-      .setScrollFactor(0)
-      .setInteractive({ useHandCursor: true });
-    const nextText = this.add
-      .text(worldWidth / 2, worldHeight / 2 + 34, 'Next', { color: '#ecf1ff', fontSize: '20px' })
-      .setOrigin(0.5)
-      .setDepth(DEPTH_OVERLAY + 2)
-      .setScrollFactor(0);
-
-    nextButton.on('pointerdown', () => {
-      this.startLevel(this.levelIndex + 1, true);
-    });
-
-    this.levelClearContainer = this.add.container(0, 0, [bg, text, nextButton, nextText]).setDepth(DEPTH_OVERLAY);
-  }
-
-  private clearLevelOverlay(): void {
-    this.levelClearContainer?.destroy(true);
-    this.levelClearContainer = undefined;
-  }
-
   private clearDynamicSprites(): void {
     const groups = [this.bombSprites, this.itemSprites, this.flameSprites, this.enemySprites] as const;
     for (const group of groups) {
       for (const sprite of group.values()) sprite.destroy();
       group.clear();
     }
+    this.doorSprite?.destroy();
+    this.doorSprite = undefined;
   }
 
   private destroyBreakableSprite(x: number, y: number): void {
@@ -698,7 +710,6 @@ export class GameScene extends Phaser.Scene {
         .setDisplaySize(tileSize * (baseStyle.scale ?? 0.7) * pulseScale, tileSize * (baseStyle.scale ?? 0.7) * pulseScale)
         .setOrigin(baseStyle.origin?.x ?? 0.5, baseStyle.origin?.y ?? 0.5)
         .setAlpha(alpha)
-        // Why: keep pulse warning visible without introducing extra animation state in the model.
         .setTint(shouldWarn ? 0xffc457 : 0xffffff);
     }
 
@@ -835,17 +846,13 @@ export class GameScene extends Phaser.Scene {
     return sprite;
   }
 
-  private getFlameSegmentSize(
-    segment: FlameSegmentKind,
-    axis: FlameArmAxis | undefined,
-  ): { width: number; height: number } {
+  private getFlameSegmentSize(segment: FlameSegmentKind, axis: FlameArmAxis | undefined): { width: number; height: number } {
     if (segment === 'center') {
       return { width: FLAME_SEGMENT_SCALE.center, height: FLAME_SEGMENT_SCALE.center };
     }
 
     return axis === 'horizontal' ? FLAME_SEGMENT_SCALE.armHorizontal : FLAME_SEGMENT_SCALE.armVertical;
   }
-
 
   private ensureFallbackTexture(): void {
     if (this.textures.exists('fallback-missing')) return;
@@ -874,10 +881,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getTileAssetStyle(tileType: TileType): import('./types').AssetStyle {
-    return (
-      ASSET_REGISTRY.tile?.[tileType]?.none ??
-      { textureKey: 'fallback-missing', path: '', origin: { x: 0.5, y: 0.5 }, scale: 1, depth: DEPTH_BREAKABLE, alpha: 1 }
-    );
+    return ASSET_REGISTRY.tile?.[tileType]?.none ?? { textureKey: 'fallback-missing', path: '', origin: { x: 0.5, y: 0.5 }, scale: 1, depth: DEPTH_BREAKABLE, alpha: 1 };
   }
 
   private toDelta(direction: Direction): { dx: number; dy: number } {
