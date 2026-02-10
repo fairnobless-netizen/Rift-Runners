@@ -42,74 +42,98 @@ export const FLAME_SEGMENT_SCALE = {
   armVertical: { width: 0.38, height: 0.8 },
 } as const;
 
-export const LAYERS = {
-  floor: 0,
-  breakable: 1,
-  bomb: 2,
-  item: 3,
-  player: 4,
-  enemy: 5,
-  flame: 6,
-  overlay: 10,
-} as const;
+export const DEPTH_FLOOR = 0;
+export const DEPTH_BREAKABLE = 1;
+export const DEPTH_BOMB = 2;
+export const DEPTH_ITEM = 3;
+export const DEPTH_PLAYER = 4;
+export const DEPTH_ENEMY = 5;
+export const DEPTH_FLAME = 6;
+export const DEPTH_OVERLAY = 10;
 
 export const ASSET_REGISTRY: AssetRegistry = {
+  tile: {
+    floor: {
+      none: { textureKey: 'tile-floor', path: '/assets/sprites/tile-floor.svg', origin: { x: 0.5, y: 0.5 }, scale: 1, depth: DEPTH_FLOOR },
+    },
+    hardWall: {
+      none: {
+        textureKey: 'tile-hard-wall',
+        path: '/assets/sprites/tile-hard-wall.svg',
+        origin: { x: 0.5, y: 0.5 },
+        scale: 1,
+        depth: DEPTH_BREAKABLE,
+      },
+    },
+    breakable: {
+      none: {
+        textureKey: 'tile-breakable',
+        path: '/assets/sprites/tile-breakable.svg',
+        origin: { x: 0.5, y: 0.5 },
+        scale: 1,
+        depth: DEPTH_BREAKABLE,
+      },
+    },
+  },
   player: {
     idle: {
-      up: { fillColor: 0x50d3ff, strokeColor: 0x0b1a2e, scale: 0.5 },
-      down: { fillColor: 0x2bb1e7, strokeColor: 0x0b1a2e, scale: 0.5 },
-      left: { fillColor: 0x7bc8ff, strokeColor: 0x0b1a2e, scale: 0.5 },
-      right: { fillColor: 0x2fdefa, strokeColor: 0x0b1a2e, scale: 0.5 },
+      up: { textureKey: 'player-up', path: '/assets/sprites/player-up.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.74, depth: DEPTH_PLAYER },
+      down: { textureKey: 'player-down', path: '/assets/sprites/player-down.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.74, depth: DEPTH_PLAYER },
+      left: { textureKey: 'player-left', path: '/assets/sprites/player-left.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.74, depth: DEPTH_PLAYER },
+      right: { textureKey: 'player-right', path: '/assets/sprites/player-right.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.74, depth: DEPTH_PLAYER },
     },
     move: {
-      up: { fillColor: 0x7de2ff, strokeColor: 0x0b1a2e, scale: 0.52 },
-      down: { fillColor: 0x67ccee, strokeColor: 0x0b1a2e, scale: 0.52 },
-      left: { fillColor: 0x98eaff, strokeColor: 0x0b1a2e, scale: 0.52 },
-      right: { fillColor: 0x56e0ff, strokeColor: 0x0b1a2e, scale: 0.52 },
+      up: { textureKey: 'player-up', path: '/assets/sprites/player-up.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.8, depth: DEPTH_PLAYER },
+      down: { textureKey: 'player-down', path: '/assets/sprites/player-down.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.8, depth: DEPTH_PLAYER },
+      left: { textureKey: 'player-left', path: '/assets/sprites/player-left.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.8, depth: DEPTH_PLAYER },
+      right: { textureKey: 'player-right', path: '/assets/sprites/player-right.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.8, depth: DEPTH_PLAYER },
     },
     placeBomb: {
-      up: { fillColor: 0x8de9ff, strokeColor: 0x0b1a2e, scale: 0.5 },
-      down: { fillColor: 0x6ad6f4, strokeColor: 0x0b1a2e, scale: 0.5 },
-      left: { fillColor: 0x9eeeff, strokeColor: 0x0b1a2e, scale: 0.5 },
-      right: { fillColor: 0x6ce8ff, strokeColor: 0x0b1a2e, scale: 0.5 },
+      up: { textureKey: 'player-up', path: '/assets/sprites/player-up.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.76, depth: DEPTH_PLAYER },
+      down: { textureKey: 'player-down', path: '/assets/sprites/player-down.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.76, depth: DEPTH_PLAYER },
+      left: { textureKey: 'player-left', path: '/assets/sprites/player-left.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.76, depth: DEPTH_PLAYER },
+      right: { textureKey: 'player-right', path: '/assets/sprites/player-right.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.76, depth: DEPTH_PLAYER },
     },
   },
   bomb: {
     active: {
-      none: { fillColor: 0x222222, strokeColor: 0xbac2d7, scale: 0.46 },
+      none: { textureKey: 'bomb-active', path: '/assets/sprites/bomb.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.7, depth: DEPTH_BOMB },
     },
     detonate: {
-      none: { fillColor: 0x333333, strokeColor: 0xffc457, scale: 0.5 },
+      none: { textureKey: 'bomb-active', path: '/assets/sprites/bomb.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.74, depth: DEPTH_BOMB },
     },
   },
   flame: {
     active: {
-      none: { fillColor: 0xff6a3d, alpha: 0.95, scale: 0.68 },
+      none: { textureKey: 'flame-center', path: '/assets/sprites/flame-center.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.68, depth: DEPTH_FLAME, alpha: 0.95 },
     },
     idle: {
-      none: { fillColor: 0xffb15c, alpha: 0.9, scale: 0.6 },
+      none: { textureKey: 'flame-arm-h', path: '/assets/sprites/flame-arm-h.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.6, depth: DEPTH_FLAME, alpha: 0.9 },
+    },
+    move: {
+      none: { textureKey: 'flame-arm-v', path: '/assets/sprites/flame-arm-v.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.6, depth: DEPTH_FLAME, alpha: 0.9 },
     },
   },
   item: {
     active: {
-      none: { fillColor: 0xffc457, strokeColor: 0x101010, scale: 0.3 },
+      none: { textureKey: 'pickup-fire', path: '/assets/sprites/pickup-fire.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.48, depth: DEPTH_ITEM },
     },
     pickup: {
-      none: { fillColor: 0xffffff, strokeColor: 0x101010, scale: 0.3 },
+      none: { textureKey: 'pickup-bomb', path: '/assets/sprites/pickup-bomb.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.48, depth: DEPTH_ITEM },
     },
   },
   enemy: {
     idle: {
-      up: { fillColor: 0xff7a7a, strokeColor: 0x2e0b0b, scale: 0.45 },
-      down: { fillColor: 0xff5757, strokeColor: 0x2e0b0b, scale: 0.45 },
-      left: { fillColor: 0xff8b64, strokeColor: 0x2e0b0b, scale: 0.45 },
-      right: { fillColor: 0xff9f6f, strokeColor: 0x2e0b0b, scale: 0.45 },
+      up: { textureKey: 'enemy-up', path: '/assets/sprites/enemy-up.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.72, depth: DEPTH_ENEMY },
+      down: { textureKey: 'enemy-down', path: '/assets/sprites/enemy-down.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.72, depth: DEPTH_ENEMY },
+      left: { textureKey: 'enemy-left', path: '/assets/sprites/enemy-left.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.72, depth: DEPTH_ENEMY },
+      right: { textureKey: 'enemy-right', path: '/assets/sprites/enemy-right.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.72, depth: DEPTH_ENEMY },
     },
     move: {
-      up: { fillColor: 0xff8989, strokeColor: 0x2e0b0b, scale: 0.48 },
-      down: { fillColor: 0xff6d6d, strokeColor: 0x2e0b0b, scale: 0.48 },
-      left: { fillColor: 0xff9b79, strokeColor: 0x2e0b0b, scale: 0.48 },
-      right: { fillColor: 0xffb081, strokeColor: 0x2e0b0b, scale: 0.48 },
+      up: { textureKey: 'enemy-up', path: '/assets/sprites/enemy-up.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.78, depth: DEPTH_ENEMY },
+      down: { textureKey: 'enemy-down', path: '/assets/sprites/enemy-down.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.78, depth: DEPTH_ENEMY },
+      left: { textureKey: 'enemy-left', path: '/assets/sprites/enemy-left.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.78, depth: DEPTH_ENEMY },
+      right: { textureKey: 'enemy-right', path: '/assets/sprites/enemy-right.svg', origin: { x: 0.5, y: 0.5 }, scale: 0.78, depth: DEPTH_ENEMY },
     },
   },
 };
