@@ -2,8 +2,10 @@ import http from 'http';
 import cors from 'cors';
 import express from 'express';
 
-import { campaignRouter } from './api/campaign.routes';
 import { healthRouter } from './api/health.routes';
+import { campaignRouter } from './api/campaign.routes';
+import { profileRouter } from './api/profile.routes';
+import { authRouter } from './api/auth.routes';
 import { startWsGateway } from './ws/gateway';
 
 const app = express();
@@ -11,8 +13,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// public
 app.use(healthRouter);
+
+// api
+app.use('/api', authRouter);
 app.use('/api', campaignRouter);
+app.use('/api', profileRouter);
 
 const port = Number(process.env.PORT ?? 3001);
 const server = http.createServer(app);
