@@ -2,7 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
-import { EVENT_CAMPAIGN_STATE, EVENT_READY, EVENT_STATS, gameEvents, type ReadyPayload } from '../game/gameEvents';
+
+import {
+  EVENT_CAMPAIGN_STATE,
+  EVENT_READY,
+  EVENT_SIMULATION,
+  EVENT_STATS,
+  gameEvents,
+  type ReadyPayload,
+} from '../game/gameEvents';
+
 import {
   fetchCampaignFromBackend,
   getCampaignSyncStatus,
@@ -11,7 +20,10 @@ import {
   saveCampaignState,
   type CampaignState,
 } from '../game/campaign';
-import type { ControlsState, Direction, PlayerStats } from '../game/types';
+
+import type { ControlState, Direction, PlayerStats } from '../game/types';
+import { fetchWallet } from '../game/wallet';
+
 
 const defaultStats: PlayerStats = {
   capacity: GAME_CONFIG.defaultBombCapacity,
@@ -46,7 +58,9 @@ export default function GameView(): JSX.Element {
   const [joystickPressed, setJoystickPressed] = useState(false);
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [profileName, setProfileName] = useState<string>('—');
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
+const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
+const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
+
 
   const setMovementFromDirection = (direction: Direction | null): void => {
     controlsRef.current.up = direction === 'up';
@@ -118,6 +132,9 @@ export default function GameView(): JSX.Element {
         if (meJson?.ok) {
           setProfileName(String(meJson.user?.displayName ?? '—'));
         }
+
+        const w = await fetchWallet();
+        if (w) setWallet(w);
       } catch {
         // keep silent (dev may run without backend)
       }
@@ -148,15 +165,26 @@ export default function GameView(): JSX.Element {
     const onCampaignState = (nextCampaign: CampaignState): void => {
       setCampaign({ ...nextCampaign });
     };
+    const onSimulation = async (event: SimulationEvent): Promise<void> => {
+  if (event.type !== 'BOSS_DEFEATED') return;
+
+  // MVP: wallet rewards are not client-granted in mainline to avoid security holes.
+  // TODO economy: apply boss rewards via server-authoritative ledger/events.
+  const refreshed = await fetchWallet();
+  if (refreshed) setWallet(refreshed);
+};
+
 
     gameEvents.on(EVENT_STATS, onStats);
     gameEvents.on(EVENT_READY, onReady);
     gameEvents.on(EVENT_CAMPAIGN_STATE, onCampaignState);
+    gameEvents.on(EVENT_SIMULATION, onSimulation);
 
     return () => {
       gameEvents.off(EVENT_STATS, onStats);
       gameEvents.off(EVENT_READY, onReady);
       gameEvents.off(EVENT_CAMPAIGN_STATE, onCampaignState);
+      gameEvents.off(EVENT_SIMULATION, onSimulation);
     };
   }, [zoom]);
 
@@ -291,7 +319,11 @@ export default function GameView(): JSX.Element {
           <span>Bombs: {stats.placed}/{stats.capacity}</span>
           <span>Range: {stats.range}</span>
           <span>Score: {stats.score}</span>
-          <span style={{ opacity: 0.7 }}>{syncStatus === 'synced' ? 'Synced' : 'Offline'}</span>
+<span>Score: {stats.score}</span>
+<span>Stars: {wallet.stars}</span>
+<span>Crystals: {wallet.crystals}</span>
+<span style={{ opacity: 0.7 }}>{syncStatus === 'synced' ? 'Synced' : 'Offline'}</span>
+
         </div>
       </section>
 
