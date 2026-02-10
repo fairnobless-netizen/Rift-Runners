@@ -12,10 +12,9 @@ export type EntityState =
   | 'placeBomb'
   | 'detonate'
   | 'active'
-  | 'pickup'
-  | 'floor'
-  | 'hardWall'
-  | 'breakable';
+  | 'pickup';
+
+export type TileAssetKey = TileType;
 
 export type FlameSegmentKind = 'center' | 'arm';
 
@@ -93,7 +92,17 @@ export interface AssetStyle {
   depth?: number;
 }
 
-export type AssetRegistry = Partial<Record<EntityKind, Partial<Record<EntityState, Partial<Record<Facing | 'none', AssetStyle>>>>>>;
+export type FacingAssetRegistry = Partial<Record<Facing | 'none', AssetStyle>>;
+
+export type EntityStateAssetRegistry = Partial<Record<EntityState, FacingAssetRegistry>>;
+
+export type EntityAssetRegistry = Partial<Record<Exclude<EntityKind, 'tile'>, EntityStateAssetRegistry>>;
+
+export type TileAssetRegistry = Partial<Record<TileAssetKey, Partial<Record<'none', AssetStyle>>>>;
+
+export type AssetRegistry = EntityAssetRegistry & {
+  tile?: TileAssetRegistry;
+};
 
 
 /**
