@@ -117,15 +117,16 @@ export default function GameView(): JSX.Element {
         <aside className="zoom-panel">
           <label htmlFor="zoom">Zoom</label>
           <input
-            id="zoom"
-            type="range"
-            orient="vertical"
-            min={GAME_CONFIG.minZoom}
-            max={GAME_CONFIG.maxZoom}
-            step={0.05}
-            value={zoom}
-            onChange={(event) => onZoomInput(Number(event.target.value))}
+  id="zoom"
+  type="range"
+  className="zoom-slider zoom-slider--vertical"
+  min={GAME_CONFIG.minZoom}
+  max={GAME_CONFIG.maxZoom}
+  step={0.05}
+  value={zoom}
+  onChange={(event) => onZoomInput(Number(event.target.value))}
           />
+
           <button type="button" onClick={resetZoom}>Reset</button>
         </aside>
       </section>
