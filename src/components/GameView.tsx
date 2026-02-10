@@ -3,7 +3,14 @@ import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
 import { EVENT_CAMPAIGN_STATE, EVENT_READY, EVENT_STATS, gameEvents, type ReadyPayload } from '../game/gameEvents';
-import { fetchCampaignFromBackend, loadCampaignState, saveCampaignState, type CampaignState } from '../game/campaign';
+import {
+  fetchCampaignFromBackend,
+  getCampaignSyncStatus,
+  loadCampaignState,
+  resetCampaignState,
+  saveCampaignState,
+  type CampaignState,
+} from '../game/campaign';
 import type { ControlsState, Direction, PlayerStats } from '../game/types';
 
 const defaultStats: PlayerStats = {
@@ -39,6 +46,7 @@ export default function GameView(): JSX.Element {
   const [joystickPressed, setJoystickPressed] = useState(false);
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [profileName, setProfileName] = useState<string>('—');
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
 
   const setMovementFromDirection = (direction: Direction | null): void => {
     controlsRef.current.up = direction === 'up';
@@ -117,6 +125,15 @@ export default function GameView(): JSX.Element {
 
     // TODO backend: in production handle auth errors + refresh/retry strategy
     runAuth();
+  }, []);
+
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setSyncStatus(getCampaignSyncStatus());
+    }, 1000);
+
+    return () => window.clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -274,6 +291,7 @@ export default function GameView(): JSX.Element {
           <span>Bombs: {stats.placed}/{stats.capacity}</span>
           <span>Range: {stats.range}</span>
           <span>Score: {stats.score}</span>
+          <span style={{ opacity: 0.7 }}>{syncStatus === 'synced' ? 'Synced' : 'Offline'}</span>
         </div>
       </section>
 
@@ -341,6 +359,18 @@ export default function GameView(): JSX.Element {
 
           <div className="right-panel right-panel--actions" aria-label="Action buttons">
             <div className="boost-slot" aria-hidden="true">Boost</div>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm('Reset campaign progress?')) {
+                  const state = resetCampaignState();
+                  // TODO: notify GameScene about new campaign state if needed
+                  setCampaign(state);
+                }
+              }}
+            >
+              Reset
+            </button>
             <button
               type="button"
               className="bomb-btn"
