@@ -10,6 +10,16 @@ export interface CampaignState {
   trophies: string[];
 }
 
+export type CampaignSyncStatus = 'synced' | 'offline';
+
+let campaignSyncStatus: CampaignSyncStatus = 'offline';
+let campaignPostTimer: number | null = null;
+const CAMPAIGN_POST_DEBOUNCE_MS = 800;
+
+export function getCampaignSyncStatus(): CampaignSyncStatus {
+  return campaignSyncStatus;
+}
+
 const DEFAULT_CAMPAIGN_STATE: CampaignState = {
   stage: 1,
   zone: 1,
@@ -45,7 +55,10 @@ function getSessionToken(): string | null {
 
 async function postCampaignToBackend(state: CampaignState): Promise<void> {
   const token = getSessionToken();
-  if (!token) return;
+  if (!token) {
+    campaignSyncStatus = 'offline';
+    return;
+  }
 
   try {
     await fetch('/api/campaign/progress', {
@@ -56,14 +69,19 @@ async function postCampaignToBackend(state: CampaignState): Promise<void> {
       },
       body: JSON.stringify(state),
     });
+    campaignSyncStatus = 'synced';
   } catch {
+    campaignSyncStatus = 'offline';
     // ignore (offline / backend down)
   }
 }
 
 export async function fetchCampaignFromBackend(): Promise<{ ok: boolean; hasProgress: boolean; campaignState: CampaignState } | null> {
   const token = getSessionToken();
-  if (!token) return null;
+  if (!token) {
+    campaignSyncStatus = 'offline';
+    return null;
+  }
 
   try {
     const res = await fetch('/api/campaign/progress', {
@@ -71,11 +89,16 @@ export async function fetchCampaignFromBackend(): Promise<{ ok: boolean; hasProg
     });
     const json = await res.json();
 
-    if (!json?.ok) return null;
+    if (!json?.ok) {
+      campaignSyncStatus = 'offline';
+      return null;
+    }
 
     const campaignState = sanitizeCampaignState(json.campaignState);
+    campaignSyncStatus = 'synced';
     return { ok: true, hasProgress: Boolean(json.hasProgress), campaignState };
   } catch {
+    campaignSyncStatus = 'offline';
     return null;
   }
 }
@@ -89,9 +112,15 @@ export function saveCampaignState(state: CampaignState): void {
     // Ignore write failures (private mode, quota).
   }
 
-  // backend truth (best-effort)
-  // TODO backend: if backend becomes authoritative DB, keep this as primary write path
-  void postCampaignToBackend(payload);
+  // backend sync (debounced)
+  if (campaignPostTimer) {
+    window.clearTimeout(campaignPostTimer);
+  }
+
+  campaignPostTimer = window.setTimeout(() => {
+    void postCampaignToBackend(payload);
+    campaignPostTimer = null;
+  }, CAMPAIGN_POST_DEBOUNCE_MS);
 }
 
 export function loadCampaignState(): CampaignState {
@@ -151,4 +180,24 @@ export function levelIndexToCampaignState(levelIndex: number, score: number, tro
     score: Math.max(0, Math.floor(score)),
     trophies: [...trophies],
   };
+}
+
+export function resetCampaignState(): CampaignState {
+  const initial: CampaignState = {
+    stage: 1,
+    zone: 1,
+    score: 0,
+    trophies: [],
+  };
+
+  try {
+    window.localStorage.setItem(CAMPAIGN_STORAGE_KEY, JSON.stringify(initial));
+  } catch {
+    // ignore
+  }
+
+  // push reset to backend (best-effort)
+  void postCampaignToBackend(initial);
+
+  return initial;
 }
