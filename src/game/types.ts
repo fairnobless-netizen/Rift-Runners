@@ -77,6 +77,7 @@ export interface PlayerStats {
   placed: number;
   range: number;
   score: number;
+  remoteDetonateUnlocked: boolean;
 }
 
 export interface ControlsState {
@@ -85,6 +86,7 @@ export interface ControlsState {
   left: boolean;
   right: boolean;
   placeBombRequested: boolean;
+  detonateRequested: boolean;
 }
 
 export interface AssetStyle {

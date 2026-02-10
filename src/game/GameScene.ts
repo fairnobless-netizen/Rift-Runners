@@ -116,6 +116,7 @@ export class GameScene extends Phaser.Scene {
     placed: 0,
     range: GAME_CONFIG.defaultRange,
     score: 0,
+    remoteDetonateUnlocked: false,
   };
 
   private enemies = new Map<string, EnemyModel>();
@@ -130,6 +131,7 @@ export class GameScene extends Phaser.Scene {
 
   private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
   private spaceKey?: Phaser.Input.Keyboard.Key;
+  private detonateKey?: Phaser.Input.Keyboard.Key;
   private heldSince: Partial<Record<Direction, number>> = {};
   private nextRepeatAt: Partial<Record<Direction, number>> = {};
   private pendingDirection: Direction | null = null;
@@ -172,6 +174,7 @@ export class GameScene extends Phaser.Scene {
     this.tickPlayerMovement(time);
     this.consumeMovementIntent(time);
     this.tryPlaceBomb(time);
+    this.tryRemoteDetonate(time);
     this.processBombTimers(time);
     this.cleanupExpiredFlames(time);
     this.tickEnemies(time);
@@ -279,6 +282,7 @@ export class GameScene extends Phaser.Scene {
         placed: 0,
         range: GAME_CONFIG.defaultRange,
         score: 0,
+        remoteDetonateUnlocked: false,
       };
     } else {
       this.stats.placed = 0;
@@ -416,11 +420,13 @@ export class GameScene extends Phaser.Scene {
   private setupInput(): void {
     this.cursors = this.input.keyboard?.createCursorKeys();
     this.spaceKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.detonateKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
   }
 
   private consumeKeyboard(): void {
     if (!this.cursors) return;
     if (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) this.controls.placeBombRequested = true;
+    if (this.detonateKey && Phaser.Input.Keyboard.JustDown(this.detonateKey)) this.controls.detonateRequested = true;
   }
 
   private tickPlayerMovement(time: number): void {
@@ -528,6 +534,20 @@ export class GameScene extends Phaser.Scene {
     this.emitSimulation('bomb.placed', time, { key: bomb.key, x: bomb.x, y: bomb.y, range: bomb.range });
   }
 
+
+  private tryRemoteDetonate(time: number): void {
+    if (!this.controls.detonateRequested) return;
+    this.controls.detonateRequested = false;
+    if (!this.stats.remoteDetonateUnlocked) return;
+    const target = [...this.arena.bombs.values()]
+      .filter((bomb) => bomb.ownerId === 'player-1')
+      .sort((a, b) => a.detonateAt - b.detonateAt || a.key.localeCompare(b.key))[0];
+    if (!target) return;
+    this.resolveBombDetonation(target.key, time);
+    this.player.state = 'detonate';
+    this.emitSimulation('bomb.remote_detonate', time, { key: target.key });
+  }
+
   private processBombTimers(time: number): void {
     while (true) {
       const dueBomb = [...this.arena.bombs.values()]
@@ -606,6 +626,7 @@ export class GameScene extends Phaser.Scene {
       this.stats.capacity = Math.min(GAME_CONFIG.maxBombCapacity, this.stats.capacity + 1);
     } else {
       this.stats.range = Math.min(GAME_CONFIG.maxRange, this.stats.range + 1);
+      this.stats.remoteDetonateUnlocked = true;
     }
 
     this.stats.score += 25;

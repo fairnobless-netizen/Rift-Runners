@@ -2,6 +2,15 @@
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   color: #ecf1ff;
   background: #080b14;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --telegram-overlay-top: 56px;
+}
+
+html.telegram-fullview {
+  --telegram-overlay-top: 20px;
 }
 
 * {
@@ -22,9 +31,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
-  max-width: 980px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 0.8rem;
+  min-height: 100vh;
+  padding-top: calc(0.8rem + var(--safe-top) + var(--telegram-overlay-top));
+  padding-right: calc(0.8rem + var(--safe-right));
+  padding-bottom: calc(0.8rem + var(--safe-bottom));
+  padding-left: calc(0.8rem + var(--safe-left));
 }
 
 .hud {
@@ -48,15 +61,39 @@ body {
   font-size: 0.95rem;
 }
 
+.playfield-shell {
+  display: grid;
+  grid-template-columns: minmax(96px, 1fr) minmax(0, 70%) minmax(96px, 1fr);
+  align-items: stretch;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.control-column {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f1630cc;
+  border: 1px solid #27335c;
+  border-radius: 12px;
+  padding: 0.6rem;
+}
+
+.control-column--right {
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
 .game-shell {
   display: flex;
   gap: 0.75rem;
   align-items: stretch;
+  min-width: 0;
 }
 
 .game-canvas {
   flex: 1;
-  min-height: min(70vw, 510px);
+  min-height: min(72vw, 70vh, 680px);
   border: 2px solid #27335c;
   border-radius: 12px;
   overflow: hidden;
@@ -94,11 +131,8 @@ button {
   font-weight: 700;
 }
 
-.controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.8rem;
+button:disabled {
+  opacity: 0.55;
 }
 
 .dpad {
@@ -133,21 +167,49 @@ button {
   grid-row: 2;
 }
 
-.bomb-btn {
-  width: 96px;
-  height: 96px;
+.bomb-btn,
+.detonate-btn {
+  width: min(112px, 100%);
+  min-height: 80px;
   border-radius: 999px;
-  font-size: 1.1rem;
-  background: #9c3e3e;
+  font-size: 1rem;
   touch-action: manipulation;
+}
+
+.bomb-btn {
+  background: #9c3e3e;
+}
+
+.detonate-btn {
+  background: #44548f;
+}
+
+@media (orientation: portrait) {
+  .playfield-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+
+  .control-column--left,
+  .control-column--right {
+    min-height: 108px;
+  }
+
+  .control-column--right {
+    flex-direction: row;
+    justify-content: space-evenly;
+  }
+
+  .game-canvas {
+    min-height: min(72vw, 66vh);
+  }
 }
 
 @media (min-width: 900px) {
   .page {
-    padding: 1.25rem;
-  }
-
-  .controls {
-    max-width: 400px;
+    padding-top: calc(1.25rem + var(--safe-top) + var(--telegram-overlay-top));
+    padding-right: calc(1.25rem + var(--safe-right));
+    padding-bottom: calc(1.25rem + var(--safe-bottom));
+    padding-left: calc(1.25rem + var(--safe-left));
   }
 }

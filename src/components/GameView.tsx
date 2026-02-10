@@ -10,6 +10,7 @@ const defaultStats: PlayerStats = {
   placed: 0,
   range: GAME_CONFIG.defaultRange,
   score: 0,
+  remoteDetonateUnlocked: false,
 };
 
 export default function GameView(): JSX.Element {
@@ -21,14 +22,36 @@ export default function GameView(): JSX.Element {
     left: false,
     right: false,
     placeBombRequested: false,
+    detonateRequested: false,
   });
 
   const zoomApiRef = useRef<ReadyPayload | null>(null);
   const [stats, setStats] = useState<PlayerStats>(defaultStats);
   const [zoom, setZoom] = useState<number>(GAME_CONFIG.startZoom);
+  const [isRemoteDetonateUnlocked, setIsRemoteDetonateUnlocked] = useState(false);
+
 
   useEffect(() => {
-    const onStats = (nextStats: PlayerStats): void => setStats({ ...nextStats });
+    const root = document.documentElement;
+    root.classList.add('telegram-fullview');
+
+    const webApp = (window as Window & { Telegram?: { WebApp?: { ready?: () => void; expand?: () => void; requestFullscreen?: () => void; isExpanded?: boolean } } }).Telegram?.WebApp;
+    if (!webApp) return () => root.classList.remove('telegram-fullview');
+
+    webApp.ready?.();
+    webApp.expand?.();
+    webApp.requestFullscreen?.();
+
+    return () => {
+      root.classList.remove('telegram-fullview');
+    };
+  }, []);
+
+  useEffect(() => {
+    const onStats = (nextStats: PlayerStats): void => {
+      setStats({ ...nextStats });
+      setIsRemoteDetonateUnlocked(nextStats.remoteDetonateUnlocked);
+    };
     const onReady = (payload: ReadyPayload): void => {
       zoomApiRef.current = payload;
       payload.setZoom(zoom);
@@ -89,6 +112,11 @@ export default function GameView(): JSX.Element {
     controlsRef.current.placeBombRequested = true;
   };
 
+  const requestDetonate = (): void => {
+    if (!isRemoteDetonateUnlocked) return;
+    controlsRef.current.detonateRequested = true;
+  };
+
   const onZoomInput = (value: number): void => {
     const clamped = Math.max(GAME_CONFIG.minZoom, Math.min(GAME_CONFIG.maxZoom, value));
     setZoom(clamped);
@@ -111,52 +139,65 @@ export default function GameView(): JSX.Element {
         </div>
       </section>
 
-      <section className="game-shell">
-        <div className="game-canvas" ref={mountRef} />
-
-        <aside className="zoom-panel">
-          <label htmlFor="zoom">Zoom</label>
-          <input
-  id="zoom"
-  type="range"
-  className="zoom-slider zoom-slider--vertical"
-  min={GAME_CONFIG.minZoom}
-  max={GAME_CONFIG.maxZoom}
-  step={0.05}
-  value={zoom}
-  onChange={(event) => onZoomInput(Number(event.target.value))}
-          />
-
-          <button type="button" onClick={resetZoom}>Reset</button>
+      <section className="playfield-shell">
+        <aside className="control-column control-column--left" aria-label="Movement controls">
+          <div className="dpad">
+            {controls.map((control) => (
+              <button
+                key={control.key}
+                type="button"
+                className={`dpad-btn dpad-${control.key}`}
+                onTouchStart={() => setDirection(control.key, true)}
+                onTouchEnd={() => setDirection(control.key, false)}
+                onMouseDown={() => setDirection(control.key, true)}
+                onMouseUp={() => setDirection(control.key, false)}
+                onMouseLeave={() => setDirection(control.key, false)}
+              >
+                {control.label}
+              </button>
+            ))}
+          </div>
         </aside>
-      </section>
 
-      <section className="controls">
-        <div className="dpad">
-          {controls.map((control) => (
-            <button
-              key={control.key}
-              type="button"
-              className={`dpad-btn dpad-${control.key}`}
-              onTouchStart={() => setDirection(control.key, true)}
-              onTouchEnd={() => setDirection(control.key, false)}
-              onMouseDown={() => setDirection(control.key, true)}
-              onMouseUp={() => setDirection(control.key, false)}
-              onMouseLeave={() => setDirection(control.key, false)}
-            >
-              {control.label}
-            </button>
-          ))}
-        </div>
+        <section className="game-shell">
+          <div className="game-canvas" ref={mountRef} />
 
-        <button
-          type="button"
-          className="bomb-btn"
-          onTouchStart={requestBomb}
-          onMouseDown={requestBomb}
-        >
-          Bomb
-        </button>
+          <aside className="zoom-panel">
+            <label htmlFor="zoom">Zoom</label>
+            <input
+              id="zoom"
+              type="range"
+              className="zoom-slider zoom-slider--vertical"
+              min={GAME_CONFIG.minZoom}
+              max={GAME_CONFIG.maxZoom}
+              step={0.05}
+              value={zoom}
+              onChange={(event) => onZoomInput(Number(event.target.value))}
+            />
+
+            <button type="button" onClick={resetZoom}>Reset</button>
+          </aside>
+        </section>
+
+        <aside className="control-column control-column--right" aria-label="Action controls">
+          <button
+            type="button"
+            className="bomb-btn"
+            onTouchStart={requestBomb}
+            onMouseDown={requestBomb}
+          >
+            Bomb
+          </button>
+          <button
+            type="button"
+            className="detonate-btn"
+            onTouchStart={requestDetonate}
+            onMouseDown={requestDetonate}
+            disabled={!isRemoteDetonateUnlocked}
+          >
+            Detonate
+          </button>
+        </aside>
       </section>
     </main>
   );
