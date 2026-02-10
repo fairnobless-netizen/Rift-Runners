@@ -16,7 +16,19 @@ import {
   toKey,
   type ArenaModel,
 } from './arena';
-import { ASSET_REGISTRY, BOMB_PULSE_CONFIG, FLAME_SEGMENT_SCALE, GAME_CONFIG, LAYERS } from './config';
+import {
+  ASSET_REGISTRY,
+  BOMB_PULSE_CONFIG,
+  DEPTH_BOMB,
+  DEPTH_BREAKABLE,
+  DEPTH_ENEMY,
+  DEPTH_FLAME,
+  DEPTH_ITEM,
+  DEPTH_OVERLAY,
+  DEPTH_PLAYER,
+  FLAME_SEGMENT_SCALE,
+  GAME_CONFIG,
+} from './config';
 import { emitSimulationEvent, emitStats, EVENT_READY, gameEvents } from './gameEvents';
 import { createDeterministicRng, type DeterministicRng } from './rng';
 import type {
@@ -71,13 +83,13 @@ export class GameScene extends Phaser.Scene {
   };
 
   private enemies = new Map<string, EnemyModel>();
-  private enemySprites = new Map<string, Phaser.GameObjects.Rectangle>();
+  private enemySprites = new Map<string, Phaser.GameObjects.Image>();
   private enemyNextMoveAt = new Map<string, number>();
 
-  private playerSprite?: Phaser.GameObjects.Rectangle;
-  private bombSprites = new Map<string, Phaser.GameObjects.Rectangle>();
-  private itemSprites = new Map<string, Phaser.GameObjects.Rectangle>();
-  private flameSprites = new Map<string, Phaser.GameObjects.Rectangle>();
+  private playerSprite?: Phaser.GameObjects.Image;
+  private bombSprites = new Map<string, Phaser.GameObjects.Image>();
+  private itemSprites = new Map<string, Phaser.GameObjects.Image>();
+  private flameSprites = new Map<string, Phaser.GameObjects.Image>();
   private activeFlames = new Map<string, FlameModel>();
 
   private levelClearContainer?: Phaser.GameObjects.Container;
@@ -93,6 +105,24 @@ export class GameScene extends Phaser.Scene {
   constructor(controls: ControlsState) {
     super('GameScene');
     this.controls = controls;
+  }
+
+  preload(): void {
+    // Keep registry-driven loading centralized so scene render logic stays data-driven.
+    this.ensureFallbackTexture();
+    const seen = new Set<string>();
+
+    for (const kind of Object.values(ASSET_REGISTRY)) {
+      if (!kind) continue;
+      for (const state of Object.values(kind)) {
+        if (!state) continue;
+        for (const asset of Object.values(state)) {
+          if (!asset || seen.has(asset.textureKey)) continue;
+          seen.add(asset.textureKey);
+          this.load.image(asset.textureKey, asset.path);
+        }
+      }
+    }
   }
 
   create(): void {
@@ -218,15 +248,17 @@ export class GameScene extends Phaser.Scene {
     for (let y = 0; y < this.arena.tiles.length; y += 1) {
       for (let x = 0; x < this.arena.tiles[y].length; x += 1) {
         const tile = this.arena.tiles[y][x];
-        const color = tile === 'HardWall' ? 0x3f4b63 : tile === 'BreakableBlock' ? 0x8f613f : 0x2a3249;
+        const tileState = tile === 'HardWall' ? 'hardWall' : tile === 'BreakableBlock' ? 'breakable' : 'floor';
+        const spec = this.getAssetStyle('tile', tileState, 'none');
         const block = this.add
-          .rectangle(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, tileSize - 2, tileSize - 2, color)
-          .setOrigin(0.5)
-          .setDepth(tile === 'Floor' ? LAYERS.floor : LAYERS.breakable)
+          .image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, this.getTextureKey(spec))
+          .setOrigin(spec.origin?.x ?? 0.5, spec.origin?.y ?? 0.5)
+          // Why: display size keeps world-space dimensions deterministic even with mixed source image sizes.
+          .setDisplaySize(tileSize - 2, tileSize - 2)
+          .setDepth(spec.depth ?? (tile === 'Floor' ? 0 : DEPTH_BREAKABLE))
           .setData('arenaTile', true);
 
         if (tile === 'BreakableBlock') {
-          block.setStrokeStyle(2, 0xb78153, 0.8);
           block.setData('breakable', true);
           block.setData('gridX', x);
           block.setData('gridY', y);
@@ -251,14 +283,10 @@ export class GameScene extends Phaser.Scene {
     const { tileSize } = GAME_CONFIG;
     this.playerSprite?.destroy();
     this.playerSprite = this.add
-      .rectangle(
-        this.player.gridX * tileSize + tileSize / 2,
-        this.player.gridY * tileSize + tileSize / 2,
-        tileSize * (style.scale ?? 0.5),
-        tileSize * (style.scale ?? 0.5),
-        style.fillColor,
-      )
-      .setDepth(LAYERS.player);
+      .image(this.player.gridX * tileSize + tileSize / 2, this.player.gridY * tileSize + tileSize / 2, this.getTextureKey(style))
+      .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
+      .setDepth(style.depth ?? DEPTH_PLAYER)
+      .setDisplaySize(tileSize * (style.scale ?? 0.74), tileSize * (style.scale ?? 0.74));
   }
 
   private spawnEnemies(): void {
@@ -573,7 +601,7 @@ export class GameScene extends Phaser.Scene {
 
     const bg = this.add
       .rectangle(worldWidth / 2, worldHeight / 2, worldWidth, worldHeight, 0x000000, 0.5)
-      .setDepth(LAYERS.overlay)
+      .setDepth(DEPTH_OVERLAY)
       .setScrollFactor(0);
     const text = this.add
       .text(worldWidth / 2, worldHeight / 2 - 36, 'LEVEL CLEAR', {
@@ -582,25 +610,25 @@ export class GameScene extends Phaser.Scene {
         fontStyle: 'bold',
       })
       .setOrigin(0.5)
-      .setDepth(LAYERS.overlay + 1)
+      .setDepth(DEPTH_OVERLAY + 1)
       .setScrollFactor(0);
 
     const nextButton = this.add
       .rectangle(worldWidth / 2, worldHeight / 2 + 34, 132, 44, 0x2f3f72)
-      .setDepth(LAYERS.overlay + 1)
+      .setDepth(DEPTH_OVERLAY + 1)
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
     const nextText = this.add
       .text(worldWidth / 2, worldHeight / 2 + 34, 'Next', { color: '#ecf1ff', fontSize: '20px' })
       .setOrigin(0.5)
-      .setDepth(LAYERS.overlay + 2)
+      .setDepth(DEPTH_OVERLAY + 2)
       .setScrollFactor(0);
 
     nextButton.on('pointerdown', () => {
       this.startLevel(this.levelIndex + 1, true);
     });
 
-    this.levelClearContainer = this.add.container(0, 0, [bg, text, nextButton, nextText]).setDepth(LAYERS.overlay);
+    this.levelClearContainer = this.add.container(0, 0, [bg, text, nextButton, nextText]).setDepth(DEPTH_OVERLAY);
   }
 
   private clearLevelOverlay(): void {
@@ -618,7 +646,7 @@ export class GameScene extends Phaser.Scene {
 
   private destroyBreakableSprite(x: number, y: number): void {
     const match = this.children.list.find((child) => {
-      if (!(child instanceof Phaser.GameObjects.Rectangle)) return false;
+      if (!(child instanceof Phaser.GameObjects.Image)) return false;
       if (!child.getData('breakable')) return false;
       return child.getData('gridX') === x && child.getData('gridY') === y;
     });
@@ -646,11 +674,10 @@ export class GameScene extends Phaser.Scene {
       this.playerSprite.setPosition(this.player.gridX * tileSize + tileSize / 2, this.player.gridY * tileSize + tileSize / 2);
     }
     this.playerSprite
-      .setFillStyle(playerStyle.fillColor)
-      .setSize(tileSize * (playerStyle.scale ?? 0.5), tileSize * (playerStyle.scale ?? 0.5));
-
-    if (playerStyle.strokeColor) this.playerSprite.setStrokeStyle(2, playerStyle.strokeColor);
-    else this.playerSprite.setStrokeStyle(0, 0, 0);
+      .setTexture(this.getTextureKey(playerStyle))
+      .setDisplaySize(tileSize * (playerStyle.scale ?? 0.74), tileSize * (playerStyle.scale ?? 0.74))
+      .setOrigin(playerStyle.origin?.x ?? 0.5, playerStyle.origin?.y ?? 0.5)
+      .setDepth(playerStyle.depth ?? DEPTH_PLAYER);
 
     const bombKeys = new Set(this.arena.bombs.keys());
     for (const bomb of this.arena.bombs.values()) {
@@ -667,10 +694,12 @@ export class GameScene extends Phaser.Scene {
 
       sprite
         .setPosition(bomb.x * tileSize + tileSize / 2, bomb.y * tileSize + tileSize / 2)
-        .setSize(tileSize * (baseStyle.scale ?? 0.46) * pulseScale, tileSize * (baseStyle.scale ?? 0.46) * pulseScale)
-        .setFillStyle(baseStyle.fillColor)
+        .setTexture(this.getTextureKey(baseStyle))
+        .setDisplaySize(tileSize * (baseStyle.scale ?? 0.7) * pulseScale, tileSize * (baseStyle.scale ?? 0.7) * pulseScale)
+        .setOrigin(baseStyle.origin?.x ?? 0.5, baseStyle.origin?.y ?? 0.5)
         .setAlpha(alpha)
-        .setStrokeStyle(shouldWarn ? 3 : 2, shouldWarn ? 0xffc457 : (baseStyle.strokeColor ?? 0xbac2d7));
+        // Why: keep pulse warning visible without introducing extra animation state in the model.
+        .setTint(shouldWarn ? 0xffc457 : 0xffffff);
     }
 
     for (const [key, sprite] of this.bombSprites.entries()) {
@@ -684,14 +713,13 @@ export class GameScene extends Phaser.Scene {
       const sprite = this.itemSprites.get(item.key) ?? this.createItemSprite(item.key);
       if (!sprite) continue;
 
-      const style = this.getAssetStyle('item', 'active', 'none');
-      const color = item.type === 'BombUp' ? 0x77ff9a : style.fillColor;
+      const style = this.getAssetStyle('item', item.type === 'BombUp' ? 'pickup' : 'active', 'none');
       sprite
         .setPosition(item.x * tileSize + tileSize / 2, item.y * tileSize + tileSize / 2)
-        .setSize(tileSize * (style.scale ?? 0.3), tileSize * (style.scale ?? 0.3))
-        .setFillStyle(color)
+        .setTexture(this.getTextureKey(style))
+        .setDisplaySize(tileSize * (style.scale ?? 0.48), tileSize * (style.scale ?? 0.48))
+        .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
         .setAlpha(style.alpha ?? 1);
-      if (style.strokeColor) sprite.setStrokeStyle(2, style.strokeColor, 0.7);
     }
 
     for (const [key, sprite] of this.itemSprites.entries()) {
@@ -705,12 +733,14 @@ export class GameScene extends Phaser.Scene {
       const sprite = this.flameSprites.get(flame.key) ?? this.createFlameSprite(flame.key);
       if (!sprite) continue;
 
-      const style = this.getAssetStyle('flame', flame.segment === 'center' ? 'active' : 'idle', 'none');
+      const state = flame.segment === 'center' ? 'active' : flame.axis === 'vertical' ? 'move' : 'idle';
+      const style = this.getAssetStyle('flame', state, 'none');
       const size = this.getFlameSegmentSize(flame.segment, flame.axis);
       sprite
         .setPosition(flame.x * tileSize + tileSize / 2, flame.y * tileSize + tileSize / 2)
-        .setSize(tileSize * size.width, tileSize * size.height)
-        .setFillStyle(style.fillColor)
+        .setTexture(this.getTextureKey(style))
+        .setDisplaySize(tileSize * size.width, tileSize * size.height)
+        .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
         .setAlpha(style.alpha ?? 1);
     }
 
@@ -727,9 +757,9 @@ export class GameScene extends Phaser.Scene {
       const style = this.getAssetStyle('enemy', enemy.state, enemy.facing);
       sprite
         .setPosition(enemy.gridX * tileSize + tileSize / 2, enemy.gridY * tileSize + tileSize / 2)
-        .setSize(tileSize * (style.scale ?? 0.45), tileSize * (style.scale ?? 0.45))
-        .setFillStyle(style.fillColor);
-      if (style.strokeColor) sprite.setStrokeStyle(2, style.strokeColor);
+        .setTexture(this.getTextureKey(style))
+        .setDisplaySize(tileSize * (style.scale ?? 0.72), tileSize * (style.scale ?? 0.72))
+        .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5);
     }
 
     for (const [key, sprite] of this.enemySprites.entries()) {
@@ -739,83 +769,67 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private createBombSprite(key: string): Phaser.GameObjects.Rectangle | null {
+  private createBombSprite(key: string): Phaser.GameObjects.Image | null {
     const bomb = this.arena.bombs.get(key);
     if (!bomb) return null;
 
     const style = this.getAssetStyle('bomb', 'active', 'none');
     const { tileSize } = GAME_CONFIG;
     const sprite = this.add
-      .rectangle(
-        bomb.x * tileSize + tileSize / 2,
-        bomb.y * tileSize + tileSize / 2,
-        tileSize * (style.scale ?? 0.46),
-        tileSize * (style.scale ?? 0.46),
-        style.fillColor,
-      )
-      .setDepth(LAYERS.bomb);
+      .image(bomb.x * tileSize + tileSize / 2, bomb.y * tileSize + tileSize / 2, this.getTextureKey(style))
+      .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
+      .setDepth(style.depth ?? DEPTH_BOMB)
+      .setDisplaySize(tileSize * (style.scale ?? 0.7), tileSize * (style.scale ?? 0.7));
 
     this.bombSprites.set(key, sprite);
     return sprite;
   }
 
-  private createItemSprite(key: string): Phaser.GameObjects.Rectangle | null {
+  private createItemSprite(key: string): Phaser.GameObjects.Image | null {
     const item = this.arena.items.get(key);
     if (!item) return null;
 
-    const style = this.getAssetStyle('item', 'active', 'none');
+    const style = this.getAssetStyle('item', item.type === 'BombUp' ? 'pickup' : 'active', 'none');
     const { tileSize } = GAME_CONFIG;
     const sprite = this.add
-      .rectangle(
-        item.x * tileSize + tileSize / 2,
-        item.y * tileSize + tileSize / 2,
-        tileSize * (style.scale ?? 0.3),
-        tileSize * (style.scale ?? 0.3),
-        style.fillColor,
-      )
-      .setDepth(LAYERS.item);
+      .image(item.x * tileSize + tileSize / 2, item.y * tileSize + tileSize / 2, this.getTextureKey(style))
+      .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
+      .setDepth(style.depth ?? DEPTH_ITEM)
+      .setDisplaySize(tileSize * (style.scale ?? 0.48), tileSize * (style.scale ?? 0.48));
 
     this.itemSprites.set(key, sprite);
     return sprite;
   }
 
-  private createFlameSprite(key: string): Phaser.GameObjects.Rectangle | null {
+  private createFlameSprite(key: string): Phaser.GameObjects.Image | null {
     const flame = this.activeFlames.get(key);
     if (!flame) return null;
 
-    const style = this.getAssetStyle('flame', flame.segment === 'center' ? 'active' : 'idle', 'none');
+    const style = this.getAssetStyle('flame', flame.segment === 'center' ? 'active' : flame.axis === 'vertical' ? 'move' : 'idle', 'none');
     const { tileSize } = GAME_CONFIG;
     const size = this.getFlameSegmentSize(flame.segment, flame.axis);
     const sprite = this.add
-      .rectangle(
-        flame.x * tileSize + tileSize / 2,
-        flame.y * tileSize + tileSize / 2,
-        tileSize * size.width,
-        tileSize * size.height,
-        style.fillColor,
-      )
-      .setDepth(LAYERS.flame)
+      .image(flame.x * tileSize + tileSize / 2, flame.y * tileSize + tileSize / 2, this.getTextureKey(style))
+      .setDisplaySize(tileSize * size.width, tileSize * size.height)
+      .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
+      .setDepth(style.depth ?? DEPTH_FLAME)
       .setAlpha(style.alpha ?? 1);
 
     this.flameSprites.set(key, sprite);
     return sprite;
   }
 
-  private createEnemySprite(key: string): Phaser.GameObjects.Rectangle | null {
+  private createEnemySprite(key: string): Phaser.GameObjects.Image | null {
     const enemy = this.enemies.get(key);
     if (!enemy) return null;
 
     const style = this.getAssetStyle('enemy', enemy.state, enemy.facing);
     const { tileSize } = GAME_CONFIG;
     const sprite = this.add
-      .rectangle(
-        enemy.gridX * tileSize + tileSize / 2,
-        enemy.gridY * tileSize + tileSize / 2,
-        tileSize * (style.scale ?? 0.45),
-        tileSize * (style.scale ?? 0.45),
-        style.fillColor,
-      )
-      .setDepth(LAYERS.enemy);
+      .image(enemy.gridX * tileSize + tileSize / 2, enemy.gridY * tileSize + tileSize / 2, this.getTextureKey(style))
+      .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
+      .setDepth(style.depth ?? DEPTH_ENEMY)
+      .setDisplaySize(tileSize * (style.scale ?? 0.72), tileSize * (style.scale ?? 0.72));
 
     this.enemySprites.set(key, sprite);
     return sprite;
@@ -832,11 +846,31 @@ export class GameScene extends Phaser.Scene {
     return axis === 'horizontal' ? FLAME_SEGMENT_SCALE.armHorizontal : FLAME_SEGMENT_SCALE.armVertical;
   }
 
-  private getAssetStyle(kind: EntityKind, state: EntityState, facing: Facing | 'none') {
+
+  private ensureFallbackTexture(): void {
+    if (this.textures.exists('fallback-missing')) return;
+
+    const g = this.make.graphics({ x: 0, y: 0 });
+    g.fillStyle(0xff00ff, 1);
+    g.fillRect(0, 0, 32, 32);
+    g.lineStyle(5, 0x111111, 1);
+    g.lineBetween(0, 0, 32, 32);
+    g.lineBetween(0, 32, 32, 0);
+    g.generateTexture('fallback-missing', 32, 32);
+    g.destroy();
+  }
+
+  private getTextureKey(asset: { textureKey: string }): string {
+    return this.textures.exists(asset.textureKey) ? asset.textureKey : 'fallback-missing';
+  }
+
+  private getAssetStyle(kind: EntityKind, state: EntityState, facing: Facing | 'none'): import('./types').AssetStyle {
     return (
       ASSET_REGISTRY[kind]?.[state]?.[facing] ??
       ASSET_REGISTRY[kind]?.idle?.[facing] ??
-      ASSET_REGISTRY[kind]?.active?.none ?? { fillColor: 0xffffff }
+      ASSET_REGISTRY[kind]?.active?.none ??
+      ASSET_REGISTRY[kind]?.floor?.none ??
+      { textureKey: 'fallback-missing', path: '', origin: { x: 0.5, y: 0.5 }, scale: 1, depth: DEPTH_BREAKABLE, alpha: 1 }
     );
   }
 

@@ -4,9 +4,18 @@ export type ItemType = 'BombUp' | 'FireUp';
 
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
-export type EntityKind = 'player' | 'bomb' | 'flame' | 'item' | 'enemy';
+export type EntityKind = 'tile' | 'player' | 'bomb' | 'flame' | 'item' | 'enemy';
 
-export type EntityState = 'idle' | 'move' | 'placeBomb' | 'detonate' | 'active' | 'pickup';
+export type EntityState =
+  | 'idle'
+  | 'move'
+  | 'placeBomb'
+  | 'detonate'
+  | 'active'
+  | 'pickup'
+  | 'floor'
+  | 'hardWall'
+  | 'breakable';
 
 export type FlameSegmentKind = 'center' | 'arm';
 
@@ -76,10 +85,12 @@ export interface ControlsState {
 }
 
 export interface AssetStyle {
-  fillColor: number;
-  strokeColor?: number;
+  textureKey: string;
+  path: string;
+  origin?: { x: number; y: number };
   alpha?: number;
   scale?: number;
+  depth?: number;
 }
 
 export type AssetRegistry = Partial<Record<EntityKind, Partial<Record<EntityState, Partial<Record<Facing | 'none', AssetStyle>>>>>>;
