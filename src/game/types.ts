@@ -8,6 +8,10 @@ export type EntityKind = 'player' | 'bomb' | 'flame' | 'item' | 'enemy';
 
 export type EntityState = 'idle' | 'move' | 'placeBomb' | 'detonate' | 'active' | 'pickup';
 
+export type FlameSegmentKind = 'center' | 'arm';
+
+export type FlameArmAxis = 'horizontal' | 'vertical';
+
 export type Facing = Direction;
 
 export interface GridPosition {
@@ -44,6 +48,8 @@ export interface ItemModel extends GridPosition {
 export interface FlameModel extends GridPosition {
   key: string;
   expiresAt: number;
+  segment: FlameSegmentKind;
+  axis?: FlameArmAxis;
 }
 
 export interface PlayerStats {
