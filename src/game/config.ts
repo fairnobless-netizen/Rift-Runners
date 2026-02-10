@@ -53,10 +53,10 @@ export const DEPTH_OVERLAY = 10;
 
 export const ASSET_REGISTRY: AssetRegistry = {
   tile: {
-    floor: {
+    Floor: {
       none: { textureKey: 'tile-floor', path: '/assets/sprites/tile-floor.svg', origin: { x: 0.5, y: 0.5 }, scale: 1, depth: DEPTH_FLOOR },
     },
-    hardWall: {
+    HardWall: {
       none: {
         textureKey: 'tile-hard-wall',
         path: '/assets/sprites/tile-hard-wall.svg',
@@ -65,7 +65,7 @@ export const ASSET_REGISTRY: AssetRegistry = {
         depth: DEPTH_BREAKABLE,
       },
     },
-    breakable: {
+    BreakableBlock: {
       none: {
         textureKey: 'tile-breakable',
         path: '/assets/sprites/tile-breakable.svg',

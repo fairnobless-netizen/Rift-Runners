@@ -38,6 +38,7 @@ import type {
   EntityKind,
   EntityState,
   Facing,
+  TileType,
   FlameArmAxis,
   FlameModel,
   FlameSegmentKind,
@@ -248,8 +249,7 @@ export class GameScene extends Phaser.Scene {
     for (let y = 0; y < this.arena.tiles.length; y += 1) {
       for (let x = 0; x < this.arena.tiles[y].length; x += 1) {
         const tile = this.arena.tiles[y][x];
-        const tileState = tile === 'HardWall' ? 'hardWall' : tile === 'BreakableBlock' ? 'breakable' : 'floor';
-        const spec = this.getAssetStyle('tile', tileState, 'none');
+        const spec = this.getTileAssetStyle(tile);
         const block = this.add
           .image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, this.getTextureKey(spec))
           .setOrigin(spec.origin?.x ?? 0.5, spec.origin?.y ?? 0.5)
@@ -864,12 +864,18 @@ export class GameScene extends Phaser.Scene {
     return this.textures.exists(asset.textureKey) ? asset.textureKey : 'fallback-missing';
   }
 
-  private getAssetStyle(kind: EntityKind, state: EntityState, facing: Facing | 'none'): import('./types').AssetStyle {
+  private getAssetStyle(kind: Exclude<EntityKind, 'tile'>, state: EntityState, facing: Facing | 'none'): import('./types').AssetStyle {
     return (
       ASSET_REGISTRY[kind]?.[state]?.[facing] ??
       ASSET_REGISTRY[kind]?.idle?.[facing] ??
       ASSET_REGISTRY[kind]?.active?.none ??
-      ASSET_REGISTRY[kind]?.floor?.none ??
+      { textureKey: 'fallback-missing', path: '', origin: { x: 0.5, y: 0.5 }, scale: 1, depth: DEPTH_BREAKABLE, alpha: 1 }
+    );
+  }
+
+  private getTileAssetStyle(tileType: TileType): import('./types').AssetStyle {
+    return (
+      ASSET_REGISTRY.tile?.[tileType]?.none ??
       { textureKey: 'fallback-missing', path: '', origin: { x: 0.5, y: 0.5 }, scale: 1, depth: DEPTH_BREAKABLE, alpha: 1 }
     );
   }
