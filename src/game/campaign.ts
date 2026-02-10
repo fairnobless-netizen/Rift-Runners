@@ -1,4 +1,5 @@
 export const CAMPAIGN_STORAGE_KEY = 'rift_campaign_v1';
+export const SESSION_TOKEN_KEY = 'rift_session_token';
 export const MAX_STAGE = 7;
 export const ZONES_PER_STAGE = 10;
 
@@ -33,15 +34,64 @@ function sanitizeCampaignState(value: unknown): CampaignState {
   };
 }
 
+function getSessionToken(): string | null {
+  try {
+    const t = window.localStorage.getItem(SESSION_TOKEN_KEY);
+    return t && t.trim() ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+async function postCampaignToBackend(state: CampaignState): Promise<void> {
+  const token = getSessionToken();
+  if (!token) return;
+
+  try {
+    await fetch('/api/campaign/progress', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(state),
+    });
+  } catch {
+    // ignore (offline / backend down)
+  }
+}
+
+export async function fetchCampaignFromBackend(): Promise<{ ok: boolean; hasProgress: boolean; campaignState: CampaignState } | null> {
+  const token = getSessionToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/campaign/progress', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json();
+
+    if (!json?.ok) return null;
+
+    const campaignState = sanitizeCampaignState(json.campaignState);
+    return { ok: true, hasProgress: Boolean(json.hasProgress), campaignState };
+  } catch {
+    return null;
+  }
+}
+
 export function saveCampaignState(state: CampaignState): void {
   const payload = sanitizeCampaignState(state);
+
   try {
-    // TODO backend: persist campaign via API instead of localStorage
-    // TODO backend: replace saveCampaignState with API call POST /campaign/progress
     window.localStorage.setItem(CAMPAIGN_STORAGE_KEY, JSON.stringify(payload));
   } catch {
     // Ignore write failures (private mode, quota).
   }
+
+  // backend truth (best-effort)
+  // TODO backend: if backend becomes authoritative DB, keep this as primary write path
+  void postCampaignToBackend(payload);
 }
 
 export function loadCampaignState(): CampaignState {
