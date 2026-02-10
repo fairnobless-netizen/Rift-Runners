@@ -4,6 +4,8 @@ import {
   createArena,
   destroyBreakable,
   fromKey,
+  getEnemyCountForLevel,
+  getEnemySpawnCells,
   getExplosionResult,
   isInsideArena,
   maybeDropItem,
@@ -12,12 +14,14 @@ import {
   removeBomb,
   setBombOwnerEscaped,
   toKey,
+  type ArenaModel,
 } from './arena';
 import { ASSET_REGISTRY, BOMB_PULSE_CONFIG, FLAME_SEGMENT_SCALE, GAME_CONFIG, LAYERS } from './config';
 import { emitStats, EVENT_READY, gameEvents } from './gameEvents';
 import type {
   ControlsState,
   Direction,
+  EnemyModel,
   EntityKind,
   EntityState,
   Facing,
@@ -33,9 +37,13 @@ interface TimedDirection {
   justPressed: boolean;
 }
 
+const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
+
 export class GameScene extends Phaser.Scene {
   private controls: ControlsState;
-  private arena = createArena();
+  private arena: ArenaModel = createArena(0);
+  private levelIndex = 0;
+
   private player: PlayerModel = {
     gridX: 1,
     gridY: 1,
@@ -48,6 +56,7 @@ export class GameScene extends Phaser.Scene {
     state: 'idle',
     graceBombKey: null,
   };
+
   private stats: PlayerStats = {
     capacity: GAME_CONFIG.defaultBombCapacity,
     placed: 0,
@@ -55,11 +64,18 @@ export class GameScene extends Phaser.Scene {
     score: 0,
   };
 
+  private enemies = new Map<string, EnemyModel>();
+  private enemySprites = new Map<string, Phaser.GameObjects.Rectangle>();
+  private enemyNextMoveAt = new Map<string, number>();
+
   private playerSprite?: Phaser.GameObjects.Rectangle;
   private bombSprites = new Map<string, Phaser.GameObjects.Rectangle>();
   private itemSprites = new Map<string, Phaser.GameObjects.Rectangle>();
   private flameSprites = new Map<string, Phaser.GameObjects.Rectangle>();
   private activeFlames = new Map<string, FlameModel>();
+
+  private levelClearContainer?: Phaser.GameObjects.Container;
+  private isLevelCleared = false;
 
   private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
   private spaceKey?: Phaser.Input.Keyboard.Key;
@@ -75,22 +91,24 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor('#0f1220');
-    this.drawArena();
-    this.createPlayer();
     this.setupInput();
     this.setupCamera();
-    emitStats(this.stats);
+    this.startLevel(0, false);
   }
 
   update(time: number): void {
+    if (this.isLevelCleared) return;
+
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
     this.consumeMovementIntent(time);
     this.tryPlaceBomb(time);
     this.processBombTimers(time);
     this.cleanupExpiredFlames(time);
+    this.tickEnemies(time);
     this.updatePlayerStateFromTimers(time);
     this.syncSpritesFromArena(time);
+    this.checkPlayerEnemyCollision();
   }
 
   private setupCamera(): void {
@@ -98,7 +116,6 @@ export class GameScene extends Phaser.Scene {
     const worldWidth = gridWidth * tileSize;
     const worldHeight = gridHeight * tileSize;
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
-    this.cameras.main.startFollow(this.playerSprite!, true, 0.2, 0.2);
     this.cameras.main.setZoom(startZoom);
 
     gameEvents.emit(EVENT_READY, {
@@ -110,17 +127,55 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private drawArena(): void {
+  private startLevel(levelIndex: number, keepScore: boolean): void {
+    this.levelIndex = Math.max(0, levelIndex);
+    this.isLevelCleared = false;
+    this.clearLevelOverlay();
+    this.clearDynamicSprites();
+
+    this.arena = createArena(this.levelIndex);
+    this.activeFlames.clear();
+    this.enemies.clear();
+    this.enemyNextMoveAt.clear();
+
+    this.rebuildArenaTiles();
+    this.spawnPlayer();
+    this.spawnEnemies();
+
+    if (!keepScore) {
+      this.stats = {
+        capacity: GAME_CONFIG.defaultBombCapacity,
+        placed: 0,
+        range: GAME_CONFIG.defaultRange,
+        score: 0,
+      };
+    } else {
+      this.stats.placed = 0;
+    }
+
+    emitStats(this.stats);
+    if (this.playerSprite) this.cameras.main.startFollow(this.playerSprite, true, 0.2, 0.2);
+  }
+
+  private restartLevelAfterDeath(): void {
+    this.stats.score = Math.max(0, this.stats.score - GAME_CONFIG.playerDeathPenalty);
+    this.startLevel(this.levelIndex, true);
+  }
+
+  private rebuildArenaTiles(): void {
+    const stale = this.children.list.filter((child) => child.getData('arenaTile') === true);
+    for (const node of stale) node.destroy();
+
     const { tileSize } = GAME_CONFIG;
     for (let y = 0; y < this.arena.tiles.length; y += 1) {
       for (let x = 0; x < this.arena.tiles[y].length; x += 1) {
         const tile = this.arena.tiles[y][x];
         const color = tile === 'HardWall' ? 0x3f4b63 : tile === 'BreakableBlock' ? 0x8f613f : 0x2a3249;
-
         const block = this.add
           .rectangle(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, tileSize - 2, tileSize - 2, color)
           .setOrigin(0.5)
-          .setDepth(tile === 'Floor' ? LAYERS.floor : LAYERS.breakable);
+          .setDepth(tile === 'Floor' ? LAYERS.floor : LAYERS.breakable)
+          .setData('arenaTile', true);
 
         if (tile === 'BreakableBlock') {
           block.setStrokeStyle(2, 0xb78153, 0.8);
@@ -132,9 +187,21 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private createPlayer(): void {
+  private spawnPlayer(): void {
+    this.player.gridX = 1;
+    this.player.gridY = 1;
+    this.player.targetX = null;
+    this.player.targetY = null;
+    this.player.moveFromX = 1;
+    this.player.moveFromY = 1;
+    this.player.moveStartedAt = 0;
+    this.player.facing = 'down';
+    this.player.state = 'idle';
+    this.player.graceBombKey = null;
+
     const style = this.getAssetStyle('player', this.player.state, this.player.facing);
     const { tileSize } = GAME_CONFIG;
+    this.playerSprite?.destroy();
     this.playerSprite = this.add
       .rectangle(
         this.player.gridX * tileSize + tileSize / 2,
@@ -144,6 +211,24 @@ export class GameScene extends Phaser.Scene {
         style.fillColor,
       )
       .setDepth(LAYERS.player);
+  }
+
+  private spawnEnemies(): void {
+    const spawnCells = Phaser.Utils.Array.Shuffle(getEnemySpawnCells(this.arena));
+    const targetCount = Math.min(spawnCells.length, getEnemyCountForLevel(this.levelIndex));
+
+    for (let i = 0; i < targetCount; i += 1) {
+      const cell = spawnCells[i];
+      const key = `enemy-${this.levelIndex}-${i}-${cell.x}-${cell.y}`;
+      this.enemies.set(key, {
+        key,
+        gridX: cell.x,
+        gridY: cell.y,
+        facing: 'left',
+        state: 'idle',
+      });
+      this.enemyNextMoveAt.set(key, 0);
+    }
   }
 
   private setupInput(): void {
@@ -196,11 +281,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getDirectionIntent(time: number): TimedDirection | null {
-    const ordered: Direction[] = ['up', 'down', 'left', 'right'];
-    const held = ordered.filter((dir) => this.isDirectionHeld(dir));
+    const held = DIRECTIONS.filter((dir) => this.isDirectionHeld(dir));
 
     if (held.length === 0) {
-      for (const dir of ordered) {
+      for (const dir of DIRECTIONS) {
         this.heldSince[dir] = undefined;
         this.nextRepeatAt[dir] = undefined;
       }
@@ -291,7 +375,6 @@ export class GameScene extends Phaser.Scene {
         destroyBreakable(this.arena, block.x, block.y);
         this.destroyBreakableSprite(block.x, block.y);
         this.stats.score += 10;
-
         maybeDropItem(this.arena, block.x, block.y, Math.random(), Math.random());
       }
 
@@ -300,7 +383,7 @@ export class GameScene extends Phaser.Scene {
         const segment: FlameSegmentKind = impactedKey === bomb.key ? 'center' : 'arm';
         const axis: FlameArmAxis | undefined = segment === 'arm' ? (pos.x === bomb.x ? 'vertical' : 'horizontal') : undefined;
         this.spawnFlame(pos.x, pos.y, time + GAME_CONFIG.flameLifetimeMs, segment, axis);
-        this.hitPlayerAt(pos.x, pos.y);
+        this.hitEntitiesAt(pos.x, pos.y);
       }
 
       for (const chainKey of result.chainBombKeys) queue.push(chainKey);
@@ -340,13 +423,72 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private destroyBreakableSprite(x: number, y: number): void {
-    const match = this.children.list.find((child) => {
-      if (!(child instanceof Phaser.GameObjects.Rectangle)) return false;
-      if (!child.getData('breakable')) return false;
-      return child.getData('gridX') === x && child.getData('gridY') === y;
+  private tickEnemies(time: number): void {
+    for (const enemy of this.enemies.values()) {
+      const next = this.enemyNextMoveAt.get(enemy.key) ?? 0;
+      if (time < next) continue;
+
+      const direction = this.chooseEnemyDirection(enemy);
+      if (!direction) {
+        this.enemyNextMoveAt.set(enemy.key, time + GAME_CONFIG.enemyMoveIntervalMs);
+        enemy.state = 'idle';
+        continue;
+      }
+
+      const { dx, dy } = this.toDelta(direction);
+      const nx = enemy.gridX + dx;
+      const ny = enemy.gridY + dy;
+      if (this.canEnemyOccupy(nx, ny, enemy.key)) {
+        enemy.gridX = nx;
+        enemy.gridY = ny;
+        enemy.facing = direction;
+        enemy.state = 'move';
+      } else {
+        enemy.state = 'idle';
+      }
+
+      this.enemyNextMoveAt.set(enemy.key, time + GAME_CONFIG.enemyMoveIntervalMs);
+    }
+  }
+
+  private chooseEnemyDirection(enemy: EnemyModel): Direction | null {
+    const valid = DIRECTIONS.filter((dir) => {
+      const { dx, dy } = this.toDelta(dir);
+      return this.canEnemyOccupy(enemy.gridX + dx, enemy.gridY + dy, enemy.key);
     });
-    match?.destroy();
+
+    if (valid.length === 0) return null;
+
+    if (valid.includes(enemy.facing) && Math.random() < GAME_CONFIG.enemyForwardBias) {
+      return enemy.facing;
+    }
+
+    return Phaser.Utils.Array.GetRandom(valid);
+  }
+
+  private canEnemyOccupy(x: number, y: number, selfKey: string): boolean {
+    if (!isInsideArena(x, y) || !canOccupyCell(this.arena, x, y)) return false;
+    for (const enemy of this.enemies.values()) {
+      if (enemy.key === selfKey) continue;
+      if (enemy.gridX === x && enemy.gridY === y) return false;
+    }
+    return true;
+  }
+
+  private hitEntitiesAt(x: number, y: number): void {
+    this.hitPlayerAt(x, y);
+    let scoreChanged = false;
+    for (const enemy of [...this.enemies.values()]) {
+      if (enemy.gridX !== x || enemy.gridY !== y) continue;
+      this.enemies.delete(enemy.key);
+      this.enemyNextMoveAt.delete(enemy.key);
+      this.enemySprites.get(enemy.key)?.destroy();
+      this.enemySprites.delete(enemy.key);
+      this.stats.score += GAME_CONFIG.enemyScore;
+      scoreChanged = true;
+    }
+    if (scoreChanged) emitStats(this.stats);
+    if (this.enemies.size === 0) this.showLevelClearOverlay();
   }
 
   private hitPlayerAt(x: number, y: number): void {
@@ -355,17 +497,78 @@ export class GameScene extends Phaser.Scene {
         ? this.player.gridX === x && this.player.gridY === y
         : this.player.targetX === x && this.player.targetY === y;
     if (!playerOnCell) return;
+    this.restartLevelAfterDeath();
+  }
 
-    this.stats.score = Math.max(0, this.stats.score - 50);
-    this.player.gridX = 1;
-    this.player.gridY = 1;
-    this.player.targetX = null;
-    this.player.targetY = null;
-    this.player.state = 'idle';
-    this.player.graceBombKey = null;
+  private checkPlayerEnemyCollision(): void {
+    if (this.player.targetX !== null || this.player.targetY !== null) return;
+    for (const enemy of this.enemies.values()) {
+      if (enemy.gridX === this.player.gridX && enemy.gridY === this.player.gridY) {
+        this.restartLevelAfterDeath();
+        return;
+      }
+    }
+  }
 
-    const { tileSize } = GAME_CONFIG;
-    this.playerSprite?.setPosition(this.player.gridX * tileSize + tileSize / 2, this.player.gridY * tileSize + tileSize / 2);
+  private showLevelClearOverlay(): void {
+    if (this.isLevelCleared || this.levelClearContainer) return;
+    this.isLevelCleared = true;
+
+    const worldWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
+    const worldHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
+
+    const bg = this.add
+      .rectangle(worldWidth / 2, worldHeight / 2, worldWidth, worldHeight, 0x000000, 0.5)
+      .setDepth(LAYERS.overlay)
+      .setScrollFactor(0);
+    const text = this.add
+      .text(worldWidth / 2, worldHeight / 2 - 36, 'LEVEL CLEAR', {
+        color: '#ffffff',
+        fontSize: '30px',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5)
+      .setDepth(LAYERS.overlay + 1)
+      .setScrollFactor(0);
+
+    const nextButton = this.add
+      .rectangle(worldWidth / 2, worldHeight / 2 + 34, 132, 44, 0x2f3f72)
+      .setDepth(LAYERS.overlay + 1)
+      .setScrollFactor(0)
+      .setInteractive({ useHandCursor: true });
+    const nextText = this.add
+      .text(worldWidth / 2, worldHeight / 2 + 34, 'Next', { color: '#ecf1ff', fontSize: '20px' })
+      .setOrigin(0.5)
+      .setDepth(LAYERS.overlay + 2)
+      .setScrollFactor(0);
+
+    nextButton.on('pointerdown', () => {
+      this.startLevel(this.levelIndex + 1, true);
+    });
+
+    this.levelClearContainer = this.add.container(0, 0, [bg, text, nextButton, nextText]).setDepth(LAYERS.overlay);
+  }
+
+  private clearLevelOverlay(): void {
+    this.levelClearContainer?.destroy(true);
+    this.levelClearContainer = undefined;
+  }
+
+  private clearDynamicSprites(): void {
+    const groups = [this.bombSprites, this.itemSprites, this.flameSprites, this.enemySprites] as const;
+    for (const group of groups) {
+      for (const sprite of group.values()) sprite.destroy();
+      group.clear();
+    }
+  }
+
+  private destroyBreakableSprite(x: number, y: number): void {
+    const match = this.children.list.find((child) => {
+      if (!(child instanceof Phaser.GameObjects.Rectangle)) return false;
+      if (!child.getData('breakable')) return false;
+      return child.getData('gridX') === x && child.getData('gridY') === y;
+    });
+    match?.destroy();
   }
 
   private updatePlayerStateFromTimers(time: number): void {
@@ -462,6 +665,24 @@ export class GameScene extends Phaser.Scene {
       sprite.destroy();
       this.flameSprites.delete(key);
     }
+
+    const enemyKeys = new Set(this.enemies.keys());
+    for (const enemy of this.enemies.values()) {
+      const sprite = this.enemySprites.get(enemy.key) ?? this.createEnemySprite(enemy.key);
+      if (!sprite) continue;
+      const style = this.getAssetStyle('enemy', enemy.state, enemy.facing);
+      sprite
+        .setPosition(enemy.gridX * tileSize + tileSize / 2, enemy.gridY * tileSize + tileSize / 2)
+        .setSize(tileSize * (style.scale ?? 0.45), tileSize * (style.scale ?? 0.45))
+        .setFillStyle(style.fillColor);
+      if (style.strokeColor) sprite.setStrokeStyle(2, style.strokeColor);
+    }
+
+    for (const [key, sprite] of this.enemySprites.entries()) {
+      if (enemyKeys.has(key)) continue;
+      sprite.destroy();
+      this.enemySprites.delete(key);
+    }
   }
 
   private createBombSprite(key: string): Phaser.GameObjects.Rectangle | null {
@@ -523,6 +744,26 @@ export class GameScene extends Phaser.Scene {
       .setAlpha(style.alpha ?? 1);
 
     this.flameSprites.set(key, sprite);
+    return sprite;
+  }
+
+  private createEnemySprite(key: string): Phaser.GameObjects.Rectangle | null {
+    const enemy = this.enemies.get(key);
+    if (!enemy) return null;
+
+    const style = this.getAssetStyle('enemy', enemy.state, enemy.facing);
+    const { tileSize } = GAME_CONFIG;
+    const sprite = this.add
+      .rectangle(
+        enemy.gridX * tileSize + tileSize / 2,
+        enemy.gridY * tileSize + tileSize / 2,
+        tileSize * (style.scale ?? 0.45),
+        tileSize * (style.scale ?? 0.45),
+        style.fillColor,
+      )
+      .setDepth(LAYERS.enemy);
+
+    this.enemySprites.set(key, sprite);
     return sprite;
   }
 

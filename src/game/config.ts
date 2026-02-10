@@ -9,16 +9,24 @@ export const GAME_CONFIG = {
   moveRepeatIntervalMs: 95,
   bombFuseMs: 2200,
   flameLifetimeMs: 400,
+  enemyMoveIntervalMs: 260,
+  enemyForwardBias: 0.65,
+  baseEnemyCount: 1,
+  maxEnemyCount: 6,
+  enemyScore: 75,
+  playerDeathPenalty: 50,
   defaultBombCapacity: 1,
   defaultRange: 2,
   maxBombCapacity: 5,
   maxRange: 6,
   itemDropChance: 0.25,
+  levelBreakableDensityStart: 0.7,
+  levelBreakableDensityStep: 0.05,
+  levelBreakableDensityMax: 0.9,
   minZoom: 0.8,
   maxZoom: 2.5,
   startZoom: 1.25,
 } as const;
-
 
 export const BOMB_PULSE_CONFIG = {
   warningThresholdMs: 900,
@@ -40,7 +48,9 @@ export const LAYERS = {
   bomb: 2,
   item: 3,
   player: 4,
-  flame: 5,
+  enemy: 5,
+  flame: 6,
+  overlay: 10,
 } as const;
 
 export const ASSET_REGISTRY: AssetRegistry = {
@@ -86,6 +96,20 @@ export const ASSET_REGISTRY: AssetRegistry = {
     },
     pickup: {
       none: { fillColor: 0xffffff, strokeColor: 0x101010, scale: 0.3 },
+    },
+  },
+  enemy: {
+    idle: {
+      up: { fillColor: 0xff7a7a, strokeColor: 0x2e0b0b, scale: 0.45 },
+      down: { fillColor: 0xff5757, strokeColor: 0x2e0b0b, scale: 0.45 },
+      left: { fillColor: 0xff8b64, strokeColor: 0x2e0b0b, scale: 0.45 },
+      right: { fillColor: 0xff9f6f, strokeColor: 0x2e0b0b, scale: 0.45 },
+    },
+    move: {
+      up: { fillColor: 0xff8989, strokeColor: 0x2e0b0b, scale: 0.48 },
+      down: { fillColor: 0xff6d6d, strokeColor: 0x2e0b0b, scale: 0.48 },
+      left: { fillColor: 0xff9b79, strokeColor: 0x2e0b0b, scale: 0.48 },
+      right: { fillColor: 0xffb081, strokeColor: 0x2e0b0b, scale: 0.48 },
     },
   },
 };

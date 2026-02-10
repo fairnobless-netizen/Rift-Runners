@@ -76,9 +76,11 @@ body {
   min-width: 64px;
 }
 
-.zoom-panel input[type='range'] {
-  writing-mode: bt-lr;
+.zoom-slider--vertical {
+  writing-mode: vertical-lr;
+  direction: rtl;
   -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
   width: 22px;
   height: 180px;
 }
@@ -148,13 +150,4 @@ button {
   .controls {
     max-width: 400px;
   }
-  .zoom-slider--vertical {
-  /* делает range вертикальным в большинстве браузеров */
-  writing-mode: bt-lr;
-  -webkit-appearance: slider-vertical;
-
-  width: 22px;
-  height: 180px;
-}
-
 }
