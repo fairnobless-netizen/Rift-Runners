@@ -2,10 +2,28 @@ import { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
-import { EVENT_CAMPAIGN_STATE, EVENT_READY, EVENT_SIMULATION, EVENT_STATS, gameEvents, type ReadyPayload } from '../game/gameEvents';
-import { fetchCampaignFromBackend, loadCampaignState, saveCampaignState, type CampaignState } from '../game/campaign';
-import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../game/types';
-import { fetchWallet, grantWallet } from '../game/wallet';
+
+import {
+  EVENT_CAMPAIGN_STATE,
+  EVENT_READY,
+  EVENT_SIMULATION,
+  EVENT_STATS,
+  gameEvents,
+  type ReadyPayload,
+} from '../game/gameEvents';
+
+import {
+  fetchCampaignFromBackend,
+  getCampaignSyncStatus,
+  loadCampaignState,
+  resetCampaignState,
+  saveCampaignState,
+  type CampaignState,
+} from '../game/campaign';
+
+import type { ControlState, Direction, PlayerStats } from '../game/types';
+import { fetchWallet } from '../game/wallet';
+
 
 const defaultStats: PlayerStats = {
   capacity: GAME_CONFIG.defaultBombCapacity,
@@ -40,7 +58,9 @@ export default function GameView(): JSX.Element {
   const [joystickPressed, setJoystickPressed] = useState(false);
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [profileName, setProfileName] = useState<string>('—');
-  const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
+const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
+const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
+
 
   const setMovementFromDirection = (direction: Direction | null): void => {
     controlsRef.current.up = direction === 'up';
@@ -124,6 +144,15 @@ export default function GameView(): JSX.Element {
     runAuth();
   }, []);
 
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setSyncStatus(getCampaignSyncStatus());
+    }, 1000);
+
+    return () => window.clearInterval(id);
+  }, []);
+
   useEffect(() => {
     const onStats = (nextStats: PlayerStats): void => {
       setStats({ ...nextStats });
@@ -137,18 +166,14 @@ export default function GameView(): JSX.Element {
       setCampaign({ ...nextCampaign });
     };
     const onSimulation = async (event: SimulationEvent): Promise<void> => {
-      if (event.type !== 'BOSS_DEFEATED') return;
+  if (event.type !== 'BOSS_DEFEATED') return;
 
-      // TODO security: move rewards granting to server-authoritative events
-      const granted = await grantWallet({ crystals: 10 });
-      if (granted) {
-        setWallet(granted);
-        return;
-      }
+  // MVP: wallet rewards are not client-granted in mainline to avoid security holes.
+  // TODO economy: apply boss rewards via server-authoritative ledger/events.
+  const refreshed = await fetchWallet();
+  if (refreshed) setWallet(refreshed);
+};
 
-      const refreshed = await fetchWallet();
-      if (refreshed) setWallet(refreshed);
-    };
 
     gameEvents.on(EVENT_STATS, onStats);
     gameEvents.on(EVENT_READY, onReady);
@@ -294,8 +319,11 @@ export default function GameView(): JSX.Element {
           <span>Bombs: {stats.placed}/{stats.capacity}</span>
           <span>Range: {stats.range}</span>
           <span>Score: {stats.score}</span>
-          <span>Stars: {wallet.stars}</span>
-          <span>Crystals: {wallet.crystals}</span>
+<span>Score: {stats.score}</span>
+<span>Stars: {wallet.stars}</span>
+<span>Crystals: {wallet.crystals}</span>
+<span style={{ opacity: 0.7 }}>{syncStatus === 'synced' ? 'Synced' : 'Offline'}</span>
+
         </div>
       </section>
 
@@ -363,6 +391,18 @@ export default function GameView(): JSX.Element {
 
           <div className="right-panel right-panel--actions" aria-label="Action buttons">
             <div className="boost-slot" aria-hidden="true">Boost</div>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm('Reset campaign progress?')) {
+                  const state = resetCampaignState();
+                  // TODO: notify GameScene about new campaign state if needed
+                  setCampaign(state);
+                }
+              }}
+            >
+              Reset
+            </button>
             <button
               type="button"
               className="bomb-btn"
