@@ -7,3 +7,9 @@ export function requireEnv(name: string): string {
 export function getOptionalEnv(name: string): string | undefined {
   return process.env[name];
 }
+
+export const TELEGRAM_AUTH_MAX_AGE_SEC = 24 * 60 * 60; // 24 hours
+
+export function isProduction(): boolean {
+  return process.env.NODE_ENV === 'production';
+}

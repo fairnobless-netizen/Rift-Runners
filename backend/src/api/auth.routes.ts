@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import crypto from 'crypto';
-import { requireEnv } from '../config/env';
+import { TELEGRAM_AUTH_MAX_AGE_SEC, isProduction, requireEnv } from '../config/env';
 import { verifyTelegramInitData } from '../auth/telegramInitDataVerify';
 import { memoryDb } from '../db/memoryDb';
 
@@ -10,9 +10,10 @@ authRouter.post('/auth/telegram', (req, res) => {
   const initData: string = String(req.body?.initData ?? '');
 
   // DEV fallback: allow empty initData when running locally without Telegram
-  // TODO security: disable DEV fallback in production
-  const isDev = process.env.NODE_ENV !== 'production';
+  const isDev = !isProduction();
+
   if (isDev && !initData) {
+    // DEV fallback allowed ONLY outside production
     const tgUserId = 'dev_demo';
     const now = Date.now();
 
@@ -39,8 +40,14 @@ authRouter.post('/auth/telegram', (req, res) => {
     return res.status(500).json({ ok: false, error: e?.message ?? 'Missing TG_BOT_TOKEN' });
   }
 
-  const vr = verifyTelegramInitData(initData, botToken);
-  if (!vr.ok) return res.status(401).json({ ok: false, error: vr.error });
+  const vr = verifyTelegramInitData(initData, botToken, TELEGRAM_AUTH_MAX_AGE_SEC);
+  if (!vr.ok) {
+    return res.status(401).json({
+      ok: false,
+      error: vr.error,
+      message: vr.message,
+    });
+  }
 
   const now = Date.now();
   const displayName =
@@ -63,6 +70,6 @@ authRouter.post('/auth/telegram', (req, res) => {
   const token = crypto.randomBytes(24).toString('hex');
   memoryDb.sessions.set(token, { token, tgUserId: vr.tgUserId, createdAt: now });
 
-  // TODO M5c+: issue JWT instead of memory session tokens
+  // TODO backend-relevant: replace memory session tokens with JWT + refresh flow
   return res.status(200).json({ ok: true, token, user: memoryDb.users.get(vr.tgUserId) });
 });
