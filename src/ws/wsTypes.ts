@@ -14,7 +14,6 @@ export type WsServerMessage =
   | { type: 'room:left' }
   | { type: 'match:started'; matchId: string }
   | { type: 'match:snapshot'; snapshot: MatchSnapshotV1 }
-  | { type: 'match:error'; error: string }
   | { type: 'error'; error: string };
 
 export type MatchSnapshotV1 = {
