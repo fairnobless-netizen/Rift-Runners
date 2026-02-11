@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import type { NetSimConfig, NetSimPresetId } from '../ws/useWsClient';
 
 type PredictionStats = {
   correctionCount: number;
@@ -53,6 +54,9 @@ export function WsDebugOverlay({
   identity,
   netSim,
   onLobby,
+  netSimPresets,
+  onToggleNetSim,
+  onSelectNetSimPreset,
   predictionStats,
   tickDebugStats,
   rttMs,
@@ -68,12 +72,10 @@ export function WsDebugOverlay({
     clientId?: number;
     displayName?: string;
   };
-  netSim: {
-    enabled: boolean;
-    latencyMs: number;
-    jitterMs: number;
-    dropRate: number;
-  };
+  netSim: NetSimConfig;
+  netSimPresets: { id: NetSimPresetId; label: string }[];
+  onToggleNetSim: (enabled: boolean) => void;
+  onSelectNetSimPreset: (presetId: NetSimPresetId) => void;
   onLobby: () => void;
   predictionStats: PredictionStats | null;
   tickDebugStats: TickDebugStats | null;
@@ -116,8 +118,28 @@ export function WsDebugOverlay({
       </div>
 
       <div style={{ marginTop: 4 }}>
-        NetSim: latency={netSim.latencyMs}ms, jitter={netSim.jitterMs}ms, drop={netSim.dropRate}
+        NetSim: {netSim.enabled ? 'ON' : 'OFF'} | latency={netSim.latencyMs}ms, jitter={netSim.jitterMs}ms, drop={netSim.dropRate}
       </div>
+
+      {import.meta.env.DEV && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={netSim.enabled}
+              onChange={(ev) => onToggleNetSim(ev.currentTarget.checked)}
+            />
+            NetSim
+          </label>
+          <select value={netSim.presetId} onChange={(ev) => onSelectNetSimPreset(ev.currentTarget.value as NetSimPresetId)}>
+            {netSimPresets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div style={{ marginTop: 4 }}>
         snapshotTick: {tickDebugStats?.snapshotTick ?? '—'} | simulationTick: {tickDebugStats?.simulationTick ?? '—'}
