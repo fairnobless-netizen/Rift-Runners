@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { RemotePlayersRenderer } from './RemotePlayersRenderer';
+import { LocalPredictionController } from './LocalPredictionController';
 import {
   canOccupyCell,
   createArena,
@@ -84,6 +85,10 @@ const LEVELS_PER_ZONE = BOSS_CONFIG.zonesPerStage;
 
 export class GameScene extends Phaser.Scene {
   private remotePlayers?: RemotePlayersRenderer;
+  private prediction = new LocalPredictionController();
+  private inputSeq = 0;
+  private matchGridW = GAME_CONFIG.gridWidth;
+  private matchGridH = GAME_CONFIG.gridHeight;
   private controls: ControlsState;
   private readonly baseSeed = 0x52494654;
   private readonly runId = 1;
@@ -1284,9 +1289,62 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  public sendLocalMatchMove(direction: Direction, sendInput: (input: { seq: number; dx: number; dy: number; dir: Direction }) => void) {
+    const { dx, dy } = this.toDelta(direction);
+    this.inputSeq += 1;
+
+    const input = {
+      seq: this.inputSeq,
+      dx,
+      dy,
+      dir: direction,
+    };
+
+    sendInput(input);
+    this.prediction.pushInput(input);
+    this.moveLocalPlayer(dx, dy);
+  }
+
+  public moveLocalPlayer(dx: number, dy: number) {
+    const nextX = clamp(this.player.gridX + dx, 0, this.matchGridW - 1);
+    const nextY = clamp(this.player.gridY + dy, 0, this.matchGridH - 1);
+    this.setLocalPlayerPosition(nextX, nextY);
+  }
+
+  public setLocalPlayerPosition(x: number, y: number) {
+    this.player.gridX = x;
+    this.player.gridY = y;
+    this.player.targetX = null;
+    this.player.targetY = null;
+
+    const tileSize = GAME_CONFIG.tileSize;
+    this.playerSprite?.setPosition(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2);
+  }
+
   public applyMatchSnapshot(snapshot: any, localTgUserId?: string) {
     if (!this.remotePlayers) return;
     if (snapshot?.version !== 'match_v1') return;
+
+    this.matchGridW = snapshot.world?.gridW ?? this.matchGridW;
+    this.matchGridH = snapshot.world?.gridH ?? this.matchGridH;
+
+    if (localTgUserId) {
+      const myPlayer = snapshot.players?.find((p: any) => p.tgUserId === localTgUserId);
+      if (myPlayer) {
+        this.prediction.applyAuthoritativeState(
+          myPlayer.x,
+          myPlayer.y,
+          myPlayer.lastInputSeq,
+          (dx, dy) => this.moveLocalPlayer(dx, dy),
+          (x, y) => this.setLocalPlayerPosition(x, y),
+        );
+      }
+    }
+
     this.remotePlayers.applySnapshot(snapshot, localTgUserId);
   }
+}
+
+function clamp(v: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, v));
 }

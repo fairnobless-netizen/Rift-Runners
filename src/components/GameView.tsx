@@ -77,7 +77,6 @@ export default function GameView(): JSX.Element {
   const [ledger, setLedger] = useState<WalletLedgerEntry[]>([]);
   const [purchaseBusySku, setPurchaseBusySku] = useState<string | null>(null);
   const ws = useWsClient(token || undefined);
-  const inputSeqRef = useRef(0);
 
 
   const setMovementFromDirection = (direction: Direction | null): void => {
@@ -502,8 +501,9 @@ export default function GameView(): JSX.Element {
         onCreateRoom={() => ws.send({ type: 'room:create' })}
         onStartMatch={() => ws.send({ type: 'match:start' })}
         onMove={(dir) => {
-          inputSeqRef.current += 1;
-          ws.send({ type: 'match:input', seq: inputSeqRef.current, payload: { kind: 'move', dir } });
+          sceneRef.current?.sendLocalMatchMove(dir, (input) => {
+            ws.send({ type: 'match:input', seq: input.seq, payload: { kind: 'move', dir: input.dir } });
+          });
         }}
       />
     </main>
