@@ -165,20 +165,29 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
     case 'match:input': {
       const matchId = ctx.matchId;
-      if (!matchId) {
-        return;
-      }
+      if (!matchId) return;
 
       const match = getMatch(matchId);
-      if (!match) {
-        return;
+      if (!match) return;
+
+      const seq = Number((msg as any).seq);
+      if (!Number.isFinite(seq)) return;
+
+      const payload = (msg as any).payload;
+      if (!payload || typeof payload !== 'object') return;
+
+      // Minimal validation for v1
+      if (payload.kind === 'move') {
+        const dir = payload.dir;
+        if (dir !== 'up' && dir !== 'down' && dir !== 'left' && dir !== 'right') return;
+
+        match.inputQueue.push({
+          tgUserId: ctx.tgUserId,
+          seq: Math.floor(seq),
+          payload,
+        });
       }
 
-      match.inputQueue.push({
-        tgUserId: ctx.tgUserId,
-        seq: msg.seq,
-        payload: msg.payload,
-      });
       return;
     }
 

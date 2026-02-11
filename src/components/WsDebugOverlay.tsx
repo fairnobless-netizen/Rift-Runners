@@ -1,12 +1,4 @@
-import type { WsServerMessage } from '../ws/wsTypes';
-
-type WsDebugOverlayProps = {
-  connected: boolean;
-  messages: WsServerMessage[];
-  onLobby: () => void;
-  onCreateRoom: () => void;
-  onStartMatch: () => void;
-};
+import { useMemo } from 'react';
 
 export function WsDebugOverlay({
   connected,
@@ -14,30 +6,112 @@ export function WsDebugOverlay({
   onLobby,
   onCreateRoom,
   onStartMatch,
-}: WsDebugOverlayProps) {
+  onMove,
+}: {
+  connected: boolean;
+  messages: any[];
+  onLobby: () => void;
+  onCreateRoom: () => void;
+  onStartMatch: () => void;
+  onMove: (dir: 'up' | 'down' | 'left' | 'right') => void;
+}) {
+  const lastSnapshot = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m?.type === 'match:snapshot') return m.snapshot;
+    }
+    return null;
+  }, [messages]);
+
   return (
     <div
       style={{
         position: 'fixed',
         right: 10,
         bottom: 10,
-        width: 320,
-        maxHeight: 300,
-        overflow: 'auto',
-        background: 'rgba(0,0,0,0.8)',
+        width: 360,
+        background: 'rgba(0,0,0,0.82)',
         color: '#0f0',
         fontSize: 12,
-        padding: 8,
+        padding: 10,
         zIndex: 9999,
+        borderRadius: 10,
       }}
     >
-      <div>WS: {connected ? 'CONNECTED' : 'OFFLINE'}</div>
-      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-        <button type="button" onClick={onLobby}>Lobby</button>
-        <button type="button" onClick={onCreateRoom}>Create Room</button>
-        <button type="button" onClick={onStartMatch}>Start Match</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <div>WS: {connected ? 'CONNECTED' : 'OFFLINE'}</div>
+        <div>{lastSnapshot ? `tick: ${lastSnapshot.tick}` : 'no snapshot'}</div>
       </div>
-      <pre>{JSON.stringify(messages.slice(-5), null, 2)}</pre>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button onClick={onLobby}>Lobby</button>
+        <button onClick={onCreateRoom}>Create Room</button>
+        <button onClick={onStartMatch}>Start Match</button>
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <div style={{ marginBottom: 6 }}>Move:</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, width: 180 }}>
+          <div />
+          <button onClick={() => onMove('up')}>↑</button>
+          <div />
+          <button onClick={() => onMove('left')}>←</button>
+          <button onClick={() => onMove('down')}>↓</button>
+          <button onClick={() => onMove('right')}>→</button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <div style={{ marginBottom: 6 }}>Snapshot preview:</div>
+        <MiniGrid snapshot={lastSnapshot} />
+      </div>
+
+      <div style={{ marginTop: 8 }}>
+        <div style={{ marginBottom: 6 }}>Last messages:</div>
+        <pre style={{ maxHeight: 120, overflow: 'auto', margin: 0 }}>
+          {JSON.stringify(messages.slice(-3), null, 2)}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+function MiniGrid({ snapshot }: { snapshot: any }) {
+  if (!snapshot?.world) return <div style={{ opacity: 0.6 }}>No match snapshot yet.</div>;
+
+  const gridW = snapshot.world.gridW ?? 15;
+  const gridH = snapshot.world.gridH ?? 15;
+  const cell = 10;
+
+  const players = Array.isArray(snapshot.players) ? snapshot.players : [];
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: gridW * cell,
+        height: gridH * cell,
+        border: '1px solid rgba(0,255,0,0.35)',
+        backgroundSize: `${cell}px ${cell}px`,
+        backgroundImage:
+          'linear-gradient(to right, rgba(0,255,0,0.12) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,255,0,0.12) 1px, transparent 1px)',
+      }}
+    >
+      {players.map((p: any) => (
+        <div
+          key={String(p.tgUserId)}
+          title={String(p.tgUserId)}
+          style={{
+            position: 'absolute',
+            left: (p.x ?? 0) * cell + 1,
+            top: (p.y ?? 0) * cell + 1,
+            width: cell - 2,
+            height: cell - 2,
+            background: 'rgba(0,255,0,0.65)',
+            borderRadius: 3,
+          }}
+        />
+      ))}
     </div>
   );
 }
