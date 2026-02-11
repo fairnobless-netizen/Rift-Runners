@@ -1,6 +1,8 @@
 import { Router } from 'express';
-import { memoryDb, type PurchaseIntentRecord } from '../db/memoryDb';
-import { appendWalletLedgerEntry, getOrCreateWallet } from '../services/walletService';
+import crypto from 'crypto';
+import { resolveSessionFromRequest } from '../auth/session';
+import { createPurchaseIntent, deletePurchaseIntent, getPurchaseIntent } from '../db/repos';
+import { grantWallet } from '../services/walletService';
 
 export const shopRouter = Router();
 
@@ -40,124 +42,89 @@ const CATALOG: CatalogItem[] = [
   },
 ];
 
-let intentSeq = 1;
-
-function nextIntentId(): string {
-  const id = `intent_${String(intentSeq).padStart(8, '0')}`;
-  intentSeq += 1;
-  return id;
-}
-
-function getBearerToken(req: any): string | null {
-  const h = String(req.headers?.authorization ?? '');
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m ? m[1] : null;
-}
-
-function requireSession(req: any): { tgUserId: string } | null {
-  const token = getBearerToken(req);
-  if (!token) return null;
-  const session = memoryDb.sessions.get(token);
-  if (!session) return null;
-  return { tgUserId: session.tgUserId };
+function newIntentId(): string {
+  return `intent_${crypto.randomBytes(8).toString('hex')}`;
 }
 
 shopRouter.get('/shop/catalog', (_req, res) => {
   return res.status(200).json({ ok: true, items: CATALOG });
 });
 
-shopRouter.post('/shop/purchase-intent', (req, res) => {
-  const s = requireSession(req);
+shopRouter.post('/shop/purchase-intent', async (req, res) => {
+  const s = await resolveSessionFromRequest(req as any);
   if (!s) return res.status(401).json({ ok: false, error: 'unauthorized' });
 
-  const sku = String(req.body?.sku ?? '');
+  const sku = String((req as any).body?.sku ?? '');
   const item = CATALOG.find((candidate) => candidate.sku === sku);
 
   if (!item || !item.available) {
     return res.status(404).json({ ok: false, error: 'sku_not_available' });
   }
 
-  const intent: PurchaseIntentRecord = {
-    id: nextIntentId(),
+  const intentId = newIntentId();
+  const expiresAt = Date.now() + 10 * 60 * 1000; // 10 min
+
+  await createPurchaseIntent({
+    id: intentId,
     tgUserId: s.tgUserId,
     sku,
     provider: 'telegram_stars',
-    createdAt: Date.now(),
-  };
-
-  memoryDb.purchaseIntents.set(intent.id, intent);
+    expiresAt,
+  });
 
   return res.status(200).json({
     ok: true,
-    intentId: intent.id,
-    provider: intent.provider,
+    intentId,
+    provider: 'telegram_stars',
     payloadStub: {
       sku,
       priceStars: item.priceStars,
-      // TODO stars: replace stub payload with Telegram Stars invoice payload
       simulated: true,
     },
   });
 });
 
-shopRouter.post('/shop/purchase-confirm', (req, res) => {
-  const s = requireSession(req);
+shopRouter.post('/shop/purchase-confirm', async (req, res) => {
+  const s = await resolveSessionFromRequest(req as any);
   if (!s) return res.status(401).json({ ok: false, error: 'unauthorized' });
 
-  const intentId = String(req.body?.intentId ?? '');
-  const intent = memoryDb.purchaseIntents.get(intentId);
-  if (!intent || intent.tgUserId !== s.tgUserId) {
+  const intentId = String((req as any).body?.intentId ?? '');
+  const intent = await getPurchaseIntent({ id: intentId, tgUserId: s.tgUserId });
+  if (!intent) {
     return res.status(404).json({ ok: false, error: 'intent_not_found' });
   }
 
-  const item = CATALOG.find((candidate) => candidate.sku === intent.sku);
+  const now = Date.now();
+  if (Number(intent.expires_at) <= now) {
+    await deletePurchaseIntent({ id: intentId, tgUserId: s.tgUserId });
+    return res.status(409).json({ ok: false, error: 'intent_expired' });
+  }
+
+  const item = CATALOG.find((candidate) => candidate.sku === String(intent.sku));
   if (!item || !item.available) {
     return res.status(409).json({ ok: false, error: 'sku_not_available' });
   }
 
-  const wallet = getOrCreateWallet(s.tgUserId);
-  const nextWallet = {
-    tgUserId: wallet.tgUserId,
-    stars: Math.max(0, wallet.stars + Math.floor(item.grants.stars ?? 0)),
-    crystals: Math.max(0, wallet.crystals + Math.floor(item.grants.crystals ?? 0)),
-  };
-  memoryDb.wallets.set(s.tgUserId, nextWallet);
+  // Stub confirm: we assume payment succeeded.
+  // N2 will validate via Stars receipt/webhook + idempotency by provider_txn_id.
+  // Here we still write authoritative ledger+wallet via transaction.
+  const spendStars = -Math.max(0, Math.floor(item.priceStars));
+  const grantStars = Math.floor(item.grants.stars ?? 0);
+  const grantCrystals = Math.floor(item.grants.crystals ?? 0);
 
-  let ledgerEntry = appendWalletLedgerEntry({
-    tgUserId: s.tgUserId,
-    type: 'purchase',
-    currency: 'stars',
-    amount: -Math.max(0, item.priceStars),
-    meta: {
+  const result = await grantWallet(
+    s.tgUserId,
+    { stars: spendStars + grantStars, crystals: grantCrystals },
+    {
+      source: 'purchase_stub_confirm',
       intentId,
       sku: item.sku,
-      provider: intent.provider,
-      providerPayload: req.body?.providerPayload ?? null,
-      // TODO stars: replace stub confirm with validated webhook / provider receipt
+      provider: 'telegram_stars',
+      providerPayload: (req as any).body?.providerPayload ?? null,
     },
-  });
+  );
 
-  if (item.grants.crystals) {
-    ledgerEntry = appendWalletLedgerEntry({
-      tgUserId: s.tgUserId,
-      type: 'purchase',
-      currency: 'crystals',
-      amount: Math.floor(item.grants.crystals),
-      meta: { intentId, sku: item.sku, provider: intent.provider },
-    });
-  }
+  await deletePurchaseIntent({ id: intentId, tgUserId: s.tgUserId });
 
-  if (item.grants.stars) {
-    ledgerEntry = appendWalletLedgerEntry({
-      tgUserId: s.tgUserId,
-      type: 'purchase',
-      currency: 'stars',
-      amount: Math.floor(item.grants.stars),
-      meta: { intentId, sku: item.sku, provider: intent.provider },
-    });
-  }
-
-  memoryDb.purchaseIntents.delete(intentId);
-
-  return res.status(200).json({ ok: true, wallet: nextWallet, ledgerEntry });
+  return res.status(200).json({ ok: true, wallet: result.wallet, entries: result.entries });
 });

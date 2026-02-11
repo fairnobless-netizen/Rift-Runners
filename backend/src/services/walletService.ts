@@ -1,95 +1,98 @@
-import {
-  memoryDb,
-  type WalletCurrency,
-  type WalletLedgerEntryRecord,
-  type WalletLedgerType,
-  type WalletRecord,
-} from '../db/memoryDb';
+import crypto from 'crypto';
+import { applyWalletDeltaTx, ensureWallet, listLedger } from '../db/repos';
 
-let ledgerSeq = 1;
+export type WalletCurrency = 'stars' | 'crystals';
+export type WalletLedgerType = 'reward' | 'purchase' | 'refund' | 'adjustment';
 
-function nextLedgerId(): string {
-  const id = `led_${String(ledgerSeq).padStart(8, '0')}`;
-  ledgerSeq += 1;
-  return id;
-}
+export type WalletRecord = {
+  tgUserId: string;
+  stars: number;
+  crystals: number;
+};
 
-export function getOrCreateWallet(tgUserId: string): WalletRecord {
-  const existing = memoryDb.wallets.get(tgUserId);
-  if (existing) return existing;
-
-  const wallet: WalletRecord = { tgUserId, stars: 0, crystals: 0 };
-  memoryDb.wallets.set(tgUserId, wallet);
-  return wallet;
-}
-
-function applyDelta(wallet: WalletRecord, delta: { stars?: number; crystals?: number }): WalletRecord {
-  return {
-    tgUserId: wallet.tgUserId,
-    stars: Math.max(0, (wallet.stars ?? 0) + (delta.stars ?? 0)),
-    crystals: Math.max(0, (wallet.crystals ?? 0) + (delta.crystals ?? 0)),
-  };
-}
-
-export function appendWalletLedgerEntry(params: {
+export type WalletLedgerEntryRecord = {
+  id: string;
   tgUserId: string;
   type: WalletLedgerType;
   currency: WalletCurrency;
   amount: number;
-  meta?: Record<string, unknown>;
-}): WalletLedgerEntryRecord {
-  const entry: WalletLedgerEntryRecord = {
-    id: nextLedgerId(),
-    tgUserId: params.tgUserId,
-    type: params.type,
-    currency: params.currency,
-    amount: Math.floor(params.amount),
-    meta: params.meta ?? {},
-    createdAt: Date.now(),
-  };
-  memoryDb.walletLedger.unshift(entry);
-  return entry;
+  meta: Record<string, unknown>;
+  createdAt: number;
+};
+
+function newId(prefix: string): string {
+  return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 }
 
-export function listWalletLedger(tgUserId: string, limit = 50): WalletLedgerEntryRecord[] {
-  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
-  return memoryDb.walletLedger.filter((entry) => entry.tgUserId === tgUserId).slice(0, safeLimit);
+export async function getOrCreateWallet(tgUserId: string): Promise<WalletRecord> {
+  const w = await ensureWallet(tgUserId);
+  return { tgUserId: w.tgUserId, stars: w.stars, crystals: w.crystals };
 }
 
-export function grantWallet(
+export async function listWalletLedger(tgUserId: string, limit = 50): Promise<WalletLedgerEntryRecord[]> {
+  const rows = await listLedger(tgUserId, limit);
+  return rows.map((r: any) => ({
+    id: String(r.id),
+    tgUserId: String(r.tg_user_id),
+    type: String(r.type) as WalletLedgerType,
+    currency: String(r.currency) as WalletCurrency,
+    amount: Number(r.amount),
+    meta: (r.meta ?? {}) as Record<string, unknown>,
+    createdAt: Number(r.created_at),
+  }));
+}
+
+/**
+ * Atomic mutation path for wallet + ledger.
+ * This is the ONLY correct way to grant/spend currency.
+ */
+export async function grantWallet(
   tgUserId: string,
   delta: { stars?: number; crystals?: number },
   meta: Record<string, unknown> = {},
-): { wallet: WalletRecord; entries: WalletLedgerEntryRecord[] } {
-  const wallet = getOrCreateWallet(tgUserId);
-  const next = applyDelta(wallet, delta);
-  memoryDb.wallets.set(tgUserId, next);
+): Promise<{ wallet: WalletRecord; entries: WalletLedgerEntryRecord[] }> {
+  const now = Date.now();
 
   const entries: WalletLedgerEntryRecord[] = [];
   const stars = Math.floor(delta.stars ?? 0);
   const crystals = Math.floor(delta.crystals ?? 0);
 
   if (stars !== 0) {
-    entries.push(appendWalletLedgerEntry({
+    entries.push({
+      id: newId('led'),
       tgUserId,
       type: stars > 0 ? 'reward' : 'adjustment',
       currency: 'stars',
       amount: stars,
       meta,
-    }));
+      createdAt: now,
+    });
   }
 
   if (crystals !== 0) {
-    entries.push(appendWalletLedgerEntry({
+    entries.push({
+      id: newId('led'),
       tgUserId,
       type: crystals > 0 ? 'reward' : 'adjustment',
       currency: 'crystals',
       amount: crystals,
       meta,
-    }));
+      createdAt: now,
+    });
   }
 
-  return { wallet: next, entries };
-}
+  const w = await applyWalletDeltaTx({
+    tgUserId,
+    delta: { stars, crystals },
+    ledgerEntries: entries.map((e) => ({
+      id: e.id,
+      type: e.type,
+      currency: e.currency,
+      amount: e.amount,
+      meta: e.meta,
+      createdAt: e.createdAt,
+    })),
+  });
 
-// TODO backend-relevant: move wallet mutation to DB-backed transactional updates.
+  return { wallet: { tgUserId: w.tgUserId, stars: w.stars, crystals: w.crystals }, entries };
+}
