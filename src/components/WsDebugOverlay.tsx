@@ -32,6 +32,8 @@ type TickDebugStats = {
   rttJitterMs: number;
   targetBufferPairs: number;
   targetBufferTargetPairs: number;
+  adaptiveEveryTicks: number;
+  adaptiveEveryTargetTicks: number;
   bufferHasReserve: boolean;
 };
 
@@ -117,6 +119,10 @@ export function WsDebugOverlay({
 
       <div style={{ marginTop: 4 }}>
         targetBuffer: {tickDebugStats?.targetBufferPairs ?? '—'} (target {tickDebugStats?.targetBufferTargetPairs ?? '—'}) | reserve: {String(tickDebugStats?.bufferHasReserve ?? false)}
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        adaptiveEvery: {tickDebugStats?.adaptiveEveryTicks ?? '—'} (target {tickDebugStats?.adaptiveEveryTargetTicks ?? '—'})
       </div>
 
       <div style={{ marginTop: 4 }}>

@@ -77,6 +77,8 @@ type TickDebugStats = {
   rttJitterMs: number;
   targetBufferPairs: number;
   targetBufferTargetPairs: number;
+  adaptiveEveryTicks: number;
+  adaptiveEveryTargetTicks: number;
   bufferHasReserve: boolean;
 };
 
@@ -259,6 +261,8 @@ export default function GameView(): JSX.Element {
           rttJitterMs: netInterpStats.rttJitterMs,
           targetBufferPairs: netInterpStats.targetBufferPairs,
           targetBufferTargetPairs: netInterpStats.targetBufferTargetPairs,
+          adaptiveEveryTicks: netInterpStats.adaptiveEveryTicks,
+          adaptiveEveryTargetTicks: netInterpStats.adaptiveEveryTargetTicks,
           bufferHasReserve: netInterpStats.bufferHasReserve,
         };
       });
