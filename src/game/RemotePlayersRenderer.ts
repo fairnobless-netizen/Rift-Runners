@@ -16,10 +16,29 @@ export class RemotePlayersRenderer {
   private readonly maxExtrapolationTicks = 3;
   private stallAfterTicks = 7;
   private renderTick = -1;
+  private baseDelayTicks = 2;
   private delayTicks = 2;
+  private minDelayTicks = 1;
+  private maxDelayTicks = 6;
+  private targetBufferPairs = 2;
   private bufferSize = 0;
   private extrapolatingTicks = 0;
   private stalled = false;
+  private underrunCount = 0;
+  private stallCount = 0;
+  private extrapCount = 0;
+
+  private readonly metricsWindowTicks = 60;
+  private readonly adaptiveUpdateEveryTicks = 10;
+  private readonly adaptiveCooldownTicks = 20;
+  private lastAdaptiveUpdateTick = 0;
+  private lastDelayChangeTick = 0;
+  private windowUnderrunEvents: number[] = [];
+  private windowStallEvents: number[] = [];
+  private windowExtrapEvents: number[] = [];
+  private windowUnderrunSum = 0;
+  private windowStallSum = 0;
+  private windowExtrapSum = 0;
 
   private tileSize = 32;
   private offsetX = 0;
@@ -35,8 +54,8 @@ export class RemotePlayersRenderer {
     this.offsetY = params.offsetY;
   }
 
-  update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string, delayTicks = 2): void {
-    this.delayTicks = delayTicks;
+  update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string): void {
+    this.updateAdaptiveDelay(simulationTick, buffer.length);
     this.stallAfterTicks = this.delayTicks + this.maxExtrapolationTicks + 2;
     const renderTick = simulationTick - this.delayTicks;
     this.renderTick = renderTick;
@@ -64,18 +83,24 @@ export class RemotePlayersRenderer {
     }
 
     if (!snapshotA || !snapshotB) {
+      this.recordUnderrun();
       const anchorSnapshot = this.findAnchorSnapshot(buffer, renderTick) ?? buffer[buffer.length - 1];
       const extrapolationTicks = Math.max(0, renderTick - anchorSnapshot.tick);
 
       if (extrapolationTicks > 0 && extrapolationTicks <= this.maxExtrapolationTicks) {
+        this.recordExtrapolation();
         this.extrapolatingTicks = extrapolationTicks;
         this.renderExtrapolated(anchorSnapshot, extrapolationTicks, localTgUserId);
         return;
       }
 
       if (extrapolationTicks > this.maxExtrapolationTicks) {
+        this.recordExtrapolation();
         this.extrapolatingTicks = this.maxExtrapolationTicks;
         this.stalled = extrapolationTicks >= this.stallAfterTicks;
+        if (this.stalled) {
+          this.recordStall();
+        }
         this.renderFrozen(anchorSnapshot, localTgUserId);
         return;
       }
@@ -100,6 +125,104 @@ export class RemotePlayersRenderer {
     }
 
     this.destroyMissingPlayers(alive);
+  }
+
+  private updateAdaptiveDelay(simulationTick: number, bufferSize: number): void {
+    if (this.windowUnderrunEvents.length === 0) {
+      this.lastAdaptiveUpdateTick = simulationTick;
+      this.lastDelayChangeTick = simulationTick;
+    }
+
+    this.pushWindowSample(0, 0, 0);
+
+    if (simulationTick - this.lastAdaptiveUpdateTick < this.adaptiveUpdateEveryTicks) {
+      return;
+    }
+
+    this.lastAdaptiveUpdateTick = simulationTick;
+    if (simulationTick - this.lastDelayChangeTick < this.adaptiveCooldownTicks) {
+      return;
+    }
+
+    const windowSize = Math.max(1, this.windowUnderrunEvents.length);
+    const underrunRate = this.windowUnderrunSum / windowSize;
+    const bufferHasReserve = bufferSize >= this.targetBufferPairs + 2;
+
+    if (underrunRate > 0.05 || this.windowStallSum > 0) {
+      const nextDelay = Math.min(this.delayTicks + 1, this.maxDelayTicks);
+      if (nextDelay !== this.delayTicks) {
+        this.delayTicks = nextDelay;
+        this.lastDelayChangeTick = simulationTick;
+      }
+      return;
+    }
+
+    if (this.windowUnderrunSum === 0 && bufferHasReserve) {
+      const nextDelay = Math.max(this.delayTicks - 1, this.minDelayTicks);
+      if (nextDelay !== this.delayTicks) {
+        this.delayTicks = nextDelay;
+        this.lastDelayChangeTick = simulationTick;
+      }
+    }
+  }
+
+  private pushWindowSample(underrunEvent: number, stallEvent: number, extrapEvent: number): void {
+    this.windowUnderrunEvents.push(underrunEvent);
+    this.windowStallEvents.push(stallEvent);
+    this.windowExtrapEvents.push(extrapEvent);
+    this.windowUnderrunSum += underrunEvent;
+    this.windowStallSum += stallEvent;
+    this.windowExtrapSum += extrapEvent;
+
+    if (this.windowUnderrunEvents.length > this.metricsWindowTicks) {
+      this.windowUnderrunSum -= this.windowUnderrunEvents.shift() ?? 0;
+      this.windowStallSum -= this.windowStallEvents.shift() ?? 0;
+      this.windowExtrapSum -= this.windowExtrapEvents.shift() ?? 0;
+    }
+  }
+
+  private addEventSample(eventType: 'underrun' | 'stall' | 'extrap'): void {
+    const lastIndex = this.windowUnderrunEvents.length - 1;
+    if (lastIndex < 0) {
+      this.pushWindowSample(0, 0, 0);
+    }
+
+    const safeIndex = this.windowUnderrunEvents.length - 1;
+    if (eventType === 'underrun') {
+      if (this.windowUnderrunEvents[safeIndex] === 0) {
+        this.windowUnderrunEvents[safeIndex] = 1;
+        this.windowUnderrunSum += 1;
+      }
+      return;
+    }
+
+    if (eventType === 'stall') {
+      if (this.windowStallEvents[safeIndex] === 0) {
+        this.windowStallEvents[safeIndex] = 1;
+        this.windowStallSum += 1;
+      }
+      return;
+    }
+
+    if (this.windowExtrapEvents[safeIndex] === 0) {
+      this.windowExtrapEvents[safeIndex] = 1;
+      this.windowExtrapSum += 1;
+    }
+  }
+
+  private recordUnderrun(): void {
+    this.underrunCount += 1;
+    this.addEventSample('underrun');
+  }
+
+  private recordStall(): void {
+    this.stallCount += 1;
+    this.addEventSample('stall');
+  }
+
+  private recordExtrapolation(): void {
+    this.extrapCount += 1;
+    this.addEventSample('extrap');
   }
 
   private renderFromSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): void {
@@ -166,15 +289,30 @@ export class RemotePlayersRenderer {
 
   getDebugStats(): {
     renderTick: number;
+    baseDelayTicks: number;
     delayTicks: number;
+    minDelayTicks: number;
+    maxDelayTicks: number;
     bufferSize: number;
+    underrunRate: number;
+    underrunCount: number;
+    stallCount: number;
+    extrapCount: number;
     extrapolatingTicks: number;
     stalled: boolean;
   } {
+    const windowSize = Math.max(1, this.windowUnderrunEvents.length);
     return {
       renderTick: this.renderTick,
+      baseDelayTicks: this.baseDelayTicks,
       delayTicks: this.delayTicks,
+      minDelayTicks: this.minDelayTicks,
+      maxDelayTicks: this.maxDelayTicks,
       bufferSize: this.bufferSize,
+      underrunRate: this.windowUnderrunSum / windowSize,
+      underrunCount: this.underrunCount,
+      stallCount: this.stallCount,
+      extrapCount: this.extrapCount,
       extrapolatingTicks: this.extrapolatingTicks,
       stalled: this.stalled,
     };

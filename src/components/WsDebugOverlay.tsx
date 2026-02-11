@@ -15,8 +15,15 @@ type TickDebugStats = {
   snapshotTick: number;
   simulationTick: number;
   renderTick: number;
+  baseDelayTicks: number;
   delayTicks: number;
+  minDelayTicks: number;
+  maxDelayTicks: number;
   bufferSize: number;
+  underrunRate: number;
+  underrunCount: number;
+  stallCount: number;
+  extrapCount: number;
   extrapolatingTicks: number;
   stalled: boolean;
 };
@@ -94,11 +101,15 @@ export function WsDebugOverlay({
       </div>
 
       <div style={{ marginTop: 4 }}>
-        renderTick: {tickDebugStats?.renderTick ?? '—'} | delayTicks: {tickDebugStats?.delayTicks ?? '—'} | bufferSize: {tickDebugStats?.bufferSize ?? 0}
+        renderTick: {tickDebugStats?.renderTick ?? '—'} | delayTicks(auto): {tickDebugStats?.delayTicks ?? '—'} (base {tickDebugStats?.baseDelayTicks ?? '—'}, range {tickDebugStats?.minDelayTicks ?? '—'}-{tickDebugStats?.maxDelayTicks ?? '—'})
       </div>
 
       <div style={{ marginTop: 4 }}>
-        extrap: {tickDebugStats?.extrapolatingTicks ?? 0} ticks | stalled: {String(tickDebugStats?.stalled ?? false)}
+        bufferSize: {tickDebugStats?.bufferSize ?? 0} | underrunRate: {((tickDebugStats?.underrunRate ?? 0) * 100).toFixed(1)}% | underruns: {tickDebugStats?.underrunCount ?? 0}
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        extrapCount: {tickDebugStats?.extrapCount ?? 0} | stallCount: {tickDebugStats?.stallCount ?? 0} | extrapTicks: {tickDebugStats?.extrapolatingTicks ?? 0} | stalled: {String(tickDebugStats?.stalled ?? false)}
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
