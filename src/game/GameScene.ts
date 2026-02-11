@@ -1421,6 +1421,7 @@ export class GameScene extends Phaser.Scene {
     baseDelayTicks: number;
     baseDelayTargetTicks: number;
     baseDelayStepCooldownMs: number;
+    baseDelayStepCooldownTicks: number;
     delayTicks: number;
     minDelayTicks: number;
     maxDelayTicks: number;
@@ -1440,15 +1441,23 @@ export class GameScene extends Phaser.Scene {
     adaptiveEveryTicks: number;
     adaptiveEveryTargetTicks: number;
     bufferHasReserve: boolean;
+    tuning: {
+      baseDelayMax: number;
+      targetBufferMin: number;
+      targetBufferMax: number;
+      cadenceMin: number;
+      cadenceMax: number;
+    };
   } {
     return this.remotePlayers?.getDebugStats() ?? {
       renderTick: -1,
       baseDelayTicks: 2,
       baseDelayTargetTicks: 2,
-      baseDelayStepCooldownMs: 500,
+      baseDelayStepCooldownMs: 20,
+      baseDelayStepCooldownTicks: 20,
       delayTicks: 2,
       minDelayTicks: 1,
-      maxDelayTicks: 6,
+      maxDelayTicks: 10,
       bufferSize: this.snapshotBuffer.length,
       underrunRate: 0,
       underrunCount: 0,
@@ -1465,6 +1474,13 @@ export class GameScene extends Phaser.Scene {
       adaptiveEveryTicks: 2,
       adaptiveEveryTargetTicks: 2,
       bufferHasReserve: false,
+      tuning: {
+        baseDelayMax: 10,
+        targetBufferMin: 2,
+        targetBufferMax: 6,
+        cadenceMin: 2,
+        cadenceMax: 8,
+      },
     };
   }
 }

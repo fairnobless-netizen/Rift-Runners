@@ -1,6 +1,39 @@
 import Phaser from 'phaser';
 import type { MatchSnapshotV1 } from '../ws/wsTypes';
 
+// M15.4: Frozen interpolation tuning constants (single source of truth)
+const INTERP_TUNING = {
+  // baseDelay (RTT-based) smoothing
+  baseDelay: {
+    minTicks: 1,
+    maxTicks: 10, // hard ceiling for safety
+    stepLimitPerUpdate: 1, // max +/- ticks per updateAdaptiveDelay call
+    cooldownTicks: 20, // how often baseDelay can change (in simulation ticks)
+    hysteresisTicks: 1, // dead-zone around target
+    spikeGuardMs: 120, // ignore sudden RTT spikes beyond this (ms)
+  },
+
+  // targetBufferPairs smoothing (jitter-aware)
+  targetBuffer: {
+    minPairs: 2,
+    maxPairs: 6,
+    cooldownTicks: 20,
+    hysteresisPairs: 1,
+  },
+
+  // adaptive cadence (how often controller runs)
+  cadence: {
+    minEvery: 2,
+    maxEvery: 8,
+    cooldownTicks: 30,
+  },
+
+  // late snapshot EMA
+  late: {
+    emaAlpha: 0.2, // smoothing factor for late rate
+  },
+} as const;
+
 type RemotePlayerView = {
   container: Phaser.GameObjects.Container;
   body: Phaser.GameObjects.Rectangle;
@@ -20,38 +53,26 @@ export class RemotePlayersRenderer {
   // M14.3: baseDelay smoothing / spike guard
   private baseDelayTargetTicks: number = 2;
   private baseDelayLastAppliedAtMs: number = 0;
-  private readonly baseDelayStepCooldownMs: number = 500; // apply at most 1 tick step per 0.5s
-  private readonly baseDelayHysteresisTicks: number = 1; // ignore +-1 jitter unless sustained
-  private readonly rttSpikeFactor: number = 2.0; // spike if sample > ema * factor
   private rttLastGoodEmaMs: number | null = null;
   private rttMs: number | null = null;
   private rttJitterMs = 0;
   private delayTicks = 2;
-  private minDelayTicks = 1;
-  private maxDelayTicks = 6;
+  private minDelayTicks: number = INTERP_TUNING.baseDelay.minTicks;
+  private maxDelayTicks: number = INTERP_TUNING.baseDelay.maxTicks;
   private targetBufferPairs = 2;
   // M15: targetBufferPairs smoothing
   private targetBufferTargetPairs = 2;
   private lastTargetBufferChangeTick = 0;
-  private readonly targetBufferCooldownTicks = 20;
-  private readonly targetBufferHysteresisPairs = 1;
-  private readonly targetBufferMaxPairs = 6;
-  private readonly targetBufferMinPairs = 2;
   // M15.2: adaptive update cadence (reduce noise under jitter)
   private adaptiveEveryTargetTicks: number = 2;
   private adaptiveEveryTicks: number = 2;
   private lastAdaptiveEveryChangeTick: number = 0;
-
-  private readonly adaptiveEveryCooldownTicks: number = 30; // change cadence at most once per ~1.5s (20Hz)
-  private readonly adaptiveEveryMin: number = 2;
-  private readonly adaptiveEveryMax: number = 8;
   private bufferSize = 0;
   private extrapolatingTicks = 0;
   private stalled = false;
   private underrunCount = 0;
   private lateSnapshotCount = 0;
   private lateSnapshotEma = 0;
-  private readonly lateSnapshotEmaAlpha = 0.1;
   private stallCount = 0;
   private extrapCount = 0;
 
@@ -93,7 +114,7 @@ export class RemotePlayersRenderer {
     if (rttMs == null || !Number.isFinite(rttMs) || tickMs <= 0) return;
 
     // Spike guard: if RTT suddenly doubles vs last good EMA, don't immediately raise baseDelay.
-    if (this.rttLastGoodEmaMs != null && rttMs > this.rttLastGoodEmaMs * this.rttSpikeFactor) {
+    if (this.rttLastGoodEmaMs != null && rttMs - this.rttLastGoodEmaMs > INTERP_TUNING.baseDelay.spikeGuardMs) {
       // keep target as is; let symptom-based controller handle short turbulence
       return;
     }
@@ -104,7 +125,7 @@ export class RemotePlayersRenderer {
     const oneWayMs = rttMs * 0.5;
     const safetyMs = Math.max(0, rttJitterMs) * 0.5 + tickMs;
     const recommended = Math.round((oneWayMs + safetyMs) / tickMs);
-    const clamped = Math.max(1, Math.min(recommended, this.maxDelayTicks));
+    const clamped = Phaser.Math.Clamp(recommended, INTERP_TUNING.baseDelay.minTicks, INTERP_TUNING.baseDelay.maxTicks);
 
     this.baseDelayTargetTicks = clamped;
 
@@ -113,22 +134,27 @@ export class RemotePlayersRenderer {
     if (this.baseDelayLastAppliedAtMs === 0) this.baseDelayLastAppliedAtMs = now;
 
     const diff = this.baseDelayTargetTicks - this.baseDelayTicks;
-    if (Math.abs(diff) <= this.baseDelayHysteresisTicks) {
+    if (Math.abs(diff) <= INTERP_TUNING.baseDelay.hysteresisTicks) {
       return; // ignore small noise
     }
 
-    if (now - this.baseDelayLastAppliedAtMs < this.baseDelayStepCooldownMs) {
+    const baseDelayCooldownMs = INTERP_TUNING.baseDelay.cooldownTicks * tickMs;
+    if (now - this.baseDelayLastAppliedAtMs < baseDelayCooldownMs) {
       return; // too soon to change again
     }
 
-    // step by 1 tick towards target
-    this.baseDelayTicks += diff > 0 ? 1 : -1;
-    this.baseDelayTicks = Math.max(1, Math.min(this.baseDelayTicks, this.maxDelayTicks));
+    const step = Math.min(Math.abs(diff), INTERP_TUNING.baseDelay.stepLimitPerUpdate);
+    this.baseDelayTicks += diff > 0 ? step : -step;
+    this.baseDelayTicks = Phaser.Math.Clamp(
+      this.baseDelayTicks,
+      INTERP_TUNING.baseDelay.minTicks,
+      INTERP_TUNING.baseDelay.maxTicks,
+    );
     this.baseDelayLastAppliedAtMs = now;
 
     // keep current delay not below base
     if (this.delayTicks < this.baseDelayTicks) this.delayTicks = this.baseDelayTicks;
-    this.minDelayTicks = Math.max(1, this.baseDelayTicks - 1);
+    this.minDelayTicks = Math.max(INTERP_TUNING.baseDelay.minTicks, this.baseDelayTicks - 1);
   }
 
   update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string): void {
@@ -213,19 +239,23 @@ export class RemotePlayersRenderer {
     }
 
     const sample = isLateSnapshot ? 1 : 0;
-    this.lateSnapshotEma += (sample - this.lateSnapshotEma) * this.lateSnapshotEmaAlpha;
+    this.lateSnapshotEma += (sample - this.lateSnapshotEma) * INTERP_TUNING.late.emaAlpha;
   }
 
   private updateAdaptiveDelay(simulationTick: number, bufferSize: number): void {
     const prevDelay = this.delayTicks;
 
     // M15.2: smooth adaptive cadence (step-limited, cooldown)
-    if (simulationTick - this.lastAdaptiveEveryChangeTick >= this.adaptiveEveryCooldownTicks) {
+    if (simulationTick - this.lastAdaptiveEveryChangeTick >= INTERP_TUNING.cadence.cooldownTicks) {
       const diff = this.adaptiveEveryTargetTicks - this.adaptiveEveryTicks;
 
       if (diff !== 0) {
         this.adaptiveEveryTicks += diff > 0 ? 1 : -1;
-        this.adaptiveEveryTicks = Math.max(this.adaptiveEveryMin, Math.min(this.adaptiveEveryTicks, this.adaptiveEveryMax));
+        this.adaptiveEveryTicks = Phaser.Math.Clamp(
+          this.adaptiveEveryTicks,
+          INTERP_TUNING.cadence.minEvery,
+          INTERP_TUNING.cadence.maxEvery,
+        );
         this.lastAdaptiveEveryChangeTick = simulationTick;
       }
     }
@@ -265,22 +295,22 @@ export class RemotePlayersRenderer {
     }
 
     // M15: apply targetBufferPairs smoothly (cooldown + hysteresis + step)
-    if (simulationTick - this.lastTargetBufferChangeTick >= this.targetBufferCooldownTicks) {
+    if (simulationTick - this.lastTargetBufferChangeTick >= INTERP_TUNING.targetBuffer.cooldownTicks) {
       const diff = this.targetBufferTargetPairs - this.targetBufferPairs;
 
-      if (Math.abs(diff) > this.targetBufferHysteresisPairs) {
+      if (Math.abs(diff) > INTERP_TUNING.targetBuffer.hysteresisPairs) {
         this.targetBufferPairs += diff > 0 ? 1 : -1;
         this.targetBufferPairs = Phaser.Math.Clamp(
           this.targetBufferPairs,
-          this.targetBufferMinPairs,
-          this.targetBufferMaxPairs,
+          INTERP_TUNING.targetBuffer.minPairs,
+          INTERP_TUNING.targetBuffer.maxPairs,
         );
         this.lastTargetBufferChangeTick = simulationTick;
       }
     }
 
     // Optional: limit delayTicks step to avoid visible jitter
-    const maxStepPerUpdate = 1;
+    const maxStepPerUpdate = INTERP_TUNING.baseDelay.stepLimitPerUpdate;
     if (this.delayTicks > prevDelay + maxStepPerUpdate) this.delayTicks = prevDelay + maxStepPerUpdate;
     if (this.delayTicks < prevDelay - maxStepPerUpdate) this.delayTicks = prevDelay - maxStepPerUpdate;
 
@@ -297,7 +327,7 @@ export class RemotePlayersRenderer {
     // База: 2 пары (минимум для нормальной интерполяции с запасом)
     const raw = 2 + jitterTicks;
 
-    return Phaser.Math.Clamp(raw, this.targetBufferMinPairs, this.targetBufferMaxPairs);
+    return Phaser.Math.Clamp(raw, INTERP_TUNING.targetBuffer.minPairs, INTERP_TUNING.targetBuffer.maxPairs);
   }
 
   private computeAdaptiveEveryTicks(tickMs: number): number {
@@ -307,7 +337,7 @@ export class RemotePlayersRenderer {
     // Higher jitter -> update less often (more stable controller)
     const raw = 2 + jitterTicks;
 
-    return Math.max(this.adaptiveEveryMin, Math.min(raw, this.adaptiveEveryMax));
+    return Phaser.Math.Clamp(raw, INTERP_TUNING.cadence.minEvery, INTERP_TUNING.cadence.maxEvery);
   }
 
   private pushWindowSample(underrunEvent: number, stallEvent: number, extrapEvent: number): void {
@@ -436,6 +466,7 @@ export class RemotePlayersRenderer {
     baseDelayTicks: number;
     baseDelayTargetTicks: number;
     baseDelayStepCooldownMs: number;
+    baseDelayStepCooldownTicks: number;
     delayTicks: number;
     minDelayTicks: number;
     maxDelayTicks: number;
@@ -455,6 +486,13 @@ export class RemotePlayersRenderer {
     adaptiveEveryTicks: number;
     adaptiveEveryTargetTicks: number;
     bufferHasReserve: boolean;
+    tuning: {
+      baseDelayMax: number;
+      targetBufferMin: number;
+      targetBufferMax: number;
+      cadenceMin: number;
+      cadenceMax: number;
+    };
   } {
     const windowSize = Math.max(1, this.windowUnderrunEvents.length);
     const bufferHasReserve = this.bufferSize >= this.targetBufferPairs + 2;
@@ -462,7 +500,8 @@ export class RemotePlayersRenderer {
       renderTick: this.renderTick,
       baseDelayTicks: this.baseDelayTicks,
       baseDelayTargetTicks: this.baseDelayTargetTicks,
-      baseDelayStepCooldownMs: this.baseDelayStepCooldownMs,
+      baseDelayStepCooldownMs: INTERP_TUNING.baseDelay.cooldownTicks,
+      baseDelayStepCooldownTicks: INTERP_TUNING.baseDelay.cooldownTicks,
       delayTicks: this.delayTicks,
       minDelayTicks: this.minDelayTicks,
       maxDelayTicks: this.maxDelayTicks,
@@ -482,6 +521,13 @@ export class RemotePlayersRenderer {
       adaptiveEveryTicks: this.adaptiveEveryTicks,
       adaptiveEveryTargetTicks: this.adaptiveEveryTargetTicks,
       bufferHasReserve,
+      tuning: {
+        baseDelayMax: INTERP_TUNING.baseDelay.maxTicks,
+        targetBufferMin: INTERP_TUNING.targetBuffer.minPairs,
+        targetBufferMax: INTERP_TUNING.targetBuffer.maxPairs,
+        cadenceMin: INTERP_TUNING.cadence.minEvery,
+        cadenceMax: INTERP_TUNING.cadence.maxEvery,
+      },
     };
   }
 

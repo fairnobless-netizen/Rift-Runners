@@ -18,6 +18,7 @@ type TickDebugStats = {
   baseDelayTicks: number;
   baseDelayTargetTicks: number;
   baseDelayStepCooldownMs: number;
+  baseDelayStepCooldownTicks: number;
   delayTicks: number;
   minDelayTicks: number;
   maxDelayTicks: number;
@@ -37,6 +38,13 @@ type TickDebugStats = {
   adaptiveEveryTicks: number;
   adaptiveEveryTargetTicks: number;
   bufferHasReserve: boolean;
+  tuning: {
+    baseDelayMax: number;
+    targetBufferMin: number;
+    targetBufferMax: number;
+    cadenceMin: number;
+    cadenceMax: number;
+  };
 };
 
 export function WsDebugOverlay({
@@ -125,6 +133,10 @@ export function WsDebugOverlay({
 
       <div style={{ marginTop: 4 }}>
         adaptiveEvery: {tickDebugStats?.adaptiveEveryTicks ?? '—'} (target {tickDebugStats?.adaptiveEveryTargetTicks ?? '—'})
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        limits: delay≤{tickDebugStats?.tuning.baseDelayMax ?? '—'}, buf {tickDebugStats?.tuning.targetBufferMin ?? '—'}..{tickDebugStats?.tuning.targetBufferMax ?? '—'}, cadence {tickDebugStats?.tuning.cadenceMin ?? '—'}..{tickDebugStats?.tuning.cadenceMax ?? '—'}
       </div>
 
       <div style={{ marginTop: 4 }}>
