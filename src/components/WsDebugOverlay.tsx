@@ -14,6 +14,8 @@ type PredictionStats = {
 export function WsDebugOverlay({
   connected,
   messages,
+  identity,
+  netSim,
   onLobby,
   predictionStats,
   onCreateRoom,
@@ -22,6 +24,17 @@ export function WsDebugOverlay({
 }: {
   connected: boolean;
   messages: any[];
+  identity: {
+    id?: string;
+    clientId?: number;
+    displayName?: string;
+  };
+  netSim: {
+    enabled: boolean;
+    latencyMs: number;
+    jitterMs: number;
+    dropRate: number;
+  };
   onLobby: () => void;
   predictionStats: PredictionStats | null;
   onCreateRoom: () => void;
@@ -54,6 +67,14 @@ export function WsDebugOverlay({
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <div>WS: {connected ? 'CONNECTED' : 'OFFLINE'}</div>
         <div>{lastSnapshot ? `tick: ${lastSnapshot.tick}` : 'no snapshot'}</div>
+      </div>
+
+      <div style={{ marginTop: 8 }}>
+        Client: {identity.clientId ?? identity.id ?? '—'} | Name: {identity.displayName ?? '—'}
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        NetSim: latency={netSim.latencyMs}ms, jitter={netSim.jitterMs}ms, drop={netSim.dropRate}
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>

@@ -33,6 +33,7 @@ import {
 } from '../game/wallet';
 import { WsDebugOverlay } from './WsDebugOverlay';
 import { useWsClient } from '../ws/useWsClient';
+import { resolveDevIdentity } from '../utils/devIdentity';
 
 
 const defaultStats: PlayerStats = {
@@ -83,7 +84,8 @@ export default function GameView(): JSX.Element {
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [profileName, setProfileName] = useState<string>('—');
   const [token, setToken] = useState<string>(() => localStorage.getItem('rift_session_token') ?? '');
-  const [localTgUserId, setLocalTgUserId] = useState<string | undefined>(undefined);
+  const [devIdentity] = useState(() => resolveDevIdentity(window.location.search));
+  const [localTgUserId, setLocalTgUserId] = useState<string | undefined>(devIdentity.localFallbackTgUserId);
   const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
   const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
   const [catalog, setCatalog] = useState<ShopCatalogItem[]>([]);
@@ -138,8 +140,10 @@ export default function GameView(): JSX.Element {
         localStorage.setItem('rift_session_token', token);
         setToken(token);
         const nextLocalTgUserId = String(authJson.user?.tgUserId ?? '');
-        setLocalTgUserId(nextLocalTgUserId);
-        sceneRef.current?.setLocalTgUserId(nextLocalTgUserId || undefined);
+        if (nextLocalTgUserId) {
+          setLocalTgUserId(nextLocalTgUserId);
+          sceneRef.current?.setLocalTgUserId(nextLocalTgUserId);
+        }
 
         // M5d: backend is source of truth for campaign progress
         try {
@@ -165,7 +169,8 @@ export default function GameView(): JSX.Element {
 
         const meJson = await meRes.json();
         if (meJson?.ok) {
-          setProfileName(String(meJson.user?.displayName ?? '—'));
+          const backendName = String(meJson.user?.displayName ?? '—');
+          setProfileName(devIdentity.displayNameOverride ?? backendName);
         }
 
         const [w, nextCatalog, nextLedger] = await Promise.all([
@@ -179,11 +184,16 @@ export default function GameView(): JSX.Element {
       } catch {
         // keep silent (dev may run without backend)
       }
+
+      setProfileName((prev) => {
+        if (devIdentity.displayNameOverride) return devIdentity.displayNameOverride;
+        return prev === '—' ? 'Dev Player' : prev;
+      });
     };
 
     // TODO backend: in production handle auth errors + refresh/retry strategy
     runAuth();
-  }, []);
+  }, [devIdentity.displayNameOverride]);
 
 
   useEffect(() => {
@@ -527,6 +537,12 @@ export default function GameView(): JSX.Element {
       <WsDebugOverlay
         connected={ws.connected}
         messages={ws.messages}
+        identity={{
+          id: localTgUserId,
+          clientId: devIdentity.clientId,
+          displayName: profileName,
+        }}
+        netSim={ws.netSimConfig}
         predictionStats={predictionStats}
         onLobby={() => ws.send({ type: 'lobby:list' })}
         onCreateRoom={() => ws.send({ type: 'room:create' })}
