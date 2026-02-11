@@ -39,6 +39,10 @@ export class RemotePlayersRenderer {
     this.offsetY = params.offsetY;
   }
 
+
+  update(_delta: number) {
+    // Placeholder for interpolation/smoothing between snapshots.
+  }
   applySnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string) {
     const alive = new Set<string>();
 
