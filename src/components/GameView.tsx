@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
@@ -76,7 +76,13 @@ export default function GameView(): JSX.Element {
   const [catalog, setCatalog] = useState<ShopCatalogItem[]>([]);
   const [ledger, setLedger] = useState<WalletLedgerEntry[]>([]);
   const [purchaseBusySku, setPurchaseBusySku] = useState<string | null>(null);
-  const ws = useWsClient(token || undefined);
+  const handleSnapshot = useCallback(
+    (snapshot: Parameters<GameScene['applyMatchSnapshot']>[0]) => {
+      sceneRef.current?.applyMatchSnapshot(snapshot, localTgUserId);
+    },
+    [localTgUserId],
+  );
+  const ws = useWsClient(token || undefined, { onSnapshot: handleSnapshot });
   const inputSeqRef = useRef(0);
 
 
@@ -247,11 +253,6 @@ export default function GameView(): JSX.Element {
   }, []);
 
 
-  useEffect(() => {
-    const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
-    if (!last?.snapshot) return;
-    sceneRef.current?.applyMatchSnapshot(last.snapshot, localTgUserId);
-  }, [ws.messages, localTgUserId]);
 
   useEffect(
     () => () => {

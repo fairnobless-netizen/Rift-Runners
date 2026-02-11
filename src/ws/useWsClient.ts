@@ -1,11 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { WsClient } from './wsClient';
-import type { WsClientMessage, WsServerMessage } from './wsTypes';
+import type { MatchSnapshotV1, WsClientMessage, WsServerMessage } from './wsTypes';
 
-export function useWsClient(token?: string) {
+type UseWsClientOptions = {
+  onSnapshot?: (snapshot: MatchSnapshotV1) => void;
+};
+
+export function useWsClient(token?: string, opts: UseWsClientOptions = {}) {
   const clientRef = useRef<WsClient | null>(null);
+  const onSnapshotRef = useRef(opts.onSnapshot);
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<WsServerMessage[]>([]);
+
+  useEffect(() => {
+    onSnapshotRef.current = opts.onSnapshot;
+  }, [opts.onSnapshot]);
 
   useEffect(() => {
     if (!token) return;
@@ -17,6 +26,9 @@ export function useWsClient(token?: string) {
       onOpen: () => setConnected(true),
       onClose: () => setConnected(false),
       onMessage: (msg) => {
+        if (msg.type === 'match:snapshot') {
+          onSnapshotRef.current?.(msg.snapshot);
+        }
         setMessages((prev) => [...prev.slice(-50), msg]);
       },
     });

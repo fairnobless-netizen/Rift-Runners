@@ -211,7 +211,7 @@ export class GameScene extends Phaser.Scene {
     this.startLevel(initialLevelIndex, true);
   }
 
-  update(time: number): void {
+  update(time: number, delta: number): void {
     if (this.isLevelCleared) return;
 
     this.simulationTick += 1;
@@ -232,6 +232,7 @@ export class GameScene extends Phaser.Scene {
       this.doorController.update(time, this.isLevelCleared);
     }
     this.updateDoorVisual(time);
+    this.remotePlayers?.update(delta);
   }
 
   private setupCamera(): void {

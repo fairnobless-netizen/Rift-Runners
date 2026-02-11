@@ -4,6 +4,8 @@ type RemotePlayerView = {
   container: Phaser.GameObjects.Container;
   body: Phaser.GameObjects.Rectangle;
   nameText: Phaser.GameObjects.Text;
+  targetX: number;
+  targetY: number;
 };
 
 export type MatchSnapshotV1 = {
@@ -48,6 +50,7 @@ export class RemotePlayersRenderer {
       if (localTgUserId && p.tgUserId === localTgUserId) continue;
 
       let view = this.players.get(p.tgUserId);
+      const isNewView = !view;
       if (!view) {
         view = this.createPlayer(p);
         this.players.set(p.tgUserId, view);
@@ -56,7 +59,12 @@ export class RemotePlayersRenderer {
       const px = this.offsetX + p.x * this.tileSize + this.tileSize / 2;
       const py = this.offsetY + p.y * this.tileSize + this.tileSize / 2;
 
-      view.container.setPosition(px, py);
+      view.targetX = px;
+      view.targetY = py;
+      if (isNewView) {
+        view.container.setPosition(px, py);
+      }
+
       view.nameText.setText(p.displayName);
       view.body.setFillStyle(colorFromId(p.colorId), 0.75);
     }
@@ -69,6 +77,15 @@ export class RemotePlayersRenderer {
     }
   }
 
+
+  update(dt: number) {
+    const t = Math.min(1, dt * 0.02);
+    for (const view of this.players.values()) {
+      const x = Phaser.Math.Linear(view.container.x, view.targetX, t);
+      const y = Phaser.Math.Linear(view.container.y, view.targetY, t);
+      view.container.setPosition(x, y);
+    }
+  }
   private createPlayer(p: { displayName: string; colorId: number }) {
     const body = this.scene.add.rectangle(0, 0, 18, 18, colorFromId(p.colorId), 0.75);
     body.setOrigin(0.5, 0.5);
@@ -84,7 +101,7 @@ export class RemotePlayersRenderer {
     const container = this.scene.add.container(0, 0, [body, nameText]);
     container.setDepth(10_000);
 
-    return { container, body, nameText };
+    return { container, body, nameText, targetX: 0, targetY: 0 };
   }
 }
 
