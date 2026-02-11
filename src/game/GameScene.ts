@@ -247,7 +247,7 @@ export class GameScene extends Phaser.Scene {
       this.doorController.update(time, this.isLevelCleared);
     }
     this.updateDoorVisual(time);
-    this.remotePlayers?.update(delta);
+    this.remotePlayers?.update(this.simulationTick);
   }
 
   private fixedUpdate(): void {
