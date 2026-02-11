@@ -100,6 +100,10 @@ export class GameScene extends Phaser.Scene {
   private rng: DeterministicRng = createDeterministicRng(this.baseSeed);
   private simulationTick = 0;
   private lastSnapshotTick = -1;
+  private snapshotBuffer: MatchSnapshotV1[] = [];
+  private readonly SNAPSHOT_BUFFER_SIZE = 10;
+  private readonly INTERP_DELAY_TICKS = 2;
+  private lastRenderTick = -1;
   private arena: ArenaModel = createArena(0, this.rng);
   private levelIndex = 0;
   private zoneIndex = 0;
@@ -248,13 +252,16 @@ export class GameScene extends Phaser.Scene {
       this.doorController.update(time, this.isLevelCleared);
     }
     this.updateDoorVisual(time);
-    this.remotePlayers?.update(this.simulationTick);
   }
 
   private fixedUpdate(): void {
     this.simulationTick += 1;
     this.processLocalInputQueue();
     this.prediction.updateFixed();
+
+    const renderTick = this.simulationTick - this.INTERP_DELAY_TICKS;
+    this.lastRenderTick = renderTick;
+    this.remotePlayers?.renderInterpolated(this.snapshotBuffer, renderTick, this.localTgUserId);
   }
 
   private processLocalInputQueue(): void {
@@ -1355,20 +1362,31 @@ export class GameScene extends Phaser.Scene {
     this.placeLocalPlayerSpriteAt(x, y);
   }
 
-  public applyMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string) {
-    if (!this.remotePlayers) return;
-    if (snapshot?.version !== 'match_v1') return;
-    if (snapshot.tick <= this.lastSnapshotTick) return;
+  public pushMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
+    if (snapshot?.version !== 'match_v1') return false;
+    if (snapshot.tick <= this.lastSnapshotTick) return false;
+
+    if (localTgUserId) {
+      this.localTgUserId = localTgUserId;
+    }
 
     this.lastSnapshotTick = snapshot.tick;
-
-    const effectiveLocalId = localTgUserId ?? this.localTgUserId;
-
     this.matchGridW = snapshot.world?.gridW ?? this.matchGridW;
     this.matchGridH = snapshot.world?.gridH ?? this.matchGridH;
 
-    this.remotePlayers.applySnapshot(snapshot, effectiveLocalId);
+    this.snapshotBuffer.push(snapshot);
+    if (this.snapshotBuffer.length > this.SNAPSHOT_BUFFER_SIZE) {
+      this.snapshotBuffer.shift();
+    }
 
+    return true;
+  }
+
+  public applyMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string) {
+    const accepted = this.pushMatchSnapshot(snapshot, localTgUserId);
+    if (!accepted) return;
+
+    const effectiveLocalId = localTgUserId ?? this.localTgUserId;
     if (!effectiveLocalId) return;
 
     const me = snapshot.players?.find((p) => p.tgUserId === effectiveLocalId);
@@ -1395,6 +1413,14 @@ export class GameScene extends Phaser.Scene {
 
   public getLastSnapshotTick(): number {
     return this.lastSnapshotTick;
+  }
+
+  public getNetInterpStats(): { renderTick: number; interpDelayTicks: number; snapshotBufferSize: number } {
+    return {
+      renderTick: this.lastRenderTick,
+      interpDelayTicks: this.INTERP_DELAY_TICKS,
+      snapshotBufferSize: this.snapshotBuffer.length,
+    };
   }
 }
 

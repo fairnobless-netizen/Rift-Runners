@@ -14,6 +14,9 @@ type PredictionStats = {
 type TickDebugStats = {
   snapshotTick: number;
   simulationTick: number;
+  renderTick: number;
+  interpDelayTicks: number;
+  snapshotBufferSize: number;
 };
 
 export function WsDebugOverlay({
@@ -86,6 +89,10 @@ export function WsDebugOverlay({
 
       <div style={{ marginTop: 4 }}>
         snapshotTick: {tickDebugStats?.snapshotTick ?? '—'} | simulationTick: {tickDebugStats?.simulationTick ?? '—'}
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        renderTick: {tickDebugStats?.renderTick ?? '—'} | interpDelayTicks: {tickDebugStats?.interpDelayTicks ?? '—'} | bufferSize: {tickDebugStats?.snapshotBufferSize ?? 0}
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
