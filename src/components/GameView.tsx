@@ -60,8 +60,10 @@ type TickDebugStats = {
   snapshotTick: number;
   simulationTick: number;
   renderTick: number;
-  interpDelayTicks: number;
-  snapshotBufferSize: number;
+  delayTicks: number;
+  bufferSize: number;
+  extrapolatingTicks: number;
+  stalled: boolean;
 };
 
 const JOYSTICK_RADIUS = 56;
@@ -226,8 +228,10 @@ export default function GameView(): JSX.Element {
           snapshotTick: scene.getLastSnapshotTick(),
           simulationTick: scene.getSimulationTick(),
           renderTick: netInterpStats.renderTick,
-          interpDelayTicks: netInterpStats.interpDelayTicks,
-          snapshotBufferSize: netInterpStats.snapshotBufferSize,
+          delayTicks: netInterpStats.delayTicks,
+          bufferSize: netInterpStats.bufferSize,
+          extrapolatingTicks: netInterpStats.extrapolatingTicks,
+          stalled: netInterpStats.stalled,
         };
       });
     }, 350);
