@@ -21,8 +21,16 @@ import {
   type CampaignState,
 } from '../game/campaign';
 
-import type { ControlState, Direction, PlayerStats } from '../game/types';
-import { fetchWallet } from '../game/wallet';
+import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../game/types';
+import {
+  confirmPurchase,
+  createPurchaseIntent,
+  fetchCatalog,
+  fetchLedger,
+  fetchWallet,
+  type ShopCatalogItem,
+  type WalletLedgerEntry,
+} from '../game/wallet';
 
 
 const defaultStats: PlayerStats = {
@@ -58,8 +66,11 @@ export default function GameView(): JSX.Element {
   const [joystickPressed, setJoystickPressed] = useState(false);
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [profileName, setProfileName] = useState<string>('—');
-const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
-const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
+  const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
+  const [catalog, setCatalog] = useState<ShopCatalogItem[]>([]);
+  const [ledger, setLedger] = useState<WalletLedgerEntry[]>([]);
+  const [purchaseBusySku, setPurchaseBusySku] = useState<string | null>(null);
 
 
   const setMovementFromDirection = (direction: Direction | null): void => {
@@ -133,8 +144,14 @@ const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
           setProfileName(String(meJson.user?.displayName ?? '—'));
         }
 
-        const w = await fetchWallet();
+        const [w, nextCatalog, nextLedger] = await Promise.all([
+          fetchWallet(),
+          fetchCatalog(),
+          fetchLedger(20),
+        ]);
         if (w) setWallet(w);
+        setCatalog(nextCatalog);
+        setLedger(nextLedger);
       } catch {
         // keep silent (dev may run without backend)
       }
@@ -166,13 +183,13 @@ const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
       setCampaign({ ...nextCampaign });
     };
     const onSimulation = async (event: SimulationEvent): Promise<void> => {
-  if (event.type !== 'BOSS_DEFEATED') return;
+      if (event.type !== 'BOSS_DEFEATED') return;
 
-  // MVP: wallet rewards are not client-granted in mainline to avoid security holes.
-  // TODO economy: apply boss rewards via server-authoritative ledger/events.
-  const refreshed = await fetchWallet();
-  if (refreshed) setWallet(refreshed);
-};
+      // MVP: wallet rewards are not client-granted in mainline to avoid security holes.
+      // TODO economy: apply boss rewards via server-authoritative ledger/events.
+      const refreshed = await fetchWallet();
+      if (refreshed) setWallet(refreshed);
+    };
 
 
     gameEvents.on(EVENT_STATS, onStats);
@@ -308,6 +325,25 @@ const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
     zoomApiRef.current?.setZoom(clamped);
   };
 
+  const onBuy = async (sku: string): Promise<void> => {
+    if (purchaseBusySku) return;
+
+    setPurchaseBusySku(sku);
+    try {
+      const intent = await createPurchaseIntent(sku);
+      if (!intent) return;
+
+      const confirmed = await confirmPurchase(intent.intentId);
+      if (!confirmed) return;
+
+      setWallet(confirmed.wallet);
+      const nextLedger = await fetchLedger(20);
+      setLedger(nextLedger);
+    } finally {
+      setPurchaseBusySku(null);
+    }
+  };
+
   return (
     <main className="page">
       <section className="hud">
@@ -319,11 +355,10 @@ const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
           <span>Bombs: {stats.placed}/{stats.capacity}</span>
           <span>Range: {stats.range}</span>
           <span>Score: {stats.score}</span>
-<span>Score: {stats.score}</span>
-<span>Stars: {wallet.stars}</span>
-<span>Crystals: {wallet.crystals}</span>
-<span style={{ opacity: 0.7 }}>{syncStatus === 'synced' ? 'Synced' : 'Offline'}</span>
-
+          <span>Stars: {wallet.stars}</span>
+          <span>Crystals: {wallet.crystals}</span>
+          <span>Ledger: {ledger.length}</span>
+          <span style={{ opacity: 0.7 }}>{syncStatus === 'synced' ? 'Synced' : 'Offline'}</span>
         </div>
       </section>
 
@@ -403,6 +438,21 @@ const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
             >
               Reset
             </button>
+            <div className="shop-panel">
+              {catalog.map((item) => (
+                <button
+                  key={item.sku}
+                  type="button"
+                  className="shop-buy-btn"
+                  disabled={!item.available || purchaseBusySku !== null}
+                  onClick={() => {
+                    void onBuy(item.sku);
+                  }}
+                >
+                  Buy {item.title} ({item.priceStars}⭐)
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               className="bomb-btn"
