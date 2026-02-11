@@ -24,12 +24,19 @@ type RoomJoinMessage = {
   tgUserId?: string;
 };
 
-type ClientMessage = MatchClientMessage | RoomJoinMessage;
+type PingMessage = { type: 'ping'; id: number; t: number };
+
+type ClientMessage = MatchClientMessage | RoomJoinMessage | PingMessage;
+
+type ServerMessage =
+  | MatchServerMessage
+  | { type: 'connected' }
+  | { type: 'pong'; id: number; t: number; serverNow: number };
 
 const rooms = new Map<string, RoomState>();
 const clients = new Set<ClientCtx>();
 
-function send(socket: WebSocket, msg: MatchServerMessage | { type: 'connected' }) {
+function send(socket: WebSocket, msg: ServerMessage) {
   if (socket.readyState !== WebSocket.OPEN) {
     return;
   }
@@ -117,6 +124,12 @@ function parseMessage(raw: RawData): ClientMessage | null {
 
 function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
   switch (msg.type) {
+    case 'ping': {
+      const id = typeof msg.id === 'number' ? msg.id : 0;
+      const t = typeof msg.t === 'number' ? msg.t : 0;
+      return send(ctx.socket, { type: 'pong', id, t, serverNow: Date.now() });
+    }
+
     case 'room:join': {
       if (!msg.roomId || typeof msg.roomId !== 'string') {
         return send(ctx.socket, { type: 'match:error', error: 'invalid_room_id' });

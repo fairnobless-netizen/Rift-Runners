@@ -17,6 +17,8 @@ export class RemotePlayersRenderer {
   private stallAfterTicks = 7;
   private renderTick = -1;
   private baseDelayTicks = 2;
+  private rttMs: number | null = null;
+  private rttJitterMs = 0;
   private delayTicks = 2;
   private minDelayTicks = 1;
   private maxDelayTicks = 6;
@@ -52,6 +54,23 @@ export class RemotePlayersRenderer {
     this.tileSize = params.tileSize;
     this.offsetX = params.offsetX;
     this.offsetY = params.offsetY;
+  }
+
+  setNetworkRtt(rttMs: number | null, rttJitterMs: number, tickMs: number): void {
+    this.rttMs = rttMs;
+    this.rttJitterMs = rttJitterMs;
+
+    if (rttMs == null || !Number.isFinite(rttMs) || tickMs <= 0) return;
+
+    const oneWayMs = rttMs * 0.5;
+    const safetyMs = Math.max(0, rttJitterMs) * 0.5 + tickMs;
+    const recommended = Math.round((oneWayMs + safetyMs) / tickMs);
+
+    const nextBase = Math.max(1, Math.min(recommended, this.maxDelayTicks));
+    this.baseDelayTicks = nextBase;
+
+    if (this.delayTicks < this.baseDelayTicks) this.delayTicks = this.baseDelayTicks;
+    this.minDelayTicks = Math.max(1, this.baseDelayTicks - 1);
   }
 
   update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string): void {
@@ -300,6 +319,8 @@ export class RemotePlayersRenderer {
     extrapCount: number;
     extrapolatingTicks: number;
     stalled: boolean;
+    rttMs: number | null;
+    rttJitterMs: number;
   } {
     const windowSize = Math.max(1, this.windowUnderrunEvents.length);
     return {
@@ -315,6 +336,8 @@ export class RemotePlayersRenderer {
       extrapCount: this.extrapCount,
       extrapolatingTicks: this.extrapolatingTicks,
       stalled: this.stalled,
+      rttMs: this.rttMs,
+      rttJitterMs: this.rttJitterMs,
     };
   }
 
