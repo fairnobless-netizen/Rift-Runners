@@ -56,6 +56,11 @@ type PredictionStats = {
   biasY: number;
 };
 
+type TickDebugStats = {
+  snapshotTick: number;
+  simulationTick: number;
+};
+
 const JOYSTICK_RADIUS = 56;
 const JOYSTICK_KNOB_RADIUS = 22;
 const JOYSTICK_DEADZONE = 10;
@@ -92,6 +97,7 @@ export default function GameView(): JSX.Element {
   const [ledger, setLedger] = useState<WalletLedgerEntry[]>([]);
   const [purchaseBusySku, setPurchaseBusySku] = useState<string | null>(null);
   const [predictionStats, setPredictionStats] = useState<PredictionStats | null>(null);
+  const [tickDebugStats, setTickDebugStats] = useState<TickDebugStats | null>(null);
   const ws = useWsClient(token || undefined);
 
 
@@ -207,8 +213,17 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      const nextStats = sceneRef.current?.getPredictionStats?.() ?? null;
+      const scene = sceneRef.current;
+      const nextStats = scene?.getPredictionStats?.() ?? null;
       setPredictionStats(nextStats);
+      setTickDebugStats(
+        scene
+          ? {
+              snapshotTick: scene.getLastSnapshotTick(),
+              simulationTick: scene.getSimulationTick(),
+            }
+          : null,
+      );
     }, 350);
 
     return () => window.clearInterval(id);
@@ -544,6 +559,7 @@ export default function GameView(): JSX.Element {
         }}
         netSim={ws.netSimConfig}
         predictionStats={predictionStats}
+        tickDebugStats={tickDebugStats}
         onLobby={() => ws.send({ type: 'lobby:list' })}
         onCreateRoom={() => ws.send({ type: 'room:create' })}
         onStartMatch={() => ws.send({ type: 'match:start' })}
