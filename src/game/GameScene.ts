@@ -87,6 +87,9 @@ export class GameScene extends Phaser.Scene {
   private remotePlayers?: RemotePlayersRenderer;
   private prediction = new LocalPredictionController();
   private inputSeq = 0;
+  private accumulator = 0;
+  private readonly FIXED_DT = 1000 / 20;
+  private localInputQueue: Array<{ dx: number; dy: number }> = [];
   private matchGridW = GAME_CONFIG.gridWidth;
   private matchGridH = GAME_CONFIG.gridHeight;
   private controls: ControlsState;
@@ -216,8 +219,14 @@ export class GameScene extends Phaser.Scene {
     this.startLevel(initialLevelIndex, true);
   }
 
-  update(time: number): void {
+  update(time: number, delta: number): void {
     if (this.isLevelCleared) return;
+
+    this.accumulator += delta;
+    while (this.accumulator >= this.FIXED_DT) {
+      this.fixedUpdate();
+      this.accumulator -= this.FIXED_DT;
+    }
 
     this.simulationTick += 1;
     this.consumeKeyboard();
@@ -237,6 +246,17 @@ export class GameScene extends Phaser.Scene {
       this.doorController.update(time, this.isLevelCleared);
     }
     this.updateDoorVisual(time);
+    this.remotePlayers?.update(delta);
+  }
+
+  private fixedUpdate(): void {
+    this.processLocalInputQueue();
+  }
+
+  private processLocalInputQueue(): void {
+    const input = this.localInputQueue.shift();
+    if (!input) return;
+    this.moveLocalPlayer(input.dx, input.dy);
   }
 
   private setupCamera(): void {
@@ -351,6 +371,8 @@ export class GameScene extends Phaser.Scene {
     // TODO(module-c): replace with endless progression branch when campaign is complete.
 
     this.simulationTick = 0;
+    this.accumulator = 0;
+    this.localInputQueue.length = 0;
     this.rng = createDeterministicRng(this.mixLevelSeed(this.levelIndex));
     this.isLevelCleared = false;
     this.doorRevealed = false;
@@ -1302,7 +1324,7 @@ export class GameScene extends Phaser.Scene {
 
     sendInput(input);
     this.prediction.pushInput(input);
-    this.moveLocalPlayer(dx, dy);
+    this.localInputQueue.push({ dx, dy });
   }
 
   public moveLocalPlayer(dx: number, dy: number) {
