@@ -125,8 +125,13 @@ function parseMessage(raw: RawData): ClientMessage | null {
 function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
   switch (msg.type) {
     case 'ping': {
-      const id = typeof msg.id === 'number' ? msg.id : 0;
-      const t = typeof msg.t === 'number' ? msg.t : 0;
+      const id = Number((msg as any).id);
+      const t = Number((msg as any).t);
+
+      if (!Number.isFinite(id) || !Number.isFinite(t)) {
+        return;
+      }
+
       return send(ctx.socket, { type: 'pong', id, t, serverNow: Date.now() });
     }
 
