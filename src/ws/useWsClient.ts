@@ -2,7 +2,25 @@ import { useEffect, useRef, useState } from 'react';
 import { WsClient } from './wsClient';
 import type { WsClientMessage, WsServerMessage } from './wsTypes';
 
-type NetSimConfig = {
+export type NetSimPresetId = 'good-wifi' | '4g-ok' | 'bad-4g' | 'train';
+
+type NetSimPreset = {
+  id: NetSimPresetId;
+  label: string;
+  latencyMs: number;
+  jitterMs: number;
+  dropRate: number;
+};
+
+const NET_SIM_PRESETS: NetSimPreset[] = [
+  { id: 'good-wifi', label: 'Good WiFi', latencyMs: 20, jitterMs: 8, dropRate: 0.005 },
+  { id: '4g-ok', label: '4G OK', latencyMs: 70, jitterMs: 22, dropRate: 0.02 },
+  { id: 'bad-4g', label: 'Bad 4G', latencyMs: 140, jitterMs: 70, dropRate: 0.08 },
+  { id: 'train', label: 'Train', latencyMs: 220, jitterMs: 120, dropRate: 0.16 },
+];
+
+export type NetSimConfig = {
+  presetId: NetSimPresetId;
   enabled: boolean;
   latencyMs: number;
   jitterMs: number;
@@ -23,13 +41,15 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function resolveNetSimConfig(search: string): NetSimConfig {
+  const defaultPreset = NET_SIM_PRESETS[0];
   const params = new URLSearchParams(search);
-  const latencyMs = clamp(parseNumber(params, 'net_latency') ?? 0, 0, 500);
-  const jitterMs = clamp(parseNumber(params, 'net_jitter') ?? 0, 0, 300);
-  const dropRate = clamp(parseNumber(params, 'net_drop') ?? 0, 0, 0.5);
+  const latencyMs = clamp(parseNumber(params, 'net_latency') ?? defaultPreset.latencyMs, 0, 500);
+  const jitterMs = clamp(parseNumber(params, 'net_jitter') ?? defaultPreset.jitterMs, 0, 300);
+  const dropRate = clamp(parseNumber(params, 'net_drop') ?? defaultPreset.dropRate, 0, 0.5);
   const hasParams = params.has('net_latency') || params.has('net_jitter') || params.has('net_drop');
 
   return {
+    presetId: defaultPreset.id,
     enabled: import.meta.env.DEV && hasParams,
     latencyMs,
     jitterMs,
@@ -53,7 +73,12 @@ function shouldDrop(config: NetSimConfig): boolean {
 
 export function useWsClient(token?: string) {
   const clientRef = useRef<WsClient | null>(null);
-  const netSimConfigRef = useRef<NetSimConfig>(resolveNetSimConfig(window.location.search));
+  const [netSimConfig, setNetSimConfig] = useState<NetSimConfig>(() => resolveNetSimConfig(window.location.search));
+  const netSimConfigRef = useRef<NetSimConfig>(netSimConfig);
+  useEffect(() => {
+    netSimConfigRef.current = netSimConfig;
+  }, [netSimConfig]);
+
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<WsServerMessage[]>([]);
 
@@ -76,35 +101,36 @@ export function useWsClient(token?: string) {
       onOpen: () => setConnected(true),
       onClose: () => setConnected(false),
       onMessage: (msg) => {
-        const config = netSimConfigRef.current;
-        if (shouldDrop(config)) return;
+        // Handle pong without polluting messages
+        if (msg.type === 'pong') {
+          const sentPerf = pingSentAtRef.current.get(msg.id);
+          if (typeof sentPerf === 'number') {
+            pingSentAtRef.current.delete(msg.id);
 
-        const delayMs = getNetDelayMs(config);
-        window.setTimeout(() => {
-          // Handle pong without polluting messages
-          if (msg.type === 'pong') {
-            const sentPerf = pingSentAtRef.current.get(msg.id);
-            if (typeof sentPerf === 'number') {
-              pingSentAtRef.current.delete(msg.id);
+            const now = performance.now();
+            const sample = Math.max(0, now - sentPerf);
 
-              const now = performance.now();
-              const sample = Math.max(0, now - sentPerf);
+            const prev = rttEmaRef.current;
+            const alpha = 0.15;
+            const next = prev == null ? sample : prev + alpha * (sample - prev);
+            rttEmaRef.current = next;
 
-              const prev = rttEmaRef.current;
-              const alpha = 0.15;
-              const next = prev == null ? sample : prev + alpha * (sample - prev);
-              rttEmaRef.current = next;
+            const jitterSample = prev == null ? 0 : Math.abs(sample - prev);
+            const jAlpha = 0.2;
+            rttJitterEmaRef.current = rttJitterEmaRef.current + jAlpha * (jitterSample - rttJitterEmaRef.current);
 
-              const jitterSample = prev == null ? 0 : Math.abs(sample - prev);
-              const jAlpha = 0.2;
-              rttJitterEmaRef.current = rttJitterEmaRef.current + jAlpha * (jitterSample - rttJitterEmaRef.current);
-
-              setRttMs(next);
-              setRttJitterMs(rttJitterEmaRef.current);
-            }
-            return;
+            setRttMs(next);
+            setRttJitterMs(rttJitterEmaRef.current);
           }
+          return;
+        }
 
+        const config = netSimConfigRef.current;
+        const shouldSimulateSnapshot = import.meta.env.DEV && msg.type === 'match:snapshot' && config.enabled;
+        if (shouldSimulateSnapshot && shouldDrop(config)) return;
+
+        const delayMs = shouldSimulateSnapshot ? getNetDelayMs(config) : 0;
+        window.setTimeout(() => {
           setMessages((prev) => [...prev.slice(-50), msg]);
         }, delayMs);
       },
@@ -113,23 +139,15 @@ export function useWsClient(token?: string) {
     clientRef.current = client;
     client.connect();
 
-    // Ping loop (1s). We apply net-sim delay to ping send too, so RTT reflects simulated link.
+    // Ping loop (1s).
     const pingTimer = window.setInterval(() => {
       const c = clientRef.current;
       if (!c) return;
 
-      const config = netSimConfigRef.current;
-      if (shouldDrop(config)) return;
-
-      const delayMs = getNetDelayMs(config);
       const id = ++pingSeqRef.current;
-
-      window.setTimeout(() => {
-        // stamp at actual send time (after netSim delay)
-        pingSentAtRef.current.set(id, performance.now());
-        const msg: WsClientMessage = { type: 'ping', id, t: Date.now() };
-        c.send(msg);
-      }, delayMs);
+      pingSentAtRef.current.set(id, performance.now());
+      const msg: WsClientMessage = { type: 'ping', id, t: Date.now() };
+      c.send(msg);
     }, 1000);
 
     return () => {
@@ -145,14 +163,34 @@ export function useWsClient(token?: string) {
   return {
     connected,
     messages,
-    netSimConfig: netSimConfigRef.current,
+    netSimConfig,
+    netSimPresets: NET_SIM_PRESETS,
     rttMs,
     rttJitterMs,
+    setNetSimEnabled: (enabled: boolean) => {
+      if (!import.meta.env.DEV) return;
+      setNetSimConfig((prev) => ({ ...prev, enabled }));
+    },
+    setNetSimPreset: (presetId: NetSimPresetId) => {
+      if (!import.meta.env.DEV) return;
+
+      const preset = NET_SIM_PRESETS.find((candidate) => candidate.id === presetId);
+      if (!preset) return;
+
+      setNetSimConfig((prev) => ({
+        ...prev,
+        presetId: preset.id,
+        latencyMs: preset.latencyMs,
+        jitterMs: preset.jitterMs,
+        dropRate: preset.dropRate,
+      }));
+    },
     send: (msg: WsClientMessage) => {
       const config = netSimConfigRef.current;
-      if (shouldDrop(config)) return;
+      const shouldSimulateInput = import.meta.env.DEV && msg.type === 'match:input' && config.enabled;
+      if (shouldSimulateInput && shouldDrop(config)) return;
 
-      const delayMs = getNetDelayMs(config);
+      const delayMs = shouldSimulateInput ? getNetDelayMs(config) : 0;
       window.setTimeout(() => {
         clientRef.current?.send(msg);
       }, delayMs);

@@ -618,6 +618,9 @@ export default function GameView(): JSX.Element {
           displayName: profileName,
         }}
         netSim={ws.netSimConfig}
+        netSimPresets={ws.netSimPresets}
+        onToggleNetSim={ws.setNetSimEnabled}
+        onSelectNetSimPreset={ws.setNetSimPreset}
         predictionStats={predictionStats}
         tickDebugStats={tickDebugStats}
         rttMs={ws.rttMs}
