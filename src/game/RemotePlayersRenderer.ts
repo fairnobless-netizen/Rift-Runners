@@ -30,6 +30,13 @@ export class RemotePlayersRenderer {
   private minDelayTicks = 1;
   private maxDelayTicks = 6;
   private targetBufferPairs = 2;
+  // M15: targetBufferPairs smoothing
+  private targetBufferTargetPairs = 2;
+  private lastTargetBufferChangeTick = 0;
+  private readonly targetBufferCooldownTicks = 20;
+  private readonly targetBufferHysteresisPairs = 1;
+  private readonly targetBufferMaxPairs = 6;
+  private readonly targetBufferMinPairs = 2;
   private bufferSize = 0;
   private extrapolatingTicks = 0;
   private stalled = false;
@@ -66,6 +73,10 @@ export class RemotePlayersRenderer {
   setNetworkRtt(rttMs: number | null, rttJitterMs: number, tickMs: number): void {
     this.rttMs = rttMs;
     this.rttJitterMs = rttJitterMs;
+
+    // M15: adaptive targetBufferPairs (jitter-aware)
+    const nextTarget = this.computeTargetBufferPairs(tickMs);
+    this.targetBufferTargetPairs = nextTarget;
 
     if (rttMs == null || !Number.isFinite(rttMs) || tickMs <= 0) return;
 
@@ -187,6 +198,7 @@ export class RemotePlayersRenderer {
     if (this.windowUnderrunEvents.length === 0) {
       this.lastAdaptiveUpdateTick = simulationTick;
       this.lastDelayChangeTick = simulationTick;
+      this.lastTargetBufferChangeTick = simulationTick;
     }
 
     this.pushWindowSample(0, 0, 0);
@@ -214,6 +226,21 @@ export class RemotePlayersRenderer {
           }
         }
       }
+
+      // M15: apply targetBufferPairs smoothly (cooldown + hysteresis + step)
+      if (simulationTick - this.lastTargetBufferChangeTick >= this.targetBufferCooldownTicks) {
+        const diff = this.targetBufferTargetPairs - this.targetBufferPairs;
+
+        if (Math.abs(diff) > this.targetBufferHysteresisPairs) {
+          this.targetBufferPairs += diff > 0 ? 1 : -1;
+          this.targetBufferPairs = Phaser.Math.Clamp(
+            this.targetBufferPairs,
+            this.targetBufferMinPairs,
+            this.targetBufferMaxPairs,
+          );
+          this.lastTargetBufferChangeTick = simulationTick;
+        }
+      }
     }
 
     // Optional: limit delayTicks step to avoid visible jitter
@@ -223,6 +250,18 @@ export class RemotePlayersRenderer {
 
     // M14.4: never go below RTT-based baseDelay
     if (this.delayTicks < this.baseDelayTicks) this.delayTicks = this.baseDelayTicks;
+  }
+
+  private computeTargetBufferPairs(tickMs: number): number {
+    const jitterMs = Math.max(0, this.rttJitterMs ?? 0);
+
+    // Переводим jitter в тики. 1 tick guard + половина jitter как запас
+    const jitterTicks = tickMs > 0 ? Math.ceil((jitterMs * 0.5) / tickMs) : 0;
+
+    // База: 2 пары (минимум для нормальной интерполяции с запасом)
+    const raw = 2 + jitterTicks;
+
+    return Phaser.Math.Clamp(raw, this.targetBufferMinPairs, this.targetBufferMaxPairs);
   }
 
   private pushWindowSample(underrunEvent: number, stallEvent: number, extrapEvent: number): void {
@@ -363,8 +402,12 @@ export class RemotePlayersRenderer {
     stalled: boolean;
     rttMs: number | null;
     rttJitterMs: number;
+    targetBufferPairs: number;
+    targetBufferTargetPairs: number;
+    bufferHasReserve: boolean;
   } {
     const windowSize = Math.max(1, this.windowUnderrunEvents.length);
+    const bufferHasReserve = this.bufferSize >= this.targetBufferPairs + 2;
     return {
       renderTick: this.renderTick,
       baseDelayTicks: this.baseDelayTicks,
@@ -382,6 +425,9 @@ export class RemotePlayersRenderer {
       stalled: this.stalled,
       rttMs: this.rttMs,
       rttJitterMs: this.rttJitterMs,
+      targetBufferPairs: this.targetBufferPairs,
+      targetBufferTargetPairs: this.targetBufferTargetPairs,
+      bufferHasReserve,
     };
   }
 

@@ -1431,6 +1431,9 @@ export class GameScene extends Phaser.Scene {
     stalled: boolean;
     rttMs: number | null;
     rttJitterMs: number;
+    targetBufferPairs: number;
+    targetBufferTargetPairs: number;
+    bufferHasReserve: boolean;
   } {
     return this.remotePlayers?.getDebugStats() ?? {
       renderTick: -1,
@@ -1449,6 +1452,9 @@ export class GameScene extends Phaser.Scene {
       stalled: false,
       rttMs: null,
       rttJitterMs: 0,
+      targetBufferPairs: 2,
+      targetBufferTargetPairs: 2,
+      bufferHasReserve: false,
     };
   }
 }

@@ -30,6 +30,9 @@ type TickDebugStats = {
   stalled: boolean;
   rttMs: number | null;
   rttJitterMs: number;
+  targetBufferPairs: number;
+  targetBufferTargetPairs: number;
+  bufferHasReserve: boolean;
 };
 
 export function WsDebugOverlay({
@@ -110,6 +113,10 @@ export function WsDebugOverlay({
 
       <div style={{ marginTop: 4 }}>
         renderTick: {tickDebugStats?.renderTick ?? '—'} | delayTicks(auto): {tickDebugStats?.delayTicks ?? '—'} | baseDelay: {tickDebugStats?.baseDelayTicks ?? '—'} (target {tickDebugStats?.baseDelayTargetTicks ?? '—'}) | range {tickDebugStats?.minDelayTicks ?? '—'}-{tickDebugStats?.maxDelayTicks ?? '—'}
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        targetBuffer: {tickDebugStats?.targetBufferPairs ?? '—'} (target {tickDebugStats?.targetBufferTargetPairs ?? '—'}) | reserve: {String(tickDebugStats?.bufferHasReserve ?? false)}
       </div>
 
       <div style={{ marginTop: 4 }}>
