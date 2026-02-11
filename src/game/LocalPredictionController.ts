@@ -14,8 +14,14 @@ export class LocalPredictionController {
   private drift = 0;
   private biasX = 0;
   private biasY = 0;
-  private readonly SOFT_THRESHOLD = 0.25;
-  private readonly HARD_THRESHOLD = 1.25;
+  private inSoftCorrection = false;
+  private inHardCorrection = false;
+  private lastHardCorrectionTime = 0;
+  private readonly SOFT_ENTER = 0.3;
+  private readonly SOFT_EXIT = 0.2;
+  private readonly HARD_ENTER = 1.3;
+  private readonly HARD_EXIT = 1.1;
+  private readonly HARD_CORRECTION_COOLDOWN_MS = 200;
   private readonly BIAS_DECAY = 0.85;
 
   pushInput(input: PendingInput) {
@@ -53,20 +59,32 @@ export class LocalPredictionController {
     const drift = Math.hypot(serverX - localX, serverY - localY);
     this.drift = drift;
 
-    if (drift < this.SOFT_THRESHOLD) return;
-
-    if (drift < this.HARD_THRESHOLD) {
-      this.biasX += serverX - localX;
-      this.biasY += serverY - localY;
-      this.softCorrectionCount += 1;
+    if (this.inHardCorrection && drift <= this.HARD_EXIT) {
+      this.inHardCorrection = false;
+    } else if (!this.inHardCorrection && drift >= this.HARD_ENTER) {
+      const now = Date.now();
+      if (now - this.lastHardCorrectionTime >= this.HARD_CORRECTION_COOLDOWN_MS) {
+        this.inHardCorrection = true;
+        this.inSoftCorrection = false;
+        this.biasX = 0;
+        this.biasY = 0;
+        this.lastHardCorrectionTime = now;
+        this.correctionCount += 1;
+      }
       return;
     }
 
-    if (drift >= this.HARD_THRESHOLD) {
-      this.biasX = 0;
-      this.biasY = 0;
-      this.correctionCount += 1;
+    if (this.inSoftCorrection && drift <= this.SOFT_EXIT) {
+      this.inSoftCorrection = false;
+    } else if (!this.inSoftCorrection && drift >= this.SOFT_ENTER) {
+      this.inSoftCorrection = true;
     }
+
+    if (!this.inSoftCorrection) return;
+
+    this.biasX += serverX - localX;
+    this.biasY += serverY - localY;
+    this.softCorrectionCount += 1;
   }
 
   updateFixed() {
