@@ -13,5 +13,23 @@ export type WsServerMessage =
   | { type: 'room:joined'; room: unknown }
   | { type: 'room:left' }
   | { type: 'match:started'; matchId: string }
-  | { type: 'match:snapshot'; snapshot: unknown }
+  | { type: 'match:snapshot'; snapshot: MatchSnapshotV1 }
   | { type: 'error'; error: string };
+
+
+export type MatchSnapshotV1 = {
+  version: 'match_v1';
+  matchId: string;
+  tick: number;
+  serverTime: number;
+  world: { gridW: number; gridH: number };
+  players: Array<{
+    tgUserId: string;
+    displayName: string;
+    colorId: number;
+    skinId: string;
+    lastInputSeq: number;
+    x: number;
+    y: number;
+  }>;
+};

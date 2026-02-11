@@ -25,6 +25,9 @@ export type MatchSnapshot = {
 
   players: Array<{
     tgUserId: string;
+    displayName: string;
+    colorId: number; // 0..3
+    skinId: string;  // 'default' for now
     lastInputSeq: number;
     x: number;
     y: number;

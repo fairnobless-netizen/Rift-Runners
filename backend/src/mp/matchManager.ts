@@ -37,6 +37,9 @@ export function createMatch(roomId: string, players: string[]): MatchState {
 
     state.players.set(tgUserId, {
       tgUserId,
+      displayName: tgUserId,
+      colorId: idx % 4,
+      skinId: 'default',
       lastInputSeq: 0,
       x,
       y,

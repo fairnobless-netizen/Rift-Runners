@@ -50,6 +50,7 @@ const JOYSTICK_DEADZONE = 10;
 export default function GameView(): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
+  const sceneRef = useRef<GameScene | null>(null);
   const joystickPadRef = useRef<HTMLDivElement | null>(null);
   const controlsRef = useRef<ControlsState>({
     up: false,
@@ -69,6 +70,7 @@ export default function GameView(): JSX.Element {
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [profileName, setProfileName] = useState<string>('—');
   const [token, setToken] = useState<string>(() => localStorage.getItem('rift_session_token') ?? '');
+  const [localTgUserId, setLocalTgUserId] = useState<string | undefined>(undefined);
   const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
   const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
   const [catalog, setCatalog] = useState<ShopCatalogItem[]>([]);
@@ -122,6 +124,7 @@ export default function GameView(): JSX.Element {
 
         localStorage.setItem('rift_session_token', token);
         setToken(token);
+        setLocalTgUserId(String(authJson.user?.tgUserId ?? ''));
 
         // M5d: backend is source of truth for campaign progress
         try {
@@ -217,13 +220,16 @@ export default function GameView(): JSX.Element {
     const width = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
     const height = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
 
+    const scene = new GameScene(controlsRef.current);
+    sceneRef.current = scene;
+
     const game = new Phaser.Game({
       type: Phaser.AUTO,
       parent: mountRef.current,
       width,
       height,
       transparent: true,
-      scene: [new GameScene(controlsRef.current)],
+      scene: [scene],
       scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -236,8 +242,16 @@ export default function GameView(): JSX.Element {
       zoomApiRef.current = null;
       game.destroy(true);
       gameRef.current = null;
+      sceneRef.current = null;
     };
   }, []);
+
+
+  useEffect(() => {
+    const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
+    if (!last?.snapshot) return;
+    sceneRef.current?.applyMatchSnapshot(last.snapshot, localTgUserId);
+  }, [ws.messages, localTgUserId]);
 
   useEffect(
     () => () => {

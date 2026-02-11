@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { RemotePlayersRenderer } from './RemotePlayersRenderer';
 import {
   canOccupyCell,
   createArena,
@@ -82,6 +83,7 @@ const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
 const LEVELS_PER_ZONE = BOSS_CONFIG.zonesPerStage;
 
 export class GameScene extends Phaser.Scene {
+  private remotePlayers?: RemotePlayersRenderer;
   private controls: ControlsState;
   private readonly baseSeed = 0x52494654;
   private readonly runId = 1;
@@ -203,6 +205,8 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#0f1220');
     this.setupInput();
     this.setupCamera();
+    this.remotePlayers = new RemotePlayersRenderer(this);
+    this.remotePlayers.setTransform({ tileSize: GAME_CONFIG.tileSize, offsetX: 0, offsetY: 0 });
     const initialLevelIndex = this.loadProgress();
     this.startLevel(initialLevelIndex, true);
   }
@@ -1278,5 +1282,11 @@ export class GameScene extends Phaser.Scene {
       default:
         return false;
     }
+  }
+
+  public applyMatchSnapshot(snapshot: any, localTgUserId?: string) {
+    if (!this.remotePlayers) return;
+    if (snapshot?.version !== 'match_v1') return;
+    this.remotePlayers.applySnapshot(snapshot, localTgUserId);
   }
 }
