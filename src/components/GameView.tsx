@@ -51,6 +51,7 @@ export default function GameView(): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const sceneRef = useRef<GameScene | null>(null);
+  const inputSeqRef = useRef(0);
   const joystickPadRef = useRef<HTMLDivElement | null>(null);
   const controlsRef = useRef<ControlsState>({
     up: false,
@@ -123,7 +124,9 @@ export default function GameView(): JSX.Element {
 
         localStorage.setItem('rift_session_token', token);
         setToken(token);
-        setLocalTgUserId(String(authJson.user?.tgUserId ?? ''));
+        const nextLocalTgUserId = String(authJson.user?.tgUserId ?? '');
+        setLocalTgUserId(nextLocalTgUserId);
+        sceneRef.current?.setLocalTgUserId(nextLocalTgUserId || undefined);
 
         // M5d: backend is source of truth for campaign progress
         try {
@@ -245,6 +248,10 @@ export default function GameView(): JSX.Element {
     };
   }, []);
 
+
+  useEffect(() => {
+    sceneRef.current?.setLocalTgUserId(localTgUserId);
+  }, [localTgUserId]);
 
   useEffect(() => {
     const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
@@ -501,9 +508,17 @@ export default function GameView(): JSX.Element {
         onCreateRoom={() => ws.send({ type: 'room:create' })}
         onStartMatch={() => ws.send({ type: 'match:start' })}
         onMove={(dir) => {
-          sceneRef.current?.sendLocalMatchMove(dir, (input) => {
-            ws.send({ type: 'match:input', seq: input.seq, payload: { kind: 'move', dir: input.dir } });
-          });
+          const scene = sceneRef.current;
+          if (!scene) return;
+
+          const seq = inputSeqRef.current + 1;
+          inputSeqRef.current = seq;
+
+          const dx = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
+          const dy = dir === 'up' ? -1 : dir === 'down' ? 1 : 0;
+
+          scene.onLocalMatchInput({ seq, dx, dy });
+          ws.send({ type: 'match:input', seq, payload: { kind: 'move', dir } });
         }}
       />
     </main>

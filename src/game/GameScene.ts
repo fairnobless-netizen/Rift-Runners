@@ -89,7 +89,8 @@ export class GameScene extends Phaser.Scene {
   private inputSeq = 0;
   private accumulator = 0;
   private readonly FIXED_DT = 1000 / 20;
-  private localInputQueue: Array<{ dx: number; dy: number }> = [];
+  private localInputQueue: Array<{ seq: number; dx: number; dy: number }> = [];
+  private localTgUserId?: string;
   private matchGridW = GAME_CONFIG.gridWidth;
   private matchGridH = GAME_CONFIG.gridHeight;
   private controls: ControlsState;
@@ -256,7 +257,7 @@ export class GameScene extends Phaser.Scene {
   private processLocalInputQueue(): void {
     const input = this.localInputQueue.shift();
     if (!input) return;
-    this.moveLocalPlayer(input.dx, input.dy);
+    this.applyLocalMove(input.dx, input.dy);
   }
 
   private setupCamera(): void {
@@ -1311,23 +1312,21 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  public sendLocalMatchMove(direction: Direction, sendInput: (input: { seq: number; dx: number; dy: number; dir: Direction }) => void) {
-    const { dx, dy } = this.toDelta(direction);
-    this.inputSeq += 1;
-
-    const input = {
-      seq: this.inputSeq,
-      dx,
-      dy,
-      dir: direction,
-    };
-
-    sendInput(input);
+  public onLocalMatchInput(input: { seq: number; dx: number; dy: number }) {
+    this.inputSeq = Math.max(this.inputSeq, input.seq);
     this.prediction.pushInput(input);
-    this.localInputQueue.push({ dx, dy });
+    this.enqueueLocalInput(input);
   }
 
-  public moveLocalPlayer(dx: number, dy: number) {
+  public setLocalTgUserId(id?: string) {
+    this.localTgUserId = id;
+  }
+
+  private enqueueLocalInput(input: { seq: number; dx: number; dy: number }) {
+    this.localInputQueue.push(input);
+  }
+
+  private applyLocalMove(dx: number, dy: number) {
     const nextX = clamp(this.player.gridX + dx, 0, this.matchGridW - 1);
     const nextY = clamp(this.player.gridY + dy, 0, this.matchGridH - 1);
     this.setLocalPlayerPosition(nextX, nextY);
@@ -1347,23 +1346,25 @@ export class GameScene extends Phaser.Scene {
     if (!this.remotePlayers) return;
     if (snapshot?.version !== 'match_v1') return;
 
+    const effectiveLocalId = localTgUserId ?? this.localTgUserId;
+
     this.matchGridW = snapshot.world?.gridW ?? this.matchGridW;
     this.matchGridH = snapshot.world?.gridH ?? this.matchGridH;
 
-    if (localTgUserId) {
-      const myPlayer = snapshot.players?.find((p: any) => p.tgUserId === localTgUserId);
-      if (myPlayer) {
-        this.prediction.applyAuthoritativeState(
-          myPlayer.x,
-          myPlayer.y,
-          myPlayer.lastInputSeq,
-          (dx, dy) => this.moveLocalPlayer(dx, dy),
-          (x, y) => this.setLocalPlayerPosition(x, y),
-        );
-      }
-    }
+    this.remotePlayers.applySnapshot(snapshot, effectiveLocalId);
 
-    this.remotePlayers.applySnapshot(snapshot, localTgUserId);
+    if (!effectiveLocalId) return;
+
+    const me = snapshot.players?.find((p: any) => p.tgUserId === effectiveLocalId);
+    if (!me) return;
+
+    this.prediction.reconcile({
+      serverX: me.x,
+      serverY: me.y,
+      lastInputSeq: me.lastInputSeq,
+      setPosition: (x, y) => this.setLocalPlayerPosition(x, y),
+      applyMove: (dx, dy) => this.applyLocalMove(dx, dy),
+    });
   }
 }
 
