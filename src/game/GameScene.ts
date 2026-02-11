@@ -1417,6 +1417,8 @@ export class GameScene extends Phaser.Scene {
   public getNetInterpStats(): {
     renderTick: number;
     baseDelayTicks: number;
+    baseDelayTargetTicks: number;
+    baseDelayStepCooldownMs: number;
     delayTicks: number;
     minDelayTicks: number;
     maxDelayTicks: number;
@@ -1433,6 +1435,8 @@ export class GameScene extends Phaser.Scene {
     return this.remotePlayers?.getDebugStats() ?? {
       renderTick: -1,
       baseDelayTicks: 2,
+      baseDelayTargetTicks: 2,
+      baseDelayStepCooldownMs: 500,
       delayTicks: 2,
       minDelayTicks: 1,
       maxDelayTicks: 6,

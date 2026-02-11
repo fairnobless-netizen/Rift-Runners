@@ -16,6 +16,8 @@ type TickDebugStats = {
   simulationTick: number;
   renderTick: number;
   baseDelayTicks: number;
+  baseDelayTargetTicks: number;
+  baseDelayStepCooldownMs: number;
   delayTicks: number;
   minDelayTicks: number;
   maxDelayTicks: number;
@@ -26,6 +28,8 @@ type TickDebugStats = {
   extrapCount: number;
   extrapolatingTicks: number;
   stalled: boolean;
+  rttMs: number | null;
+  rttJitterMs: number;
 };
 
 export function WsDebugOverlay({
@@ -105,11 +109,11 @@ export function WsDebugOverlay({
       </div>
 
       <div style={{ marginTop: 4 }}>
-        renderTick: {tickDebugStats?.renderTick ?? '—'} | delayTicks(auto): {tickDebugStats?.delayTicks ?? '—'} (base {tickDebugStats?.baseDelayTicks ?? '—'}, range {tickDebugStats?.minDelayTicks ?? '—'}-{tickDebugStats?.maxDelayTicks ?? '—'})
+        renderTick: {tickDebugStats?.renderTick ?? '—'} | delayTicks(auto): {tickDebugStats?.delayTicks ?? '—'} | baseDelay: {tickDebugStats?.baseDelayTicks ?? '—'} (target {tickDebugStats?.baseDelayTargetTicks ?? '—'}) | range {tickDebugStats?.minDelayTicks ?? '—'}-{tickDebugStats?.maxDelayTicks ?? '—'}
       </div>
 
       <div style={{ marginTop: 4 }}>
-        RTT: {rttMs == null ? '—' : `${rttMs.toFixed(1)}ms`} | jitter: {Number.isFinite(rttJitterMs) ? `${rttJitterMs.toFixed(1)}ms` : '—'}
+        RTT: {(tickDebugStats?.rttMs ?? rttMs)?.toFixed(0) ?? '—'} ms | Jitter: {(tickDebugStats?.rttJitterMs ?? rttJitterMs).toFixed(0)} ms
       </div>
 
       <div style={{ marginTop: 4 }}>
