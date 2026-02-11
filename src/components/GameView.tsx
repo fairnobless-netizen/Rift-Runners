@@ -46,9 +46,13 @@ const defaultStats: PlayerStats = {
 
 type PredictionStats = {
   correctionCount: number;
+  softCorrectionCount: number;
   droppedInputCount: number;
   pendingCount: number;
   lastAckSeq: number;
+  drift: number;
+  biasX: number;
+  biasY: number;
 };
 
 const JOYSTICK_RADIUS = 56;
