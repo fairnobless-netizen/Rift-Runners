@@ -17,6 +17,13 @@ export class RemotePlayersRenderer {
   private stallAfterTicks = 7;
   private renderTick = -1;
   private baseDelayTicks = 2;
+  // M14.3: baseDelay smoothing / spike guard
+  private baseDelayTargetTicks: number = 2;
+  private baseDelayLastAppliedAtMs: number = 0;
+  private readonly baseDelayStepCooldownMs: number = 500; // apply at most 1 tick step per 0.5s
+  private readonly baseDelayHysteresisTicks: number = 1; // ignore +-1 jitter unless sustained
+  private readonly rttSpikeFactor: number = 2.0; // spike if sample > ema * factor
+  private rttLastGoodEmaMs: number | null = null;
   private rttMs: number | null = null;
   private rttJitterMs = 0;
   private delayTicks = 2;
@@ -62,13 +69,41 @@ export class RemotePlayersRenderer {
 
     if (rttMs == null || !Number.isFinite(rttMs) || tickMs <= 0) return;
 
+    // Spike guard: if RTT suddenly doubles vs last good EMA, don't immediately raise baseDelay.
+    if (this.rttLastGoodEmaMs != null && rttMs > this.rttLastGoodEmaMs * this.rttSpikeFactor) {
+      // keep target as is; let symptom-based controller handle short turbulence
+      return;
+    }
+
+    this.rttLastGoodEmaMs = rttMs;
+
+    // one-way ~= RTT/2. Add safety margin from jitter + 1 tick guard.
     const oneWayMs = rttMs * 0.5;
     const safetyMs = Math.max(0, rttJitterMs) * 0.5 + tickMs;
     const recommended = Math.round((oneWayMs + safetyMs) / tickMs);
+    const clamped = Math.max(1, Math.min(recommended, this.maxDelayTicks));
 
-    const nextBase = Math.max(1, Math.min(recommended, this.maxDelayTicks));
-    this.baseDelayTicks = nextBase;
+    this.baseDelayTargetTicks = clamped;
 
+    // Apply with hysteresis + rate limit (at most 1 tick per cooldown)
+    const now = performance.now ? performance.now() : Date.now();
+    if (this.baseDelayLastAppliedAtMs === 0) this.baseDelayLastAppliedAtMs = now;
+
+    const diff = this.baseDelayTargetTicks - this.baseDelayTicks;
+    if (Math.abs(diff) <= this.baseDelayHysteresisTicks) {
+      return; // ignore small noise
+    }
+
+    if (now - this.baseDelayLastAppliedAtMs < this.baseDelayStepCooldownMs) {
+      return; // too soon to change again
+    }
+
+    // step by 1 tick towards target
+    this.baseDelayTicks += diff > 0 ? 1 : -1;
+    this.baseDelayTicks = Math.max(1, Math.min(this.baseDelayTicks, this.maxDelayTicks));
+    this.baseDelayLastAppliedAtMs = now;
+
+    // keep current delay not below base
     if (this.delayTicks < this.baseDelayTicks) this.delayTicks = this.baseDelayTicks;
     this.minDelayTicks = Math.max(1, this.baseDelayTicks - 1);
   }
@@ -147,6 +182,8 @@ export class RemotePlayersRenderer {
   }
 
   private updateAdaptiveDelay(simulationTick: number, bufferSize: number): void {
+    const prevDelay = this.delayTicks;
+
     if (this.windowUnderrunEvents.length === 0) {
       this.lastAdaptiveUpdateTick = simulationTick;
       this.lastDelayChangeTick = simulationTick;
@@ -154,35 +191,38 @@ export class RemotePlayersRenderer {
 
     this.pushWindowSample(0, 0, 0);
 
-    if (simulationTick - this.lastAdaptiveUpdateTick < this.adaptiveUpdateEveryTicks) {
-      return;
-    }
+    const shouldUpdate = simulationTick - this.lastAdaptiveUpdateTick >= this.adaptiveUpdateEveryTicks;
+    if (shouldUpdate) {
+      this.lastAdaptiveUpdateTick = simulationTick;
+      const cooldownPassed = simulationTick - this.lastDelayChangeTick >= this.adaptiveCooldownTicks;
+      if (cooldownPassed) {
+        const windowSize = Math.max(1, this.windowUnderrunEvents.length);
+        const underrunRate = this.windowUnderrunSum / windowSize;
+        const bufferHasReserve = bufferSize >= this.targetBufferPairs + 2;
 
-    this.lastAdaptiveUpdateTick = simulationTick;
-    if (simulationTick - this.lastDelayChangeTick < this.adaptiveCooldownTicks) {
-      return;
-    }
-
-    const windowSize = Math.max(1, this.windowUnderrunEvents.length);
-    const underrunRate = this.windowUnderrunSum / windowSize;
-    const bufferHasReserve = bufferSize >= this.targetBufferPairs + 2;
-
-    if (underrunRate > 0.05 || this.windowStallSum > 0) {
-      const nextDelay = Math.min(this.delayTicks + 1, this.maxDelayTicks);
-      if (nextDelay !== this.delayTicks) {
-        this.delayTicks = nextDelay;
-        this.lastDelayChangeTick = simulationTick;
-      }
-      return;
-    }
-
-    if (this.windowUnderrunSum === 0 && bufferHasReserve) {
-      const nextDelay = Math.max(this.delayTicks - 1, this.minDelayTicks);
-      if (nextDelay !== this.delayTicks) {
-        this.delayTicks = nextDelay;
-        this.lastDelayChangeTick = simulationTick;
+        if (underrunRate > 0.05 || this.windowStallSum > 0) {
+          const nextDelay = Math.min(this.delayTicks + 1, this.maxDelayTicks);
+          if (nextDelay !== this.delayTicks) {
+            this.delayTicks = nextDelay;
+            this.lastDelayChangeTick = simulationTick;
+          }
+        } else if (this.windowUnderrunSum === 0 && bufferHasReserve) {
+          const nextDelay = Math.max(this.delayTicks - 1, this.minDelayTicks);
+          if (nextDelay !== this.delayTicks) {
+            this.delayTicks = nextDelay;
+            this.lastDelayChangeTick = simulationTick;
+          }
+        }
       }
     }
+
+    // Optional: limit delayTicks step to avoid visible jitter
+    const maxStepPerUpdate = 1;
+    if (this.delayTicks > prevDelay + maxStepPerUpdate) this.delayTicks = prevDelay + maxStepPerUpdate;
+    if (this.delayTicks < prevDelay - maxStepPerUpdate) this.delayTicks = prevDelay - maxStepPerUpdate;
+
+    // M14.4: never go below RTT-based baseDelay
+    if (this.delayTicks < this.baseDelayTicks) this.delayTicks = this.baseDelayTicks;
   }
 
   private pushWindowSample(underrunEvent: number, stallEvent: number, extrapEvent: number): void {
@@ -309,6 +349,8 @@ export class RemotePlayersRenderer {
   getDebugStats(): {
     renderTick: number;
     baseDelayTicks: number;
+    baseDelayTargetTicks: number;
+    baseDelayStepCooldownMs: number;
     delayTicks: number;
     minDelayTicks: number;
     maxDelayTicks: number;
@@ -326,6 +368,8 @@ export class RemotePlayersRenderer {
     return {
       renderTick: this.renderTick,
       baseDelayTicks: this.baseDelayTicks,
+      baseDelayTargetTicks: this.baseDelayTargetTicks,
+      baseDelayStepCooldownMs: this.baseDelayStepCooldownMs,
       delayTicks: this.delayTicks,
       minDelayTicks: this.minDelayTicks,
       maxDelayTicks: this.maxDelayTicks,

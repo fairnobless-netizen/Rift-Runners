@@ -61,6 +61,8 @@ type TickDebugStats = {
   simulationTick: number;
   renderTick: number;
   baseDelayTicks: number;
+  baseDelayTargetTicks: number;
+  baseDelayStepCooldownMs: number;
   delayTicks: number;
   minDelayTicks: number;
   maxDelayTicks: number;
@@ -238,6 +240,8 @@ export default function GameView(): JSX.Element {
           simulationTick: scene.getSimulationTick(),
           renderTick: netInterpStats.renderTick,
           baseDelayTicks: netInterpStats.baseDelayTicks,
+          baseDelayTargetTicks: netInterpStats.baseDelayTargetTicks,
+          baseDelayStepCooldownMs: netInterpStats.baseDelayStepCooldownMs,
           delayTicks: netInterpStats.delayTicks,
           minDelayTicks: netInterpStats.minDelayTicks,
           maxDelayTicks: netInterpStats.maxDelayTicks,
