@@ -31,6 +31,8 @@ import {
   type ShopCatalogItem,
   type WalletLedgerEntry,
 } from '../game/wallet';
+import { WsDebugOverlay } from './WsDebugOverlay';
+import { useWsClient } from '../ws/useWsClient';
 
 
 const defaultStats: PlayerStats = {
@@ -66,11 +68,13 @@ export default function GameView(): JSX.Element {
   const [joystickPressed, setJoystickPressed] = useState(false);
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [profileName, setProfileName] = useState<string>('—');
+  const [token, setToken] = useState<string>(() => localStorage.getItem('rift_session_token') ?? '');
   const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
   const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
   const [catalog, setCatalog] = useState<ShopCatalogItem[]>([]);
   const [ledger, setLedger] = useState<WalletLedgerEntry[]>([]);
   const [purchaseBusySku, setPurchaseBusySku] = useState<string | null>(null);
+  const ws = useWsClient(token || undefined);
 
 
   const setMovementFromDirection = (direction: Direction | null): void => {
@@ -116,6 +120,7 @@ export default function GameView(): JSX.Element {
         if (!token) return;
 
         localStorage.setItem('rift_session_token', token);
+        setToken(token);
 
         // M5d: backend is source of truth for campaign progress
         try {
@@ -474,6 +479,14 @@ export default function GameView(): JSX.Element {
           </div>
         </aside>
       </section>
+
+      <WsDebugOverlay
+        connected={ws.connected}
+        messages={ws.messages}
+        onLobby={() => ws.send({ type: 'lobby:list' })}
+        onCreateRoom={() => ws.send({ type: 'room:create' })}
+        onStartMatch={() => ws.send({ type: 'match:start' })}
+      />
     </main>
   );
 }
