@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { RemotePlayersRenderer } from './RemotePlayersRenderer';
 import { LocalPredictionController } from './LocalPredictionController';
+import type { MatchSnapshotV1 } from '../ws/wsTypes';
 import {
   canOccupyCell,
   createArena,
@@ -91,13 +92,14 @@ export class GameScene extends Phaser.Scene {
   private readonly FIXED_DT = 1000 / 20;
   private localInputQueue: Array<{ seq: number; dx: number; dy: number }> = [];
   private localTgUserId?: string;
-  private matchGridW = GAME_CONFIG.gridWidth;
-  private matchGridH = GAME_CONFIG.gridHeight;
+  private matchGridW: number = GAME_CONFIG.gridWidth;
+  private matchGridH: number = GAME_CONFIG.gridHeight;
   private controls: ControlsState;
   private readonly baseSeed = 0x52494654;
   private readonly runId = 1;
   private rng: DeterministicRng = createDeterministicRng(this.baseSeed);
   private simulationTick = 0;
+  private lastSnapshotTick = -1;
   private arena: ArenaModel = createArena(0, this.rng);
   private levelIndex = 0;
   private zoneIndex = 0;
@@ -229,7 +231,6 @@ export class GameScene extends Phaser.Scene {
       this.accumulator -= this.FIXED_DT;
     }
 
-    this.simulationTick += 1;
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
     this.consumeMovementIntent(time);
@@ -251,6 +252,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private fixedUpdate(): void {
+    this.simulationTick += 1;
     this.processLocalInputQueue();
     this.prediction.updateFixed();
   }
@@ -1353,9 +1355,12 @@ export class GameScene extends Phaser.Scene {
     this.placeLocalPlayerSpriteAt(x, y);
   }
 
-  public applyMatchSnapshot(snapshot: any, localTgUserId?: string) {
+  public applyMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string) {
     if (!this.remotePlayers) return;
     if (snapshot?.version !== 'match_v1') return;
+    if (snapshot.tick <= this.lastSnapshotTick) return;
+
+    this.lastSnapshotTick = snapshot.tick;
 
     const effectiveLocalId = localTgUserId ?? this.localTgUserId;
 
@@ -1366,7 +1371,7 @@ export class GameScene extends Phaser.Scene {
 
     if (!effectiveLocalId) return;
 
-    const me = snapshot.players?.find((p: any) => p.tgUserId === effectiveLocalId);
+    const me = snapshot.players?.find((p) => p.tgUserId === effectiveLocalId);
     if (!me) return;
 
     this.prediction.reconcile({
@@ -1382,6 +1387,14 @@ export class GameScene extends Phaser.Scene {
 
   public getPredictionStats() {
     return this.prediction?.getStats?.() ?? null;
+  }
+
+  public getSimulationTick(): number {
+    return this.simulationTick;
+  }
+
+  public getLastSnapshotTick(): number {
+    return this.lastSnapshotTick;
   }
 }
 

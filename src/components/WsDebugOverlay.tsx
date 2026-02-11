@@ -11,6 +11,11 @@ type PredictionStats = {
   biasY: number;
 };
 
+type TickDebugStats = {
+  snapshotTick: number;
+  simulationTick: number;
+};
+
 export function WsDebugOverlay({
   connected,
   messages,
@@ -18,6 +23,7 @@ export function WsDebugOverlay({
   netSim,
   onLobby,
   predictionStats,
+  tickDebugStats,
   onCreateRoom,
   onStartMatch,
   onMove,
@@ -37,6 +43,7 @@ export function WsDebugOverlay({
   };
   onLobby: () => void;
   predictionStats: PredictionStats | null;
+  tickDebugStats: TickDebugStats | null;
   onCreateRoom: () => void;
   onStartMatch: () => void;
   onMove: (dir: 'up' | 'down' | 'left' | 'right') => void;
@@ -75,6 +82,10 @@ export function WsDebugOverlay({
 
       <div style={{ marginTop: 4 }}>
         NetSim: latency={netSim.latencyMs}ms, jitter={netSim.jitterMs}ms, drop={netSim.dropRate}
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        snapshotTick: {tickDebugStats?.snapshotTick ?? '—'} | simulationTick: {tickDebugStats?.simulationTick ?? '—'}
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>

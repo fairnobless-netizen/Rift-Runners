@@ -30,7 +30,7 @@ export type MatchSnapshotV1 = {
 export class RemotePlayersRenderer {
   private scene: Phaser.Scene;
   private players = new Map<string, RemotePlayerView>();
-  private lastSnapshotTick = 0;
+  private lastSnapshotTick = -1;
 
   private tileSize = 32;
   private offsetX = 0;
@@ -46,10 +46,10 @@ export class RemotePlayersRenderer {
     this.offsetY = params.offsetY;
   }
 
-  update(currentTick: number) {
+  update(simulationTick: number) {
     for (const view of this.players.values()) {
       const tickSpan = view.targetTick - view.prevTick;
-      const alpha = tickSpan <= 0 ? 1 : Phaser.Math.Clamp((currentTick - view.prevTick) / tickSpan, 0, 1);
+      const alpha = tickSpan <= 0 ? 1 : Phaser.Math.Clamp((simulationTick - view.prevTick) / tickSpan, 0, 1);
       const x = Phaser.Math.Linear(view.prevX, view.targetX, alpha);
       const y = Phaser.Math.Linear(view.prevY, view.targetY, alpha);
       view.container.setPosition(x, y);
@@ -57,6 +57,9 @@ export class RemotePlayersRenderer {
   }
 
   applySnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string) {
+    const previousSnapshotTick = this.lastSnapshotTick;
+    this.lastSnapshotTick = snapshot.tick;
+
     const alive = new Set<string>();
 
     for (const p of snapshot.players) {
@@ -74,7 +77,7 @@ export class RemotePlayersRenderer {
       } else {
         view.prevX = view.container.x;
         view.prevY = view.container.y;
-        view.prevTick = this.lastSnapshotTick;
+        view.prevTick = previousSnapshotTick >= 0 ? previousSnapshotTick : snapshot.tick;
         view.targetX = px;
         view.targetY = py;
         view.targetTick = snapshot.tick;
@@ -90,8 +93,6 @@ export class RemotePlayersRenderer {
         this.players.delete(id);
       }
     }
-
-    this.lastSnapshotTick = snapshot.tick;
   }
 
   private createPlayer(p: { displayName: string; colorId: number }, x: number, y: number, tick: number): RemotePlayerView {
