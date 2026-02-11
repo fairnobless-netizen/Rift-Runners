@@ -189,7 +189,7 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       if (!match) return;
 
       const seq = Number((msg as any).seq);
-      if (!Number.isFinite(seq)) return;
+      if (!Number.isSafeInteger(seq) || seq <= 0) return;
 
       const payload = (msg as any).payload;
       if (!payload || typeof payload !== 'object') return;
@@ -201,7 +201,7 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
         match.inputQueue.push({
           tgUserId: ctx.tgUserId,
-          seq: Math.floor(seq),
+          seq,
           payload,
         });
       }
