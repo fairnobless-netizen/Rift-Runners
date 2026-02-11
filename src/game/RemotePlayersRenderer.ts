@@ -10,6 +10,16 @@ type RemotePlayerView = {
 export class RemotePlayersRenderer {
   private scene: Phaser.Scene;
   private players = new Map<string, RemotePlayerView>();
+  private velocities = new Map<string, { vx: number; vy: number }>();
+  private lastRenderedGridPos = new Map<string, { x: number; y: number }>();
+
+  private readonly maxExtrapolationTicks = 3;
+  private stallAfterTicks = 7;
+  private renderTick = -1;
+  private delayTicks = 2;
+  private bufferSize = 0;
+  private extrapolatingTicks = 0;
+  private stalled = false;
 
   private tileSize = 32;
   private offsetX = 0;
@@ -25,7 +35,17 @@ export class RemotePlayersRenderer {
     this.offsetY = params.offsetY;
   }
 
-  renderInterpolated(buffer: MatchSnapshotV1[], renderTick: number, localTgUserId?: string): void {
+  update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string, delayTicks = 2): void {
+    this.delayTicks = delayTicks;
+    this.stallAfterTicks = this.delayTicks + this.maxExtrapolationTicks + 2;
+    const renderTick = simulationTick - this.delayTicks;
+    this.renderTick = renderTick;
+    this.bufferSize = buffer.length;
+    this.extrapolatingTicks = 0;
+    this.stalled = false;
+
+    this.updateVelocities(buffer);
+
     if (buffer.length === 0) {
       this.destroyMissingPlayers(new Set<string>());
       return;
@@ -44,7 +64,23 @@ export class RemotePlayersRenderer {
     }
 
     if (!snapshotA || !snapshotB) {
-      this.renderFromSnapshot(buffer[buffer.length - 1], localTgUserId);
+      const anchorSnapshot = this.findAnchorSnapshot(buffer, renderTick) ?? buffer[buffer.length - 1];
+      const extrapolationTicks = Math.max(0, renderTick - anchorSnapshot.tick);
+
+      if (extrapolationTicks > 0 && extrapolationTicks <= this.maxExtrapolationTicks) {
+        this.extrapolatingTicks = extrapolationTicks;
+        this.renderExtrapolated(anchorSnapshot, extrapolationTicks, localTgUserId);
+        return;
+      }
+
+      if (extrapolationTicks > this.maxExtrapolationTicks) {
+        this.extrapolatingTicks = this.maxExtrapolationTicks;
+        this.stalled = extrapolationTicks >= this.stallAfterTicks;
+        this.renderFrozen(anchorSnapshot, localTgUserId);
+        return;
+      }
+
+      this.renderFromSnapshot(anchorSnapshot, localTgUserId);
       return;
     }
 
@@ -76,6 +112,74 @@ export class RemotePlayersRenderer {
     this.destroyMissingPlayers(alive);
   }
 
+  private renderExtrapolated(snapshot: MatchSnapshotV1, extrapolationTicks: number, localTgUserId?: string): void {
+    const alive = new Set<string>();
+    for (const player of snapshot.players) {
+      if (localTgUserId && player.tgUserId === localTgUserId) continue;
+      alive.add(player.tgUserId);
+      const velocity = this.velocities.get(player.tgUserId);
+      const x = player.x + (velocity?.vx ?? 0) * extrapolationTicks;
+      const y = player.y + (velocity?.vy ?? 0) * extrapolationTicks;
+      this.upsertPlayer(player, x, y);
+    }
+    this.destroyMissingPlayers(alive);
+  }
+
+  private renderFrozen(snapshot: MatchSnapshotV1, localTgUserId?: string): void {
+    const alive = new Set<string>();
+    for (const player of snapshot.players) {
+      if (localTgUserId && player.tgUserId === localTgUserId) continue;
+      alive.add(player.tgUserId);
+      const frozenPos = this.lastRenderedGridPos.get(player.tgUserId);
+      this.upsertPlayer(player, frozenPos?.x ?? player.x, frozenPos?.y ?? player.y);
+    }
+    this.destroyMissingPlayers(alive);
+  }
+
+  private findAnchorSnapshot(buffer: MatchSnapshotV1[], renderTick: number): MatchSnapshotV1 | undefined {
+    for (let i = buffer.length - 1; i >= 0; i -= 1) {
+      if (buffer[i].tick <= renderTick) {
+        return buffer[i];
+      }
+    }
+    return undefined;
+  }
+
+  private updateVelocities(buffer: MatchSnapshotV1[]): void {
+    if (buffer.length < 2) return;
+
+    const snapshotA = buffer[buffer.length - 2];
+    const snapshotB = buffer[buffer.length - 1];
+    const dt = snapshotB.tick - snapshotA.tick;
+    if (dt <= 0) return;
+
+    const prevPlayers = new Map(snapshotA.players.map((p) => [p.tgUserId, p]));
+    for (const nextPlayer of snapshotB.players) {
+      const prevPlayer = prevPlayers.get(nextPlayer.tgUserId);
+      if (!prevPlayer) continue;
+      this.velocities.set(nextPlayer.tgUserId, {
+        vx: (nextPlayer.x - prevPlayer.x) / dt,
+        vy: (nextPlayer.y - prevPlayer.y) / dt,
+      });
+    }
+  }
+
+  getDebugStats(): {
+    renderTick: number;
+    delayTicks: number;
+    bufferSize: number;
+    extrapolatingTicks: number;
+    stalled: boolean;
+  } {
+    return {
+      renderTick: this.renderTick,
+      delayTicks: this.delayTicks,
+      bufferSize: this.bufferSize,
+      extrapolatingTicks: this.extrapolatingTicks,
+      stalled: this.stalled,
+    };
+  }
+
   private upsertPlayer(player: { tgUserId: string; displayName: string; colorId: number }, gridX: number, gridY: number): void {
     const px = this.offsetX + gridX * this.tileSize + this.tileSize / 2;
     const py = this.offsetY + gridY * this.tileSize + this.tileSize / 2;
@@ -87,6 +191,8 @@ export class RemotePlayersRenderer {
       view.container.setPosition(px, py);
     }
 
+    this.lastRenderedGridPos.set(player.tgUserId, { x: gridX, y: gridY });
+
     view.nameText.setText(player.displayName);
     view.body.setFillStyle(colorFromId(player.colorId), 0.75);
   }
@@ -96,6 +202,8 @@ export class RemotePlayersRenderer {
       if (alive.has(id)) continue;
       view.container.destroy(true);
       this.players.delete(id);
+      this.lastRenderedGridPos.delete(id);
+      this.velocities.delete(id);
     }
   }
 

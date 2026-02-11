@@ -15,8 +15,10 @@ type TickDebugStats = {
   snapshotTick: number;
   simulationTick: number;
   renderTick: number;
-  interpDelayTicks: number;
-  snapshotBufferSize: number;
+  delayTicks: number;
+  bufferSize: number;
+  extrapolatingTicks: number;
+  stalled: boolean;
 };
 
 export function WsDebugOverlay({
@@ -92,7 +94,11 @@ export function WsDebugOverlay({
       </div>
 
       <div style={{ marginTop: 4 }}>
-        renderTick: {tickDebugStats?.renderTick ?? '—'} | interpDelayTicks: {tickDebugStats?.interpDelayTicks ?? '—'} | bufferSize: {tickDebugStats?.snapshotBufferSize ?? 0}
+        renderTick: {tickDebugStats?.renderTick ?? '—'} | delayTicks: {tickDebugStats?.delayTicks ?? '—'} | bufferSize: {tickDebugStats?.bufferSize ?? 0}
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        extrap: {tickDebugStats?.extrapolatingTicks ?? 0} ticks | stalled: {String(tickDebugStats?.stalled ?? false)}
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
