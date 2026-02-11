@@ -192,6 +192,23 @@ button:disabled {
   display: none;
 }
 
+
+.shop-panel {
+  width: min(112px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.shop-buy-btn {
+  width: 100%;
+  min-height: 40px;
+  font-size: 0.72rem;
+  background: #38508a;
+  border-radius: 8px;
+  padding: 0.4rem;
+}
+
 .bomb-btn,
 .detonate-btn {
   width: min(112px, 100%);

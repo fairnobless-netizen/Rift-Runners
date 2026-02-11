@@ -11,6 +11,27 @@ export type WalletRecord = {
   crystals: number;
 };
 
+export type WalletLedgerType = 'reward' | 'purchase' | 'refund' | 'adjustment';
+export type WalletCurrency = 'stars' | 'crystals';
+
+export type WalletLedgerEntryRecord = {
+  id: string;
+  tgUserId: string;
+  type: WalletLedgerType;
+  currency: WalletCurrency;
+  amount: number;
+  meta: Record<string, unknown>;
+  createdAt: number;
+};
+
+export type PurchaseIntentRecord = {
+  id: string;
+  tgUserId: string;
+  sku: string;
+  provider: 'telegram_stars';
+  createdAt: number;
+};
+
 export type CampaignProgressRecord = {
   tgUserId: string;
   stage: number;
@@ -30,12 +51,16 @@ const users = new Map<string, UserRecord>();
 const wallets = new Map<string, WalletRecord>();
 const sessions = new Map<string, SessionRecord>();
 const campaignProgress = new Map<string, CampaignProgressRecord>();
+const purchaseIntents = new Map<string, PurchaseIntentRecord>();
+const walletLedger: WalletLedgerEntryRecord[] = [];
 
 export const memoryDb = {
   users,
   wallets,
   sessions,
   campaignProgress,
+  purchaseIntents,
+  walletLedger,
 };
 
 // TODO M5c+: replace memoryDb with Postgres + ORM repositories
