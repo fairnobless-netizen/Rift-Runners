@@ -59,6 +59,9 @@ type PredictionStats = {
 type TickDebugStats = {
   snapshotTick: number;
   simulationTick: number;
+  renderTick: number;
+  interpDelayTicks: number;
+  snapshotBufferSize: number;
 };
 
 const JOYSTICK_RADIUS = 56;
@@ -216,14 +219,17 @@ export default function GameView(): JSX.Element {
       const scene = sceneRef.current;
       const nextStats = scene?.getPredictionStats?.() ?? null;
       setPredictionStats(nextStats);
-      setTickDebugStats(
-        scene
-          ? {
-              snapshotTick: scene.getLastSnapshotTick(),
-              simulationTick: scene.getSimulationTick(),
-            }
-          : null,
-      );
+      setTickDebugStats(() => {
+        if (!scene) return null;
+        const netInterpStats = scene.getNetInterpStats();
+        return {
+          snapshotTick: scene.getLastSnapshotTick(),
+          simulationTick: scene.getSimulationTick(),
+          renderTick: netInterpStats.renderTick,
+          interpDelayTicks: netInterpStats.interpDelayTicks,
+          snapshotBufferSize: netInterpStats.snapshotBufferSize,
+        };
+      });
     }, 350);
 
     return () => window.clearInterval(id);

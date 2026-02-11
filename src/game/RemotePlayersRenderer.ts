@@ -1,36 +1,15 @@
 import Phaser from 'phaser';
+import type { MatchSnapshotV1 } from '../ws/wsTypes';
 
 type RemotePlayerView = {
   container: Phaser.GameObjects.Container;
   body: Phaser.GameObjects.Rectangle;
   nameText: Phaser.GameObjects.Text;
-  prevTick: number;
-  targetTick: number;
-  prevX: number;
-  prevY: number;
-  targetX: number;
-  targetY: number;
-};
-
-export type MatchSnapshotV1 = {
-  version: 'match_v1';
-  matchId: string;
-  tick: number;
-  world: { gridW: number; gridH: number };
-  players: Array<{
-    tgUserId: string;
-    displayName: string;
-    colorId: number;
-    skinId: string;
-    x: number;
-    y: number;
-  }>;
 };
 
 export class RemotePlayersRenderer {
   private scene: Phaser.Scene;
   private players = new Map<string, RemotePlayerView>();
-  private lastSnapshotTick = -1;
 
   private tileSize = 32;
   private offsetX = 0;
@@ -46,56 +25,81 @@ export class RemotePlayersRenderer {
     this.offsetY = params.offsetY;
   }
 
-  update(simulationTick: number) {
-    for (const view of this.players.values()) {
-      const tickSpan = view.targetTick - view.prevTick;
-      const alpha = tickSpan <= 0 ? 1 : Phaser.Math.Clamp((simulationTick - view.prevTick) / tickSpan, 0, 1);
-      const x = Phaser.Math.Linear(view.prevX, view.targetX, alpha);
-      const y = Phaser.Math.Linear(view.prevY, view.targetY, alpha);
-      view.container.setPosition(x, y);
+  renderInterpolated(buffer: MatchSnapshotV1[], renderTick: number, localTgUserId?: string): void {
+    if (buffer.length === 0) {
+      this.destroyMissingPlayers(new Set<string>());
+      return;
     }
-  }
 
-  applySnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string) {
-    const previousSnapshotTick = this.lastSnapshotTick;
-    this.lastSnapshotTick = snapshot.tick;
+    let snapshotA: MatchSnapshotV1 | undefined;
+    let snapshotB: MatchSnapshotV1 | undefined;
+    for (let i = 1; i < buffer.length; i += 1) {
+      const prev = buffer[i - 1];
+      const next = buffer[i];
+      if (prev.tick <= renderTick && renderTick <= next.tick) {
+        snapshotA = prev;
+        snapshotB = next;
+        break;
+      }
+    }
 
+    if (!snapshotA || !snapshotB) {
+      this.renderFromSnapshot(buffer[buffer.length - 1], localTgUserId);
+      return;
+    }
+
+    const tickSpan = snapshotB.tick - snapshotA.tick;
+    const alpha = tickSpan <= 0 ? 1 : Phaser.Math.Clamp((renderTick - snapshotA.tick) / tickSpan, 0, 1);
+    const fromPlayers = new Map(snapshotA.players.map((p) => [p.tgUserId, p]));
     const alive = new Set<string>();
 
-    for (const p of snapshot.players) {
-      alive.add(p.tgUserId);
+    for (const to of snapshotB.players) {
+      if (localTgUserId && to.tgUserId === localTgUserId) continue;
 
-      if (localTgUserId && p.tgUserId === localTgUserId) continue;
-
-      let view = this.players.get(p.tgUserId);
-      const px = this.offsetX + p.x * this.tileSize + this.tileSize / 2;
-      const py = this.offsetY + p.y * this.tileSize + this.tileSize / 2;
-
-      if (!view) {
-        view = this.createPlayer(p, px, py, snapshot.tick);
-        this.players.set(p.tgUserId, view);
-      } else {
-        view.prevX = view.container.x;
-        view.prevY = view.container.y;
-        view.prevTick = previousSnapshotTick >= 0 ? previousSnapshotTick : snapshot.tick;
-        view.targetX = px;
-        view.targetY = py;
-        view.targetTick = snapshot.tick;
-      }
-
-      view.nameText.setText(p.displayName);
-      view.body.setFillStyle(colorFromId(p.colorId), 0.75);
+      alive.add(to.tgUserId);
+      const from = fromPlayers.get(to.tgUserId) ?? to;
+      const x = Phaser.Math.Linear(from.x, to.x, alpha);
+      const y = Phaser.Math.Linear(from.y, to.y, alpha);
+      this.upsertPlayer(to, x, y);
     }
 
+    this.destroyMissingPlayers(alive);
+  }
+
+  private renderFromSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): void {
+    const alive = new Set<string>();
+    for (const player of snapshot.players) {
+      if (localTgUserId && player.tgUserId === localTgUserId) continue;
+      alive.add(player.tgUserId);
+      this.upsertPlayer(player, player.x, player.y);
+    }
+    this.destroyMissingPlayers(alive);
+  }
+
+  private upsertPlayer(player: { tgUserId: string; displayName: string; colorId: number }, gridX: number, gridY: number): void {
+    const px = this.offsetX + gridX * this.tileSize + this.tileSize / 2;
+    const py = this.offsetY + gridY * this.tileSize + this.tileSize / 2;
+    let view = this.players.get(player.tgUserId);
+    if (!view) {
+      view = this.createPlayer(player, px, py);
+      this.players.set(player.tgUserId, view);
+    } else {
+      view.container.setPosition(px, py);
+    }
+
+    view.nameText.setText(player.displayName);
+    view.body.setFillStyle(colorFromId(player.colorId), 0.75);
+  }
+
+  private destroyMissingPlayers(alive: Set<string>): void {
     for (const [id, view] of this.players.entries()) {
-      if (!alive.has(id)) {
-        view.container.destroy(true);
-        this.players.delete(id);
-      }
+      if (alive.has(id)) continue;
+      view.container.destroy(true);
+      this.players.delete(id);
     }
   }
 
-  private createPlayer(p: { displayName: string; colorId: number }, x: number, y: number, tick: number): RemotePlayerView {
+  private createPlayer(p: { displayName: string; colorId: number }, x: number, y: number): RemotePlayerView {
     const body = this.scene.add.rectangle(0, 0, 18, 18, colorFromId(p.colorId), 0.75);
     body.setOrigin(0.5, 0.5);
 
@@ -115,12 +119,6 @@ export class RemotePlayersRenderer {
       container,
       body,
       nameText,
-      prevTick: tick,
-      targetTick: tick,
-      prevX: x,
-      prevY: y,
-      targetX: x,
-      targetY: y,
     };
   }
 }
