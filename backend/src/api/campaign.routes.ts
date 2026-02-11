@@ -1,21 +1,8 @@
 import { Router } from 'express';
-import { memoryDb } from '../db/memoryDb';
+import { resolveSessionFromRequest } from '../auth/session';
+import { getCampaign, saveCampaign } from '../db/repos';
 
 export const campaignRouter = Router();
-
-function getBearerToken(req: any): string | null {
-  const h = String(req.headers?.authorization ?? '');
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m ? m[1] : null;
-}
-
-function requireSession(req: any): { tgUserId: string } | null {
-  const token = getBearerToken(req);
-  if (!token) return null;
-  const session = memoryDb.sessions.get(token);
-  if (!session) return null;
-  return { tgUserId: session.tgUserId };
-}
 
 function sanitizeCampaignState(value: any) {
   const stage = Number.isFinite(value?.stage) ? Math.floor(value.stage) : 1;
@@ -31,11 +18,11 @@ function sanitizeCampaignState(value: any) {
   };
 }
 
-campaignRouter.get('/campaign/progress', (req, res) => {
-  const s = requireSession(req);
+campaignRouter.get('/campaign/progress', async (req, res) => {
+  const s = await resolveSessionFromRequest(req as any);
   if (!s) return res.status(401).json({ ok: false, error: 'unauthorized' });
 
-  const existing = memoryDb.campaignProgress.get(s.tgUserId);
+  const existing = await getCampaign(s.tgUserId);
   if (!existing) {
     return res.status(200).json({
       ok: true,
@@ -54,22 +41,20 @@ campaignRouter.get('/campaign/progress', (req, res) => {
       trophies: existing.trophies,
     },
     updatedAt: existing.updatedAt,
+    schemaVersion: existing.schemaVersion,
   });
 });
 
-campaignRouter.post('/campaign/progress', (req, res) => {
-  const s = requireSession(req);
+campaignRouter.post('/campaign/progress', async (req, res) => {
+  const s = await resolveSessionFromRequest(req as any);
   if (!s) return res.status(401).json({ ok: false, error: 'unauthorized' });
 
   const clean = sanitizeCampaignState(req.body ?? {});
-  const now = Date.now();
-
-  memoryDb.campaignProgress.set(s.tgUserId, {
+  const saved = await saveCampaign({
     tgUserId: s.tgUserId,
     ...clean,
-    updatedAt: now,
+    schemaVersion: 'rift_campaign_v1',
   });
 
-  // TODO M5e+: persist to DB per tgUserId
-  return res.status(200).json({ ok: true, saved: true, updatedAt: now });
+  return res.status(200).json({ ok: true, saved: true, updatedAt: saved.updatedAt });
 });
