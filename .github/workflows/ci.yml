@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # -----------------------
+      # Frontend
+      # -----------------------
+      - name: Frontend install
+        run: npm ci
+
+      - name: Frontend typecheck (if script exists)
+        shell: bash
+        run: |
+          if node -e "const s=require('./package.json').scripts||{}; process.exit(s.typecheck?0:1)"; then
+            echo "Running frontend typecheck..."
+            npm run typecheck
+          else
+            echo "No frontend typecheck script found. Skipping."
+          fi
+
+      - name: Frontend build
+        run: npm run build
+
+      # -----------------------
+      # Backend
+      # -----------------------
+      - name: Backend install
+        working-directory: backend
+        run: npm ci
+
+      - name: Backend typecheck (if script exists)
+        working-directory: backend
+        shell: bash
+        run: |
+          if node -e "const s=require('./package.json').scripts||{}; process.exit(s.typecheck?0:1)"; then
+            echo "Running backend typecheck..."
+            npm run typecheck
+          else
+            echo "No backend typecheck script found. Skipping."
+          fi
+
+      - name: Backend build
+        working-directory: backend
+        run: npm run build
