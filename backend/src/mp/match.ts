@@ -37,6 +37,9 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot) => void) {
     world: { ...match.world },
     players: Array.from(match.players.values()).map((p) => ({
       tgUserId: p.tgUserId,
+      displayName: p.displayName,
+      colorId: p.colorId,
+      skinId: p.skinId,
       lastInputSeq: p.lastInputSeq,
       x: p.x,
       y: p.y,

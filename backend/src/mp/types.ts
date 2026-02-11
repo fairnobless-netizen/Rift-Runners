@@ -2,6 +2,9 @@ import type { MatchInputPayload } from './protocol';
 
 export type PlayerState = {
   tgUserId: string;
+  displayName: string;
+  colorId: number; // 0..3
+  skinId: string;  // 'default' for now
   lastInputSeq: number;
   x: number;
   y: number;
