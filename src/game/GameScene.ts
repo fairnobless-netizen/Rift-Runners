@@ -1374,6 +1374,8 @@ export class GameScene extends Phaser.Scene {
       this.snapshotBuffer.shift();
     }
 
+    this.remotePlayers?.onSnapshotBuffered(snapshot.tick, this.simulationTick);
+
     return true;
   }
 
@@ -1425,6 +1427,8 @@ export class GameScene extends Phaser.Scene {
     bufferSize: number;
     underrunRate: number;
     underrunCount: number;
+    lateSnapshotCount: number;
+    lateSnapshotEma: number;
     stallCount: number;
     extrapCount: number;
     extrapolatingTicks: number;
@@ -1448,6 +1452,8 @@ export class GameScene extends Phaser.Scene {
       bufferSize: this.snapshotBuffer.length,
       underrunRate: 0,
       underrunCount: 0,
+      lateSnapshotCount: 0,
+      lateSnapshotEma: 0,
       stallCount: 0,
       extrapCount: 0,
       extrapolatingTicks: 0,
