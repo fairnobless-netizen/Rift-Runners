@@ -252,6 +252,7 @@ export class GameScene extends Phaser.Scene {
 
   private fixedUpdate(): void {
     this.processLocalInputQueue();
+    this.prediction.updateFixed();
   }
 
   private processLocalInputQueue(): void {
@@ -546,10 +547,11 @@ export class GameScene extends Phaser.Scene {
     const { tileSize } = GAME_CONFIG;
     this.playerSprite?.destroy();
     this.playerSprite = this.add
-      .image(this.player.gridX * tileSize + tileSize / 2, this.player.gridY * tileSize + tileSize / 2, this.getTextureKey(style))
+      .image(0, 0, this.getTextureKey(style))
       .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
       .setDepth(style.depth ?? DEPTH_PLAYER)
       .setDisplaySize(tileSize * (style.scale ?? 0.74), tileSize * (style.scale ?? 0.74));
+    this.placeLocalPlayerSpriteAt(this.player.gridX, this.player.gridY);
   }
 
   private spawnEnemies(): void {
@@ -589,10 +591,9 @@ export class GameScene extends Phaser.Scene {
     if (this.player.targetX === null || this.player.targetY === null || !this.playerSprite) return;
 
     const progress = Phaser.Math.Clamp((time - this.player.moveStartedAt) / GAME_CONFIG.moveDurationMs, 0, 1);
-    const { tileSize } = GAME_CONFIG;
     const px = Phaser.Math.Linear(this.player.moveFromX, this.player.targetX, progress);
     const py = Phaser.Math.Linear(this.player.moveFromY, this.player.targetY, progress);
-    this.playerSprite.setPosition(px * tileSize + tileSize / 2, py * tileSize + tileSize / 2);
+    this.placeLocalPlayerSpriteAt(px, py);
 
     if (progress < 1) return;
 
@@ -994,7 +995,7 @@ export class GameScene extends Phaser.Scene {
 
     const playerStyle = this.getAssetStyle('player', this.player.state, this.player.facing);
     if (this.player.targetX === null || this.player.targetY === null) {
-      this.playerSprite.setPosition(this.player.gridX * tileSize + tileSize / 2, this.player.gridY * tileSize + tileSize / 2);
+      this.placeLocalPlayerSpriteAt(this.player.gridX, this.player.gridY);
     }
     this.playerSprite
       .setTexture(this.getTextureKey(playerStyle))
@@ -1332,14 +1333,24 @@ export class GameScene extends Phaser.Scene {
     this.setLocalPlayerPosition(nextX, nextY);
   }
 
+  private placeLocalPlayerSpriteAt(x: number, y: number) {
+    if (!this.playerSprite) return;
+
+    const tileSize = GAME_CONFIG.tileSize;
+    const bias = this.prediction.getVisualBias();
+    this.playerSprite.setPosition(
+      (x + bias.x) * tileSize + tileSize / 2,
+      (y + bias.y) * tileSize + tileSize / 2,
+    );
+  }
+
   public setLocalPlayerPosition(x: number, y: number) {
     this.player.gridX = x;
     this.player.gridY = y;
     this.player.targetX = null;
     this.player.targetY = null;
 
-    const tileSize = GAME_CONFIG.tileSize;
-    this.playerSprite?.setPosition(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2);
+    this.placeLocalPlayerSpriteAt(x, y);
   }
 
   public applyMatchSnapshot(snapshot: any, localTgUserId?: string) {

@@ -2,9 +2,13 @@ import { useMemo } from 'react';
 
 type PredictionStats = {
   correctionCount: number;
+  softCorrectionCount: number;
   droppedInputCount: number;
   pendingCount: number;
   lastAckSeq: number;
+  drift: number;
+  biasX: number;
+  biasY: number;
 };
 
 export function WsDebugOverlay({
@@ -60,7 +64,7 @@ export function WsDebugOverlay({
 
       <div style={{ marginTop: 8 }}>
         {predictionStats
-          ? `Prediction: pending=${predictionStats.pendingCount}, corrections=${predictionStats.correctionCount}, dropped=${predictionStats.droppedInputCount}, lastAckSeq=${predictionStats.lastAckSeq}`
+          ? `Prediction: pending=${predictionStats.pendingCount}, hardSnaps=${predictionStats.correctionCount}, softCorrections=${predictionStats.softCorrectionCount}, drift=${predictionStats.drift.toFixed(3)}, bias=(${predictionStats.biasX.toFixed(3)}, ${predictionStats.biasY.toFixed(3)}), dropped=${predictionStats.droppedInputCount}, lastAckSeq=${predictionStats.lastAckSeq}`
           : 'Prediction: —'}
       </div>
 
