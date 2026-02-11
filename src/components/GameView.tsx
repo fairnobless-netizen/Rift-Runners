@@ -63,6 +63,7 @@ type TickDebugStats = {
   baseDelayTicks: number;
   baseDelayTargetTicks: number;
   baseDelayStepCooldownMs: number;
+  baseDelayStepCooldownTicks: number;
   delayTicks: number;
   minDelayTicks: number;
   maxDelayTicks: number;
@@ -82,6 +83,13 @@ type TickDebugStats = {
   adaptiveEveryTicks: number;
   adaptiveEveryTargetTicks: number;
   bufferHasReserve: boolean;
+  tuning: {
+    baseDelayMax: number;
+    targetBufferMin: number;
+    targetBufferMax: number;
+    cadenceMin: number;
+    cadenceMax: number;
+  };
 };
 
 const JOYSTICK_RADIUS = 56;
@@ -249,6 +257,7 @@ export default function GameView(): JSX.Element {
           baseDelayTicks: netInterpStats.baseDelayTicks,
           baseDelayTargetTicks: netInterpStats.baseDelayTargetTicks,
           baseDelayStepCooldownMs: netInterpStats.baseDelayStepCooldownMs,
+          baseDelayStepCooldownTicks: netInterpStats.baseDelayStepCooldownTicks,
           delayTicks: netInterpStats.delayTicks,
           minDelayTicks: netInterpStats.minDelayTicks,
           maxDelayTicks: netInterpStats.maxDelayTicks,
@@ -268,6 +277,7 @@ export default function GameView(): JSX.Element {
           adaptiveEveryTicks: netInterpStats.adaptiveEveryTicks,
           adaptiveEveryTargetTicks: netInterpStats.adaptiveEveryTargetTicks,
           bufferHasReserve: netInterpStats.bufferHasReserve,
+          tuning: netInterpStats.tuning,
         };
       });
     }, 350);
