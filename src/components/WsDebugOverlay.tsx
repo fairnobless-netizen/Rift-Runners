@@ -36,6 +36,8 @@ export function WsDebugOverlay({
   onLobby,
   predictionStats,
   tickDebugStats,
+  rttMs,
+  rttJitterMs,
   onCreateRoom,
   onStartMatch,
   onMove,
@@ -56,6 +58,8 @@ export function WsDebugOverlay({
   onLobby: () => void;
   predictionStats: PredictionStats | null;
   tickDebugStats: TickDebugStats | null;
+  rttMs: number | null;
+  rttJitterMs: number;
   onCreateRoom: () => void;
   onStartMatch: () => void;
   onMove: (dir: 'up' | 'down' | 'left' | 'right') => void;
@@ -102,6 +106,10 @@ export function WsDebugOverlay({
 
       <div style={{ marginTop: 4 }}>
         renderTick: {tickDebugStats?.renderTick ?? '—'} | delayTicks(auto): {tickDebugStats?.delayTicks ?? '—'} (base {tickDebugStats?.baseDelayTicks ?? '—'}, range {tickDebugStats?.minDelayTicks ?? '—'}-{tickDebugStats?.maxDelayTicks ?? '—'})
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        RTT: {rttMs == null ? '—' : `${rttMs.toFixed(1)}ms`} | jitter: {Number.isFinite(rttJitterMs) ? `${rttJitterMs.toFixed(1)}ms` : '—'}
       </div>
 
       <div style={{ marginTop: 4 }}>

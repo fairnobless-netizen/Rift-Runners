@@ -71,6 +71,8 @@ type TickDebugStats = {
   extrapCount: number;
   extrapolatingTicks: number;
   stalled: boolean;
+  rttMs: number | null;
+  rttJitterMs: number;
 };
 
 const JOYSTICK_RADIUS = 56;
@@ -246,6 +248,8 @@ export default function GameView(): JSX.Element {
           extrapCount: netInterpStats.extrapCount,
           extrapolatingTicks: netInterpStats.extrapolatingTicks,
           stalled: netInterpStats.stalled,
+          rttMs: netInterpStats.rttMs,
+          rttJitterMs: netInterpStats.rttJitterMs,
         };
       });
     }, 350);
@@ -330,6 +334,10 @@ export default function GameView(): JSX.Element {
     if (!last?.snapshot) return;
     sceneRef.current?.applyMatchSnapshot(last.snapshot, localTgUserId);
   }, [ws.messages, localTgUserId]);
+
+  useEffect(() => {
+    sceneRef.current?.setNetRtt(ws.rttMs ?? null, ws.rttJitterMs ?? 0);
+  }, [ws.rttMs, ws.rttJitterMs]);
 
   useEffect(
     () => () => {
@@ -584,6 +592,8 @@ export default function GameView(): JSX.Element {
         netSim={ws.netSimConfig}
         predictionStats={predictionStats}
         tickDebugStats={tickDebugStats}
+        rttMs={ws.rttMs}
+        rttJitterMs={ws.rttJitterMs}
         onLobby={() => ws.send({ type: 'lobby:list' })}
         onCreateRoom={() => ws.send({ type: 'room:create' })}
         onStartMatch={() => ws.send({ type: 'match:start' })}

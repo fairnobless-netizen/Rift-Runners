@@ -57,6 +57,14 @@ export function useWsClient(token?: string) {
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<WsServerMessage[]>([]);
 
+  const pingSeqRef = useRef(0);
+  const pingSentAtRef = useRef(new Map<number, number>());
+  const rttEmaRef = useRef<number | null>(null);
+  const rttJitterEmaRef = useRef<number>(0);
+
+  const [rttMs, setRttMs] = useState<number | null>(null);
+  const [rttJitterMs, setRttJitterMs] = useState<number>(0);
+
   useEffect(() => {
     if (!token) return;
 
@@ -67,6 +75,29 @@ export function useWsClient(token?: string) {
       onOpen: () => setConnected(true),
       onClose: () => setConnected(false),
       onMessage: (msg) => {
+        if (msg.type === 'pong') {
+          const sentPerf = pingSentAtRef.current.get(msg.id);
+          if (typeof sentPerf === 'number') {
+            pingSentAtRef.current.delete(msg.id);
+
+            const now = performance.now();
+            const sample = Math.max(0, now - sentPerf);
+
+            const prev = rttEmaRef.current;
+            const alpha = 0.15;
+            const next = prev == null ? sample : prev + alpha * (sample - prev);
+            rttEmaRef.current = next;
+
+            const jitterSample = prev == null ? 0 : Math.abs(sample - prev);
+            const jAlpha = 0.2;
+            rttJitterEmaRef.current = rttJitterEmaRef.current + jAlpha * (jitterSample - rttJitterEmaRef.current);
+
+            setRttMs(next);
+            setRttJitterMs(rttJitterEmaRef.current);
+          }
+          return;
+        }
+
         const config = netSimConfigRef.current;
         if (shouldDrop(config)) return;
 
@@ -80,7 +111,18 @@ export function useWsClient(token?: string) {
     clientRef.current = client;
     client.connect();
 
+    const pingTimer = window.setInterval(() => {
+      if (!clientRef.current) return;
+
+      const id = ++pingSeqRef.current;
+      pingSentAtRef.current.set(id, performance.now());
+
+      clientRef.current.send({ type: 'ping', id, t: Date.now() });
+    }, 1000);
+
     return () => {
+      window.clearInterval(pingTimer);
+      pingSentAtRef.current.clear();
       client.disconnect();
       clientRef.current = null;
       setConnected(false);
@@ -90,6 +132,8 @@ export function useWsClient(token?: string) {
   return {
     connected,
     messages,
+    rttMs,
+    rttJitterMs,
     netSimConfig: netSimConfigRef.current,
     send: (msg: WsClientMessage) => {
       const config = netSimConfigRef.current;

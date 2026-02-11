@@ -1406,6 +1406,10 @@ export class GameScene extends Phaser.Scene {
     return this.simulationTick;
   }
 
+  setNetRtt(rttMs: number | null, rttJitterMs: number): void {
+    this.remotePlayers?.setNetworkRtt(rttMs, rttJitterMs, this.FIXED_DT);
+  }
+
   public getLastSnapshotTick(): number {
     return this.lastSnapshotTick;
   }
@@ -1423,6 +1427,8 @@ export class GameScene extends Phaser.Scene {
     extrapCount: number;
     extrapolatingTicks: number;
     stalled: boolean;
+    rttMs: number | null;
+    rttJitterMs: number;
   } {
     return this.remotePlayers?.getDebugStats() ?? {
       renderTick: -1,
@@ -1437,6 +1443,8 @@ export class GameScene extends Phaser.Scene {
       extrapCount: 0,
       extrapolatingTicks: 0,
       stalled: false,
+      rttMs: null,
+      rttJitterMs: 0,
     };
   }
 }
