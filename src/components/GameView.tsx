@@ -60,8 +60,15 @@ type TickDebugStats = {
   snapshotTick: number;
   simulationTick: number;
   renderTick: number;
+  baseDelayTicks: number;
   delayTicks: number;
+  minDelayTicks: number;
+  maxDelayTicks: number;
   bufferSize: number;
+  underrunRate: number;
+  underrunCount: number;
+  stallCount: number;
+  extrapCount: number;
   extrapolatingTicks: number;
   stalled: boolean;
 };
@@ -228,8 +235,15 @@ export default function GameView(): JSX.Element {
           snapshotTick: scene.getLastSnapshotTick(),
           simulationTick: scene.getSimulationTick(),
           renderTick: netInterpStats.renderTick,
+          baseDelayTicks: netInterpStats.baseDelayTicks,
           delayTicks: netInterpStats.delayTicks,
+          minDelayTicks: netInterpStats.minDelayTicks,
+          maxDelayTicks: netInterpStats.maxDelayTicks,
           bufferSize: netInterpStats.bufferSize,
+          underrunRate: netInterpStats.underrunRate,
+          underrunCount: netInterpStats.underrunCount,
+          stallCount: netInterpStats.stallCount,
+          extrapCount: netInterpStats.extrapCount,
           extrapolatingTicks: netInterpStats.extrapolatingTicks,
           stalled: netInterpStats.stalled,
         };

@@ -102,7 +102,6 @@ export class GameScene extends Phaser.Scene {
   private lastSnapshotTick = -1;
   private snapshotBuffer: MatchSnapshotV1[] = [];
   private readonly SNAPSHOT_BUFFER_SIZE = 10;
-  private readonly INTERP_DELAY_TICKS = 2;
   private arena: ArenaModel = createArena(0, this.rng);
   private levelIndex = 0;
   private zoneIndex = 0;
@@ -257,7 +256,7 @@ export class GameScene extends Phaser.Scene {
     this.simulationTick += 1;
     this.processLocalInputQueue();
     this.prediction.updateFixed();
-    this.remotePlayers?.update(this.simulationTick, this.snapshotBuffer, this.localTgUserId, this.INTERP_DELAY_TICKS);
+    this.remotePlayers?.update(this.simulationTick, this.snapshotBuffer, this.localTgUserId);
   }
 
   private processLocalInputQueue(): void {
@@ -1413,15 +1412,29 @@ export class GameScene extends Phaser.Scene {
 
   public getNetInterpStats(): {
     renderTick: number;
+    baseDelayTicks: number;
     delayTicks: number;
+    minDelayTicks: number;
+    maxDelayTicks: number;
     bufferSize: number;
+    underrunRate: number;
+    underrunCount: number;
+    stallCount: number;
+    extrapCount: number;
     extrapolatingTicks: number;
     stalled: boolean;
   } {
     return this.remotePlayers?.getDebugStats() ?? {
       renderTick: -1,
-      delayTicks: this.INTERP_DELAY_TICKS,
+      baseDelayTicks: 2,
+      delayTicks: 2,
+      minDelayTicks: 1,
+      maxDelayTicks: 6,
       bufferSize: this.snapshotBuffer.length,
+      underrunRate: 0,
+      underrunCount: 0,
+      stallCount: 0,
+      extrapCount: 0,
       extrapolatingTicks: 0,
       stalled: false,
     };
