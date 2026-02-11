@@ -1361,10 +1361,16 @@ export class GameScene extends Phaser.Scene {
     this.prediction.reconcile({
       serverX: me.x,
       serverY: me.y,
+      localX: this.player.gridX,
+      localY: this.player.gridY,
       lastInputSeq: me.lastInputSeq,
       setPosition: (x, y) => this.setLocalPlayerPosition(x, y),
       applyMove: (dx, dy) => this.applyLocalMove(dx, dy),
     });
+  }
+
+  public getPredictionStats() {
+    return this.prediction?.getStats?.() ?? null;
   }
 }
 
