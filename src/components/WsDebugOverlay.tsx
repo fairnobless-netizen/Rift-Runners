@@ -1,9 +1,17 @@
 import { useMemo } from 'react';
 
+type PredictionStats = {
+  correctionCount: number;
+  droppedInputCount: number;
+  pendingCount: number;
+  lastAckSeq: number;
+};
+
 export function WsDebugOverlay({
   connected,
   messages,
   onLobby,
+  predictionStats,
   onCreateRoom,
   onStartMatch,
   onMove,
@@ -11,6 +19,7 @@ export function WsDebugOverlay({
   connected: boolean;
   messages: any[];
   onLobby: () => void;
+  predictionStats: PredictionStats | null;
   onCreateRoom: () => void;
   onStartMatch: () => void;
   onMove: (dir: 'up' | 'down' | 'left' | 'right') => void;
@@ -47,6 +56,12 @@ export function WsDebugOverlay({
         <button onClick={onLobby}>Lobby</button>
         <button onClick={onCreateRoom}>Create Room</button>
         <button onClick={onStartMatch}>Start Match</button>
+      </div>
+
+      <div style={{ marginTop: 8 }}>
+        {predictionStats
+          ? `Prediction: pending=${predictionStats.pendingCount}, corrections=${predictionStats.correctionCount}, dropped=${predictionStats.droppedInputCount}, lastAckSeq=${predictionStats.lastAckSeq}`
+          : 'Prediction: —'}
       </div>
 
       <div style={{ marginTop: 10 }}>

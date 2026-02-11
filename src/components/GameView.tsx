@@ -43,6 +43,14 @@ const defaultStats: PlayerStats = {
   remoteDetonateUnlocked: false,
 };
 
+
+type PredictionStats = {
+  correctionCount: number;
+  droppedInputCount: number;
+  pendingCount: number;
+  lastAckSeq: number;
+};
+
 const JOYSTICK_RADIUS = 56;
 const JOYSTICK_KNOB_RADIUS = 22;
 const JOYSTICK_DEADZONE = 10;
@@ -77,6 +85,7 @@ export default function GameView(): JSX.Element {
   const [catalog, setCatalog] = useState<ShopCatalogItem[]>([]);
   const [ledger, setLedger] = useState<WalletLedgerEntry[]>([]);
   const [purchaseBusySku, setPurchaseBusySku] = useState<string | null>(null);
+  const [predictionStats, setPredictionStats] = useState<PredictionStats | null>(null);
   const ws = useWsClient(token || undefined);
 
 
@@ -177,6 +186,16 @@ export default function GameView(): JSX.Element {
     const id = window.setInterval(() => {
       setSyncStatus(getCampaignSyncStatus());
     }, 1000);
+
+    return () => window.clearInterval(id);
+  }, []);
+
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const nextStats = sceneRef.current?.getPredictionStats?.() ?? null;
+      setPredictionStats(nextStats);
+    }, 350);
 
     return () => window.clearInterval(id);
   }, []);
@@ -504,6 +523,7 @@ export default function GameView(): JSX.Element {
       <WsDebugOverlay
         connected={ws.connected}
         messages={ws.messages}
+        predictionStats={predictionStats}
         onLobby={() => ws.send({ type: 'lobby:list' })}
         onCreateRoom={() => ws.send({ type: 'room:create' })}
         onStartMatch={() => ws.send({ type: 'match:start' })}
