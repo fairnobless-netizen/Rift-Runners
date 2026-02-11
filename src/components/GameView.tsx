@@ -75,6 +75,9 @@ type TickDebugStats = {
   stalled: boolean;
   rttMs: number | null;
   rttJitterMs: number;
+  targetBufferPairs: number;
+  targetBufferTargetPairs: number;
+  bufferHasReserve: boolean;
 };
 
 const JOYSTICK_RADIUS = 56;
@@ -254,6 +257,9 @@ export default function GameView(): JSX.Element {
           stalled: netInterpStats.stalled,
           rttMs: netInterpStats.rttMs,
           rttJitterMs: netInterpStats.rttJitterMs,
+          targetBufferPairs: netInterpStats.targetBufferPairs,
+          targetBufferTargetPairs: netInterpStats.targetBufferTargetPairs,
+          bufferHasReserve: netInterpStats.bufferHasReserve,
         };
       });
     }, 350);
