@@ -37,6 +37,14 @@ export class RemotePlayersRenderer {
   private readonly targetBufferHysteresisPairs = 1;
   private readonly targetBufferMaxPairs = 6;
   private readonly targetBufferMinPairs = 2;
+  // M15.2: adaptive update cadence (reduce noise under jitter)
+  private adaptiveEveryTargetTicks: number = 2;
+  private adaptiveEveryTicks: number = 2;
+  private lastAdaptiveEveryChangeTick: number = 0;
+
+  private readonly adaptiveEveryCooldownTicks: number = 30; // change cadence at most once per ~1.5s (20Hz)
+  private readonly adaptiveEveryMin: number = 2;
+  private readonly adaptiveEveryMax: number = 8;
   private bufferSize = 0;
   private extrapolatingTicks = 0;
   private stalled = false;
@@ -45,9 +53,7 @@ export class RemotePlayersRenderer {
   private extrapCount = 0;
 
   private readonly metricsWindowTicks = 60;
-  private readonly adaptiveUpdateEveryTicks = 10;
   private readonly adaptiveCooldownTicks = 20;
-  private lastAdaptiveUpdateTick = 0;
   private lastDelayChangeTick = 0;
   private windowUnderrunEvents: number[] = [];
   private windowStallEvents: number[] = [];
@@ -77,6 +83,9 @@ export class RemotePlayersRenderer {
     // M15: adaptive targetBufferPairs (jitter-aware)
     const nextTarget = this.computeTargetBufferPairs(tickMs);
     this.targetBufferTargetPairs = nextTarget;
+
+    // M15.2: adaptive cadence target
+    this.adaptiveEveryTargetTicks = this.computeAdaptiveEveryTicks(tickMs);
 
     if (rttMs == null || !Number.isFinite(rttMs) || tickMs <= 0) return;
 
@@ -195,51 +204,63 @@ export class RemotePlayersRenderer {
   private updateAdaptiveDelay(simulationTick: number, bufferSize: number): void {
     const prevDelay = this.delayTicks;
 
+    // M15.2: smooth adaptive cadence (step-limited, cooldown)
+    if (simulationTick - this.lastAdaptiveEveryChangeTick >= this.adaptiveEveryCooldownTicks) {
+      const diff = this.adaptiveEveryTargetTicks - this.adaptiveEveryTicks;
+
+      if (diff !== 0) {
+        this.adaptiveEveryTicks += diff > 0 ? 1 : -1;
+        this.adaptiveEveryTicks = Math.max(this.adaptiveEveryMin, Math.min(this.adaptiveEveryTicks, this.adaptiveEveryMax));
+        this.lastAdaptiveEveryChangeTick = simulationTick;
+      }
+    }
+
     if (this.windowUnderrunEvents.length === 0) {
-      this.lastAdaptiveUpdateTick = simulationTick;
       this.lastDelayChangeTick = simulationTick;
       this.lastTargetBufferChangeTick = simulationTick;
+      this.lastAdaptiveEveryChangeTick = simulationTick;
     }
 
     this.pushWindowSample(0, 0, 0);
 
-    const shouldUpdate = simulationTick - this.lastAdaptiveUpdateTick >= this.adaptiveUpdateEveryTicks;
-    if (shouldUpdate) {
-      this.lastAdaptiveUpdateTick = simulationTick;
-      const cooldownPassed = simulationTick - this.lastDelayChangeTick >= this.adaptiveCooldownTicks;
-      if (cooldownPassed) {
-        const windowSize = Math.max(1, this.windowUnderrunEvents.length);
-        const underrunRate = this.windowUnderrunSum / windowSize;
-        const bufferHasReserve = bufferSize >= this.targetBufferPairs + 2;
+    const every = this.adaptiveEveryTicks;
+    if (every > 1 && simulationTick % every !== 0) {
+      return;
+    }
 
-        if (underrunRate > 0.05 || this.windowStallSum > 0) {
-          const nextDelay = Math.min(this.delayTicks + 1, this.maxDelayTicks);
-          if (nextDelay !== this.delayTicks) {
-            this.delayTicks = nextDelay;
-            this.lastDelayChangeTick = simulationTick;
-          }
-        } else if (this.windowUnderrunSum === 0 && bufferHasReserve) {
-          const nextDelay = Math.max(this.delayTicks - 1, this.minDelayTicks);
-          if (nextDelay !== this.delayTicks) {
-            this.delayTicks = nextDelay;
-            this.lastDelayChangeTick = simulationTick;
-          }
+    const cooldownPassed = simulationTick - this.lastDelayChangeTick >= this.adaptiveCooldownTicks;
+    if (cooldownPassed) {
+      const windowSize = Math.max(1, this.windowUnderrunEvents.length);
+      const underrunRate = this.windowUnderrunSum / windowSize;
+      const bufferHasReserve = bufferSize >= this.targetBufferPairs + 2;
+
+      if (underrunRate > 0.05 || this.windowStallSum > 0) {
+        const nextDelay = Math.min(this.delayTicks + 1, this.maxDelayTicks);
+        if (nextDelay !== this.delayTicks) {
+          this.delayTicks = nextDelay;
+          this.lastDelayChangeTick = simulationTick;
+        }
+      } else if (this.windowUnderrunSum === 0 && bufferHasReserve) {
+        const nextDelay = Math.max(this.delayTicks - 1, this.minDelayTicks);
+        if (nextDelay !== this.delayTicks) {
+          this.delayTicks = nextDelay;
+          this.lastDelayChangeTick = simulationTick;
         }
       }
+    }
 
-      // M15: apply targetBufferPairs smoothly (cooldown + hysteresis + step)
-      if (simulationTick - this.lastTargetBufferChangeTick >= this.targetBufferCooldownTicks) {
-        const diff = this.targetBufferTargetPairs - this.targetBufferPairs;
+    // M15: apply targetBufferPairs smoothly (cooldown + hysteresis + step)
+    if (simulationTick - this.lastTargetBufferChangeTick >= this.targetBufferCooldownTicks) {
+      const diff = this.targetBufferTargetPairs - this.targetBufferPairs;
 
-        if (Math.abs(diff) > this.targetBufferHysteresisPairs) {
-          this.targetBufferPairs += diff > 0 ? 1 : -1;
-          this.targetBufferPairs = Phaser.Math.Clamp(
-            this.targetBufferPairs,
-            this.targetBufferMinPairs,
-            this.targetBufferMaxPairs,
-          );
-          this.lastTargetBufferChangeTick = simulationTick;
-        }
+      if (Math.abs(diff) > this.targetBufferHysteresisPairs) {
+        this.targetBufferPairs += diff > 0 ? 1 : -1;
+        this.targetBufferPairs = Phaser.Math.Clamp(
+          this.targetBufferPairs,
+          this.targetBufferMinPairs,
+          this.targetBufferMaxPairs,
+        );
+        this.lastTargetBufferChangeTick = simulationTick;
       }
     }
 
@@ -262,6 +283,16 @@ export class RemotePlayersRenderer {
     const raw = 2 + jitterTicks;
 
     return Phaser.Math.Clamp(raw, this.targetBufferMinPairs, this.targetBufferMaxPairs);
+  }
+
+  private computeAdaptiveEveryTicks(tickMs: number): number {
+    const jitterMs = Math.max(0, this.rttJitterMs ?? 0);
+    const jitterTicks = tickMs > 0 ? Math.ceil((jitterMs * 0.5) / tickMs) : 0;
+
+    // Higher jitter -> update less often (more stable controller)
+    const raw = 2 + jitterTicks;
+
+    return Math.max(this.adaptiveEveryMin, Math.min(raw, this.adaptiveEveryMax));
   }
 
   private pushWindowSample(underrunEvent: number, stallEvent: number, extrapEvent: number): void {
@@ -404,6 +435,8 @@ export class RemotePlayersRenderer {
     rttJitterMs: number;
     targetBufferPairs: number;
     targetBufferTargetPairs: number;
+    adaptiveEveryTicks: number;
+    adaptiveEveryTargetTicks: number;
     bufferHasReserve: boolean;
   } {
     const windowSize = Math.max(1, this.windowUnderrunEvents.length);
@@ -427,6 +460,8 @@ export class RemotePlayersRenderer {
       rttJitterMs: this.rttJitterMs,
       targetBufferPairs: this.targetBufferPairs,
       targetBufferTargetPairs: this.targetBufferTargetPairs,
+      adaptiveEveryTicks: this.adaptiveEveryTicks,
+      adaptiveEveryTargetTicks: this.adaptiveEveryTargetTicks,
       bufferHasReserve,
     };
   }

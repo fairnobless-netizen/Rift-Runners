@@ -1433,6 +1433,8 @@ export class GameScene extends Phaser.Scene {
     rttJitterMs: number;
     targetBufferPairs: number;
     targetBufferTargetPairs: number;
+    adaptiveEveryTicks: number;
+    adaptiveEveryTargetTicks: number;
     bufferHasReserve: boolean;
   } {
     return this.remotePlayers?.getDebugStats() ?? {
@@ -1454,6 +1456,8 @@ export class GameScene extends Phaser.Scene {
       rttJitterMs: 0,
       targetBufferPairs: 2,
       targetBufferTargetPairs: 2,
+      adaptiveEveryTicks: 2,
+      adaptiveEveryTargetTicks: 2,
       bufferHasReserve: false,
     };
   }
