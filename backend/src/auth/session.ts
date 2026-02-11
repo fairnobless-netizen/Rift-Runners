@@ -10,14 +10,14 @@ export function sha256Hex(value: string): string {
   return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-export function getBearerToken(req: Request): string | null {
-  const h = String((req.headers as any)?.authorization ?? '');
+export function getBearerToken(req: { headers?: { authorization?: string } }): string | null {
+  const h = String(req?.headers?.authorization ?? '');
   const m = h.match(/^Bearer\s+(.+)$/i);
   return m ? m[1] : null;
 }
 
-export async function resolveSessionFromRequest(req: Request): Promise<{ tgUserId: string } | null> {
-  const token = getBearerToken(req);
+export async function resolveSessionFromRequest(req: Request | { headers?: { authorization?: string } }): Promise<{ tgUserId: string } | null> {
+  const token = getBearerToken(req as any);
   if (!token) return null;
 
   const tokenHash = sha256Hex(token);
