@@ -49,6 +49,9 @@ export class RemotePlayersRenderer {
   private extrapolatingTicks = 0;
   private stalled = false;
   private underrunCount = 0;
+  private lateSnapshotCount = 0;
+  private lateSnapshotEma = 0;
+  private readonly lateSnapshotEmaAlpha = 0.1;
   private stallCount = 0;
   private extrapCount = 0;
 
@@ -199,6 +202,18 @@ export class RemotePlayersRenderer {
     }
 
     this.destroyMissingPlayers(alive);
+  }
+
+  onSnapshotBuffered(snapshotTick: number, simulationTick: number): void {
+    const playheadTick = this.renderTick >= 0 ? this.renderTick : simulationTick - this.delayTicks;
+    const isLateSnapshot = snapshotTick < playheadTick;
+
+    if (isLateSnapshot) {
+      this.lateSnapshotCount += 1;
+    }
+
+    const sample = isLateSnapshot ? 1 : 0;
+    this.lateSnapshotEma += (sample - this.lateSnapshotEma) * this.lateSnapshotEmaAlpha;
   }
 
   private updateAdaptiveDelay(simulationTick: number, bufferSize: number): void {
@@ -427,6 +442,8 @@ export class RemotePlayersRenderer {
     bufferSize: number;
     underrunRate: number;
     underrunCount: number;
+    lateSnapshotCount: number;
+    lateSnapshotEma: number;
     stallCount: number;
     extrapCount: number;
     extrapolatingTicks: number;
@@ -452,6 +469,8 @@ export class RemotePlayersRenderer {
       bufferSize: this.bufferSize,
       underrunRate: this.windowUnderrunSum / windowSize,
       underrunCount: this.underrunCount,
+      lateSnapshotCount: this.lateSnapshotCount,
+      lateSnapshotEma: this.lateSnapshotEma,
       stallCount: this.stallCount,
       extrapCount: this.extrapCount,
       extrapolatingTicks: this.extrapolatingTicks,

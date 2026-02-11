@@ -24,6 +24,8 @@ type TickDebugStats = {
   bufferSize: number;
   underrunRate: number;
   underrunCount: number;
+  lateSnapshotCount: number;
+  lateSnapshotEma: number;
   stallCount: number;
   extrapCount: number;
   extrapolatingTicks: number;
@@ -130,7 +132,7 @@ export function WsDebugOverlay({
       </div>
 
       <div style={{ marginTop: 4 }}>
-        bufferSize: {tickDebugStats?.bufferSize ?? 0} | underrunRate: {((tickDebugStats?.underrunRate ?? 0) * 100).toFixed(1)}% | underruns: {tickDebugStats?.underrunCount ?? 0}
+        bufferSize: {tickDebugStats?.bufferSize ?? 0} | underrunRate: {((tickDebugStats?.underrunRate ?? 0) * 100).toFixed(1)}% | underruns: {tickDebugStats?.underrunCount ?? 0} | lateRate(EMA): {((tickDebugStats?.lateSnapshotEma ?? 0) * 100).toFixed(1)}% | lateCount: {tickDebugStats?.lateSnapshotCount ?? 0}
       </div>
 
       <div style={{ marginTop: 4 }}>

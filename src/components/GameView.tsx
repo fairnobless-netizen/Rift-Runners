@@ -69,6 +69,8 @@ type TickDebugStats = {
   bufferSize: number;
   underrunRate: number;
   underrunCount: number;
+  lateSnapshotCount: number;
+  lateSnapshotEma: number;
   stallCount: number;
   extrapCount: number;
   extrapolatingTicks: number;
@@ -253,6 +255,8 @@ export default function GameView(): JSX.Element {
           bufferSize: netInterpStats.bufferSize,
           underrunRate: netInterpStats.underrunRate,
           underrunCount: netInterpStats.underrunCount,
+          lateSnapshotCount: netInterpStats.lateSnapshotCount,
+          lateSnapshotEma: netInterpStats.lateSnapshotEma,
           stallCount: netInterpStats.stallCount,
           extrapCount: netInterpStats.extrapCount,
           extrapolatingTicks: netInterpStats.extrapolatingTicks,
