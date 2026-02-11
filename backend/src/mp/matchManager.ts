@@ -18,20 +18,30 @@ export function createMatch(roomId: string, players: string[]): MatchState {
 
   const matchId = newMatchId();
 
+  const gridW = 15;
+  const gridH = 15;
+
   const state: MatchState = {
     matchId,
     roomId,
     tick: 0,
+    world: { gridW, gridH },
     players: new Map<string, PlayerState>(),
     inputQueue: [],
   };
 
-  for (const tgUserId of players) {
+  // Deterministic spawns by join order: spread along top row
+  players.forEach((tgUserId, idx) => {
+    const x = Math.min(gridW - 1, 1 + idx * 2);
+    const y = 1;
+
     state.players.set(tgUserId, {
       tgUserId,
       lastInputSeq: 0,
+      x,
+      y,
     });
-  }
+  });
 
   matches.set(matchId, state);
   roomToMatch.set(roomId, matchId);

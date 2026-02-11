@@ -5,7 +5,7 @@ export type WsClientMessage =
   | { type: 'room:join'; roomId: string }
   | { type: 'room:leave' }
   | { type: 'match:start' }
-  | { type: 'match:input'; seq: number; payload: unknown };
+  | { type: 'match:input'; seq: number; payload: { kind: 'move'; dir: 'up' | 'down' | 'left' | 'right' } };
 
 export type WsServerMessage =
   | { type: 'pong' }
