@@ -12,13 +12,15 @@ export class LocalPredictionController {
     this.pending.push(input);
   }
 
-  applyAuthoritativeState(
-    serverX: number,
-    serverY: number,
-    lastInputSeq: number,
-    applyMove: (dx: number, dy: number) => void,
-    setPosition: (x: number, y: number) => void,
-  ) {
+  reconcile(params: {
+    serverX: number;
+    serverY: number;
+    lastInputSeq: number;
+    setPosition: (x: number, y: number) => void;
+    applyMove: (dx: number, dy: number) => void;
+  }) {
+    const { serverX, serverY, lastInputSeq, setPosition, applyMove } = params;
+
     if (lastInputSeq < this.lastAckSeq) return;
     this.lastAckSeq = lastInputSeq;
 
