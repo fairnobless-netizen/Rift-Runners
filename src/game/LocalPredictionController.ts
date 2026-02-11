@@ -41,8 +41,15 @@ export class LocalPredictionController {
     if (lastInputSeq < this.lastAckSeq) return;
     this.lastAckSeq = lastInputSeq;
 
+    // Canonical reconciliation for simulation:
+    // authoritative server base first, then replay unacknowledged inputs.
     this.pending = this.pending.filter((p) => p.seq > lastInputSeq);
+    setPosition(serverX, serverY);
+    for (const p of this.pending) {
+      applyMove(p.dx, p.dy);
+    }
 
+    // Visual correction is handled after the simulation state is reconciled.
     const drift = Math.hypot(serverX - localX, serverY - localY);
     this.drift = drift;
 
@@ -56,14 +63,9 @@ export class LocalPredictionController {
     }
 
     if (drift >= this.HARD_THRESHOLD) {
-      setPosition(serverX, serverY);
       this.biasX = 0;
       this.biasY = 0;
       this.correctionCount += 1;
-
-      for (const p of this.pending) {
-        applyMove(p.dx, p.dy);
-      }
     }
   }
 
