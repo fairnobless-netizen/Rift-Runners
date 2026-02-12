@@ -94,9 +94,25 @@ export function useWsClient(token?: string) {
   useEffect(() => {
     if (!token) return;
 
-    const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    const defaultWsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    const defaultWsUrl = `${defaultWsProtocol}://${location.host}/ws`;
+    const configuredWsUrl = import.meta.env.VITE_WS_URL?.trim();
+    let wsUrl = defaultWsUrl;
+
+    if (configuredWsUrl) {
+      try {
+        const normalized = new URL(configuredWsUrl);
+        if (normalized.pathname === '/' || normalized.pathname === '') {
+          normalized.pathname = '/ws';
+        }
+        wsUrl = normalized.toString();
+      } catch {
+        wsUrl = defaultWsUrl;
+      }
+    }
+
     const client = new WsClient({
-      url: `${protocol}://${location.host}/ws`,
+      url: wsUrl,
       token,
       onOpen: () => setConnected(true),
       onClose: () => setConnected(false),
