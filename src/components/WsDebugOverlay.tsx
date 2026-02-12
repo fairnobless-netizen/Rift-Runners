@@ -106,6 +106,45 @@ type TelemetryExportSnapshot = {
 
 type TelemetryRun = TelemetryExportSnapshot;
 
+type ProbeResultPayload = {
+  createdAt: string;
+  steps: number;
+  intervalMs: number;
+  summary: {
+    pass: boolean;
+    movedCount: number;
+    blockedCount: number;
+    avgPredErr: number | null;
+    avgDrift: number | null;
+  };
+  samples: Array<{
+    t: number;
+    step: number;
+    dir: 'up' | 'down' | 'left' | 'right';
+    from: { x: number; y: number } | null;
+    to: { x: number; y: number } | null;
+    moved: boolean;
+    blocked: boolean;
+    inputSeq: number;
+    ack: number | null;
+    unacked: number | null;
+    predErr: number | null;
+    predErrEma: number | null;
+    reason: PredictionStats['reconcileReason'] | null;
+    predHardEnter: number | null;
+    predHardExit: number | null;
+    hist: number | null;
+    missHist: number | null;
+    drift: number | null;
+  }>;
+};
+
+declare global {
+  interface Window {
+    __probeLastResult?: ProbeResultPayload;
+  }
+}
+
 const TELEMETRY_DURATION_MS = 10_000;
 const TELEMETRY_CADENCE_MS = 100;
 
@@ -162,6 +201,7 @@ export function WsDebugOverlay({
   const [telemetrySummary, setTelemetrySummary] = useState<TelemetrySnapshotSummary | null>(null);
   const [telemetryExportSnapshot, setTelemetryExportSnapshot] = useState<TelemetryExportSnapshot | null>(null);
   const [telemetryRuns, setTelemetryRuns] = useState<TelemetryRun[]>([]);
+  const [probeResult, setProbeResult] = useState<ProbeResultPayload | null>(null);
   const telemetrySamplesRef = useRef<TelemetrySample[]>([]);
   const telemetryTimeoutRef = useRef<number | null>(null);
 
@@ -209,7 +249,7 @@ export function WsDebugOverlay({
       return { x: me.x, y: me.y };
     };
 
-    const samples: any[] = [];
+    const samples: ProbeResultPayload['samples'] = [];
     let i = 0;
 
     const timer = window.setInterval(() => {
@@ -255,15 +295,41 @@ export function WsDebugOverlay({
 
         // finalize after a short delay to catch last render
         window.setTimeout(() => {
-          downloadJson(
-            {
-              createdAt: new Date().toISOString(),
-              steps,
-              intervalMs,
-              samples,
+          const movedCount = samples.filter((sample) => sample.moved).length;
+          const blockedCount = samples.filter((sample) => sample.blocked).length;
+          const predErrValues = samples
+            .map((sample) => sample.predErr)
+            .filter((value): value is number => typeof value === 'number');
+          const driftValues = samples
+            .map((sample) => sample.drift)
+            .filter((value): value is number => typeof value === 'number');
+
+          const payload: ProbeResultPayload = {
+            createdAt: new Date().toISOString(),
+            steps,
+            intervalMs,
+            summary: {
+              pass: movedCount > 0,
+              movedCount,
+              blockedCount,
+              avgPredErr:
+                predErrValues.length > 0
+                  ? predErrValues.reduce((sum, value) => sum + value, 0) / predErrValues.length
+                  : null,
+              avgDrift:
+                driftValues.length > 0
+                  ? driftValues.reduce((sum, value) => sum + value, 0) / driftValues.length
+                  : null,
             },
-            `m16_2_1_probe_${Date.now()}.json`,
-          );
+            samples,
+          };
+
+          if (import.meta.env.DEV) {
+            window.__probeLastResult = payload;
+          }
+
+          setProbeResult(payload);
+          downloadJson(payload, `m16_2_1_probe_${Date.now()}.json`);
         }, 150);
       }
     }, intervalMs);
@@ -530,9 +596,15 @@ export function WsDebugOverlay({
         <button onClick={onLobby}>Lobby</button>
         <button onClick={onCreateRoom}>Create Room</button>
         <button onClick={onStartMatch}>Start Match</button>
-        <button onClick={runProbe}>Probe 20 moves</button>
+        <button data-testid="probe-btn" onClick={runProbe}>Probe 20 moves</button>
         {import.meta.env.DEV && <button onClick={() => triggerDebugDrift(10)}>Force Drift (10 ticks)</button>}
       </div>
+
+      {probeResult && (
+        <div data-testid="probe-summary" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(0,255,0,0.25)' }}>
+          Probe result: {probeResult.summary.pass ? 'PASS' : 'FAIL'} | moved={probeResult.summary.movedCount}/{probeResult.steps} | blocked={probeResult.summary.blockedCount}
+        </div>
+      )}
 
       <div style={{ marginTop: 8 }}>
         {predictionStats ? formatPredictionLine(localInputSeq, predictionStats) : 'Prediction: —'}

@@ -1,0 +1,56 @@
+name: Probe artifacts
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  probe-artifacts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Start app
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 5173 > /tmp/vite.log 2>&1 &
+
+      - name: Wait for app
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:5173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'Vite dev server did not start in time'
+          cat /tmp/vite.log
+          exit 1
+
+      - name: Run Probe e2e
+        run: npx playwright test e2e/probe.spec.ts
+
+      - name: Upload Probe artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-artifacts
+          path: |
+            artifacts/probe_screenshot.png
+            artifacts/probe_result.json
+          if-no-files-found: error
