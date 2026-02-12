@@ -162,6 +162,11 @@ export function WsDebugOverlay({
   const [telemetrySummary, setTelemetrySummary] = useState<TelemetrySnapshotSummary | null>(null);
   const [telemetryExportSnapshot, setTelemetryExportSnapshot] = useState<TelemetryExportSnapshot | null>(null);
   const [telemetryRuns, setTelemetryRuns] = useState<TelemetryRun[]>([]);
+  const [probeSummary, setProbeSummary] = useState<{
+    moved: number;
+    blocked: number;
+    pass: boolean;
+  } | null>(null);
   const telemetrySamplesRef = useRef<TelemetrySample[]>([]);
   const telemetryTimeoutRef = useRef<number | null>(null);
 
@@ -189,6 +194,8 @@ export function WsDebugOverlay({
   };
 
   const runProbe = () => {
+    setProbeSummary(null);
+
     const steps = 20;
     const intervalMs = 80;
     const dirs: Array<'up' | 'down' | 'left' | 'right'> = [
@@ -255,6 +262,16 @@ export function WsDebugOverlay({
 
         // finalize after a short delay to catch last render
         window.setTimeout(() => {
+          const movedCount = samples.filter((s) => s.moved).length;
+          const blockedCount = samples.filter((s) => s.blocked).length;
+          const pass = movedCount >= 3 && blockedCount >= 3;
+
+          setProbeSummary({
+            moved: movedCount,
+            blocked: blockedCount,
+            pass,
+          });
+
           downloadJson(
             {
               createdAt: new Date().toISOString(),
@@ -533,6 +550,21 @@ export function WsDebugOverlay({
         <button onClick={runProbe}>Probe 20 moves</button>
         {import.meta.env.DEV && <button onClick={() => triggerDebugDrift(10)}>Force Drift (10 ticks)</button>}
       </div>
+
+      {probeSummary && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: 6,
+            fontSize: 12,
+            borderRadius: 6,
+            background: probeSummary.pass ? '#0b3d1a' : '#3d0b0b',
+            color: probeSummary.pass ? '#5cff8d' : '#ff6b6b',
+          }}
+        >
+          Probe result: moved={probeSummary.moved}, blocked={probeSummary.blocked} — {probeSummary.pass ? 'PASS' : 'FAIL'}
+        </div>
+      )}
 
       <div style={{ marginTop: 8 }}>
         {predictionStats ? formatPredictionLine(localInputSeq, predictionStats) : 'Prediction: —'}
