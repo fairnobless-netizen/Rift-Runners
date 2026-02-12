@@ -126,6 +126,7 @@ export function WsDebugOverlay({
   onStartMatch,
   onMove,
   localInputSeq,
+  getLocalPlayerPosition,
 }: {
   connected: boolean;
   messages: any[];
@@ -147,6 +148,7 @@ export function WsDebugOverlay({
   onStartMatch: () => void;
   onMove: (dir: 'up' | 'down' | 'left' | 'right') => void;
   localInputSeq: number;
+  getLocalPlayerPosition?: () => { x: number; y: number } | null;
 }) {
   const lastSnapshot = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -209,21 +211,27 @@ export function WsDebugOverlay({
 
     const timer = window.setInterval(() => {
       const dir = dirs[i % dirs.length];
-      const from = getLocalPlayerPos();
+      const before = getLocalPlayerPosition?.() ?? getLocalPlayerPos();
       onMove(dir);
 
       // sample after move has been queued (next tick)
       window.setTimeout(() => {
         const ps = latestPredictionStatsRef.current;
-        const to = getLocalPlayerPos();
-        const moved = !!from && !!to && (from.x !== to.x || from.y !== to.y);
+        const after = getLocalPlayerPosition?.() ?? getLocalPlayerPos();
+
+        const moved =
+          before && after ? before.x !== after.x || before.y !== after.y : false;
+
+        const blocked = Boolean(before && after && !moved);
+
         samples.push({
           t: Date.now(),
           step: i + 1,
           dir,
-          from,
-          to,
+          from: before,
+          to: after,
           moved,
+          blocked,
           inputSeq: latestLocalInputSeqRef.current,
           ack: ps?.lastAckSeq ?? null,
           unacked: ps?.pendingCount ?? null,

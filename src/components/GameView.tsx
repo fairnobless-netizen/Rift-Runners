@@ -629,6 +629,7 @@ export default function GameView(): JSX.Element {
         onLobby={() => ws.send({ type: 'lobby:list' })}
         onCreateRoom={() => ws.send({ type: 'room:create' })}
         onStartMatch={() => ws.send({ type: 'match:start' })}
+        getLocalPlayerPosition={() => sceneRef.current?.getLocalPlayerPosition() ?? null}
         onMove={(dir) => {
           const scene = sceneRef.current;
           if (!scene) return;

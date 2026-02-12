@@ -1358,6 +1358,10 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
+  public getLocalPlayerPosition(): { x: number; y: number } {
+    return { x: this.player.gridX, y: this.player.gridY };
+  }
+
   public setLocalPlayerPosition(x: number, y: number) {
     this.player.gridX = x;
     this.player.gridY = y;
