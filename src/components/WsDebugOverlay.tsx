@@ -192,9 +192,17 @@ export function WsDebugOverlay({
     const steps = 20;
     const intervalMs = 80;
     const dirs: Array<'up' | 'down' | 'left' | 'right'> = [
-      ...Array<'right'>(5).fill('right'),
-      ...Array<'left'>(10).fill('left'),
-      ...Array<'down'>(5).fill('down'),
+      // Phase A: try to force collisions (hammer a direction)
+      ...Array(6).fill('right'),
+      ...Array(6).fill('left'),
+      ...Array(6).fill('down'),
+      // Phase B: small zig-zag (ensures mixed moved/blocked near obstacles)
+      'right',
+      'right',
+      'down',
+      'left',
+      'left',
+      'down',
     ];
 
     const getLocalPlayerPos = () => {
