@@ -9,7 +9,10 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test:e2e": "playwright test",
-    "test:e2e:probe": "playwright test e2e/probe.spec.ts"
+    "test:e2e:probe": "playwright test e2e/probe.spec.ts",
+    "dev:full": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "npm --prefix backend run dev:4101",
+    "dev:frontend": "npm run dev:5174"
   },
   "dependencies": {
     "phaser": "^3.90.0",
@@ -22,6 +25,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
-    "@playwright/test": "1.49.1"
+    "@playwright/test": "1.49.1",
+    "concurrently": "9.1.2"
   }
 }
