@@ -10,7 +10,7 @@ type PredictionStats = {
   drift: number;
   biasX: number;
   biasY: number;
-    predHardEnter?: number;
+  predHardEnter?: number;
   predHardExit?: number;
 
   // M16.2.1
@@ -20,6 +20,10 @@ type PredictionStats = {
   missingHistoryCount?: number;
   reconcileReason?: 'none' | 'soft' | 'hard';
 };
+
+function formatPredictionLine(localInputSeq: number, ps: PredictionStats): string {
+  return `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${ps.lastAckSeq}, unacked=${ps.pendingCount}, predErr=${(ps.predictionError ?? 0).toFixed(3)}, predErrEma=${(ps.predictionErrorEma ?? 0).toFixed(3)}, hardT=(${(ps.predHardEnter ?? 0).toFixed(2)}/${(ps.predHardExit ?? 0).toFixed(2)}), hist=${ps.historySize ?? 0}, missHist=${ps.missingHistoryCount ?? 0}, reason=${ps.reconcileReason ?? 'none'}, hardSnaps=${ps.correctionCount}, softCorrections=${ps.softCorrectionCount}, drift=${ps.drift.toFixed(3)}, bias=(${ps.biasX.toFixed(3)}, ${ps.biasY.toFixed(3)}), dropped=${ps.droppedInputCount}`;
+}
 
 type TickDebugStats = {
   snapshotTick: number;
@@ -206,6 +210,9 @@ export function WsDebugOverlay({
           unacked: ps?.pendingCount ?? null,
           predErr: ps?.predictionError ?? null,
           predErrEma: ps?.predictionErrorEma ?? null,
+          reason: ps?.reconcileReason ?? null,
+          predHardEnter: ps?.predHardEnter ?? null,
+          predHardExit: ps?.predHardExit ?? null,
           hist: ps?.historySize ?? null,
           missHist: ps?.missingHistoryCount ?? null,
           drift: ps?.drift ?? null,
@@ -496,11 +503,9 @@ export function WsDebugOverlay({
         <button onClick={runProbe}>Probe 20 moves</button>
       </div>
 
-<div style={{ marginTop: 8 }}>
-  {predictionStats
-    ? `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${predictionStats.lastAckSeq}, unacked=${predictionStats.pendingCount}, predErr=${(predictionStats.predictionError ?? 0).toFixed(3)}, predErrEma=${(predictionStats.predictionErrorEma ?? 0).toFixed(3)}, hist=${predictionStats.historySize ?? 0}, missHist=${predictionStats.missingHistoryCount ?? 0}, reason=${predictionStats.reconcileReason ?? 'none'}, hardT=(${(predictionStats.predHardEnter ?? 0).toFixed(2)}/${(predictionStats.predHardExit ?? 0).toFixed(2)}), hardSnaps=${predictionStats.correctionCount}, softCorrections=${predictionStats.softCorrectionCount}, drift=${predictionStats.drift.toFixed(3)}, bias=(${predictionStats.biasX.toFixed(3)}, ${predictionStats.biasY.toFixed(3)}), dropped=${predictionStats.droppedInputCount}`
-    : 'Prediction: —'}
-</div>
+      <div style={{ marginTop: 8 }}>
+        {predictionStats ? formatPredictionLine(localInputSeq, predictionStats) : 'Prediction: —'}
+      </div>
       
       {import.meta.env.DEV && telemetrySummary && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(0,255,0,0.25)' }}>
