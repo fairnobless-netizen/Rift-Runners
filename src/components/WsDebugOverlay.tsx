@@ -16,6 +16,7 @@ type PredictionStats = {
   predictionErrorEma?: number;
   historySize?: number;
   missingHistoryCount?: number;
+  reconcileReason?: 'none' | 'soft' | 'hard';
 };
 
 type TickDebugStats = {
@@ -495,7 +496,7 @@ export function WsDebugOverlay({
 
       <div style={{ marginTop: 8 }}>
         {predictionStats
-          ? `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${predictionStats.lastAckSeq}, unacked=${predictionStats.pendingCount}, predErr=${(predictionStats.predictionError ?? 0).toFixed(3)}, predErrEma=${(predictionStats.predictionErrorEma ?? 0).toFixed(3)}, hist=${predictionStats.historySize ?? 0}, missHist=${predictionStats.missingHistoryCount ?? 0}, hardSnaps=${predictionStats.correctionCount}, softCorrections=${predictionStats.softCorrectionCount}, drift=${predictionStats.drift.toFixed(3)}, bias=(${predictionStats.biasX.toFixed(3)}, ${predictionStats.biasY.toFixed(3)}), dropped=${predictionStats.droppedInputCount}`
+          ? `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${predictionStats.lastAckSeq}, unacked=${predictionStats.pendingCount}, predErr=${(predictionStats.predictionError ?? 0).toFixed(3)}, predErrEma=${(predictionStats.predictionErrorEma ?? 0).toFixed(3)}, hist=${predictionStats.historySize ?? 0}, missHist=${predictionStats.missingHistoryCount ?? 0}, reason=${predictionStats.reconcileReason ?? 'none'}, hardSnaps=${predictionStats.correctionCount}, softCorrections=${predictionStats.softCorrectionCount}, drift=${predictionStats.drift.toFixed(3)}, bias=(${predictionStats.biasX.toFixed(3)}, ${predictionStats.biasY.toFixed(3)}), dropped=${predictionStats.droppedInputCount}`
           : 'Prediction: —'}
       </div>
 
