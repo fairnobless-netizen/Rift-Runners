@@ -10,6 +10,8 @@ type PredictionStats = {
   drift: number;
   biasX: number;
   biasY: number;
+    predHardEnter?: number;
+  predHardExit?: number;
 
   // M16.2.1
   predictionError?: number;
@@ -496,14 +498,10 @@ export function WsDebugOverlay({
         <button onClick={runProbe}>Probe 20 moves</button>
       </div>
 
-      <div style={{ marginTop: 8 }}>
-        {predictionStats
-          ? `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${predictionStats.lastAckSeq}, unacked=${predictionStats.pendingCount}, predErr=${(predictionStats.predictionError ?? 0).toFixed(3)}, predErrEma=${(predictionStats.predictionErrorEma ?? 0).toFixed(3)}, hardT=(${(predictionStats.predHardEnter ?? 0).toFixed(2)}/${(predictionStats.predHardExit ?? 0).toFixed(2)}), hist=${predictionStats.historySize ?? 0}, missHist=${predictionStats.missingHistoryCount ?? 0}, reason=${predictionStats.reconcileReason ?? 'none'}, hardSnaps=${predictionStats.correctionCount}, softCorrections=${predictionStats.softCorrectionCount}, drift=${predictionStats.drift.toFixed(3)}, bias=(${predictionStats.biasX.toFixed(3)}, ${predictionStats.biasY.toFixed(3)}), dropped=${predictionStats.droppedInputCount}`
-          : 'Prediction: —'}
+{predictionStats
+  ? `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${predictionStats.lastAckSeq}, unacked=${predictionStats.pendingCount}, predErr=${(predictionStats.predictionError ?? 0).toFixed(3)}, predErrEma=${(predictionStats.predictionErrorEma ?? 0).toFixed(3)}, hardT=(${(predictionStats.predHardEnter ?? 0).toFixed(2)}/${(predictionStats.predHardExit ?? 0).toFixed(2)}), hist=${predictionStats.historySize ?? 0}, missHist=${predictionStats.missingHistoryCount ?? 0}, reason=${predictionStats.reconcileReason ?? 'none'}, hardSnaps=${predictionStats.correctionCount}, softCorrections=${predictionStats.softCorrectionCount}, drift=${predictionStats.drift.toFixed(3)}, bias=(${predictionStats.biasX.toFixed(3)}, ${predictionStats.biasY.toFixed(3)}), dropped=${predictionStats.droppedInputCount}`
+  : 'Prediction: —'}
 
-          : 'Prediction: —'}
-      </div>
-          
       {import.meta.env.DEV && telemetrySummary && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(0,255,0,0.25)' }}>
           <div style={{ marginBottom: 4 }}>10s Telemetry Summary ({telemetrySummary.sampleCount} samples)</div>
