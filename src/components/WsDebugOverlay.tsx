@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NetSimConfig, NetSimPresetId } from '../ws/useWsClient';
+import { triggerDebugDrift } from '../game/LocalPredictionController';
 
 type PredictionStats = {
   correctionCount: number;
@@ -501,6 +502,7 @@ export function WsDebugOverlay({
         <button onClick={onCreateRoom}>Create Room</button>
         <button onClick={onStartMatch}>Start Match</button>
         <button onClick={runProbe}>Probe 20 moves</button>
+        {import.meta.env.DEV && <button onClick={() => triggerDebugDrift(10)}>Force Drift (10 ticks)</button>}
       </div>
 
       <div style={{ marginTop: 8 }}>

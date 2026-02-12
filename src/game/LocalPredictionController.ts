@@ -9,6 +9,13 @@ type PredictedState = {
   y: number;
 };
 
+// DEV ONLY: force artificial prediction drift to validate correction pipeline.
+let debugDriftTicksRemaining = 0;
+
+export function triggerDebugDrift(ticks: number) {
+  debugDriftTicksRemaining = Math.max(0, Math.floor(ticks));
+}
+
 export class LocalPredictionController {
   private pending: PendingInput[] = [];
   private lastAckSeq = 0;
@@ -55,7 +62,14 @@ export class LocalPredictionController {
    * We record the predicted position for later server comparison.
    */
   onLocalSimulated(seq: number, x: number, y: number) {
-    this.history.set(seq, { x, y });
+    const predictedState: PredictedState = { x, y };
+
+    if (import.meta.env.DEV && debugDriftTicksRemaining > 0) {
+      predictedState.x += 1;
+      debugDriftTicksRemaining -= 1;
+    }
+
+    this.history.set(seq, predictedState);
 
     // prune by window (based on newest seq)
     const minSeq = seq - this.HISTORY_WINDOW;
