@@ -189,23 +189,41 @@ export function WsDebugOverlay({
   const runProbe = () => {
     const steps = 20;
     const intervalMs = 80;
+    const dirs: Array<'up' | 'down' | 'left' | 'right'> = [
+      ...Array<'right'>(5).fill('right'),
+      ...Array<'left'>(10).fill('left'),
+      ...Array<'down'>(5).fill('down'),
+    ];
 
-    const dirs: Array<'up' | 'down' | 'left' | 'right'> = ['right', 'right', 'down', 'left', 'up'];
+    const getLocalPlayerPos = () => {
+      const players = Array.isArray(lastSnapshot?.players) ? lastSnapshot.players : [];
+      const localId = identity.clientId ?? identity.id;
+      if (localId === undefined || localId === null) return null;
+      const me = players.find((player: any) => String(player?.tgUserId) === String(localId));
+      if (!me || typeof me.x !== 'number' || typeof me.y !== 'number') return null;
+      return { x: me.x, y: me.y };
+    };
 
     const samples: any[] = [];
     let i = 0;
 
     const timer = window.setInterval(() => {
       const dir = dirs[i % dirs.length];
+      const from = getLocalPlayerPos();
       onMove(dir);
 
       // sample after move has been queued (next tick)
       window.setTimeout(() => {
         const ps = latestPredictionStatsRef.current;
+        const to = getLocalPlayerPos();
+        const moved = !!from && !!to && (from.x !== to.x || from.y !== to.y);
         samples.push({
           t: Date.now(),
           step: i + 1,
           dir,
+          from,
+          to,
+          moved,
           inputSeq: latestLocalInputSeqRef.current,
           ack: ps?.lastAckSeq ?? null,
           unacked: ps?.pendingCount ?? null,
