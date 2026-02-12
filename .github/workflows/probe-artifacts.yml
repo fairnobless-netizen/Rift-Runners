@@ -1,0 +1,68 @@
+name: Probe Artifacts
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Force npm registry
+        run: npm config set registry https://registry.npmjs.org/
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx -y playwright@1.49.1 install --with-deps chromium
+
+      - name: Start Vite dev server
+        run: |
+          npm run dev -- --host 0.0.0.0 --port 4173 > vite.log 2>&1 &
+          for i in {1..30}; do
+            if curl -sf http://127.0.0.1:4173 > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Vite server did not start in time"
+          exit 1
+
+      - name: Capture probe screenshot
+        run: npx -y playwright@1.49.1 screenshot http://127.0.0.1:4173 probe_screenshot.png
+
+      - name: Write probe result
+        if: always()
+        run: |
+          cat > probe_result.json <<'JSON'
+          {
+            "status": "ok",
+            "url": "http://127.0.0.1:4173",
+            "screenshot": "probe_screenshot.png"
+          }
+          JSON
+
+      - name: Cleanup dev server
+        if: always()
+        run: pkill -f "vite" || true
+
+      - name: Upload probe artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-artifacts
+          path: |
+            probe_screenshot.png
+            probe_result.json
