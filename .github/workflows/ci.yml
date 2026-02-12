@@ -21,7 +21,10 @@ jobs:
 
       # ---------- Frontend ----------
       - name: Frontend install
-        run: npm install
+        run: |
+          npm config set fund false
+          npm config set audit false
+          npm install --no-audit --no-fund
 
       - name: Frontend build
         run: npm run build
@@ -29,7 +32,10 @@ jobs:
       # ---------- Backend ----------
       - name: Backend install
         working-directory: backend
-        run: npm install
+        run: |
+          npm config set fund false
+          npm config set audit false
+          npm install --no-audit --no-fund
 
       - name: Backend build
         working-directory: backend
