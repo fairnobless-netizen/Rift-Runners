@@ -2,11 +2,15 @@ name: Probe Artifacts
 
 on:
   pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
   workflow_dispatch:
 
 jobs:
   probe-artifacts:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -16,48 +20,28 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          # IMPORTANT: do NOT use cache: npm because there is no lockfile in repo
+
+      - name: Force npm registry
+        run: npm config set registry https://registry.npmjs.org/
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Run probe (when available)
-        shell: bash
-        run: |
-          set -u
-          mkdir -p artifacts
+      - name: Install Playwright browsers
+        run: npx -y playwright@1.49.1 install --with-deps chromium
 
-          if [ -f scripts/probe-artifacts.mjs ]; then
-            if node scripts/probe-artifacts.mjs; then
-              cat > artifacts/probe-status.json <<'JSON'
-{"status":"ran","runner":"node scripts/probe-artifacts.mjs"}
-JSON
-            else
-              code=$?
-              cat > artifacts/probe-status.json <<JSON
-{"status":"failed","runner":"node scripts/probe-artifacts.mjs","exitCode":${code}}
-JSON
-            fi
-          elif npm run | grep -q "probe:artifacts"; then
-            if npm run probe:artifacts; then
-              cat > artifacts/probe-status.json <<'JSON'
-{"status":"ran","runner":"npm run probe:artifacts"}
-JSON
-            else
-              code=$?
-              cat > artifacts/probe-status.json <<JSON
-{"status":"failed","runner":"npm run probe:artifacts","exitCode":${code}}
-JSON
-            fi
-          else
-            cat > artifacts/probe-status.json <<'JSON'
-{"status":"skipped","reason":"No probe script found (expected scripts/probe-artifacts.mjs or npm script probe:artifacts)."}
-JSON
-          fi
+      - name: Run Probe e2e
+        run: npx -y playwright@1.49.1 test e2e/probe.spec.ts
 
-      - name: Upload artifacts
+      - name: Upload Probe artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: probe-artifacts
           path: artifacts/
           if-no-files-found: warn
+
+      - name: Cleanup dev server
+        if: always()
+        run: pkill -f "vite" || true
