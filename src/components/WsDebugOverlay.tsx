@@ -197,12 +197,7 @@ export function WsDebugOverlay({
       ...Array(6).fill('left'),
       ...Array(6).fill('down'),
       // Phase B: small zig-zag (ensures mixed moved/blocked near obstacles)
-      'right',
-      'right',
-      'down',
-      'left',
-      'left',
-      'down',
+      'right', 'right', 'down', 'left', 'left', 'down',
     ];
 
     const getLocalPlayerPos = () => {
