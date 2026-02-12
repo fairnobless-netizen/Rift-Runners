@@ -262,7 +262,11 @@ export class GameScene extends Phaser.Scene {
   private processLocalInputQueue(): void {
     const input = this.localInputQueue.shift();
     if (!input) return;
+
     this.applyLocalMove(input.dx, input.dy);
+
+    // M16.2.1: record predicted state after local simulation applies the seq
+    this.prediction.onLocalSimulated(input.seq, this.player.gridX, this.player.gridY);
   }
 
   private setupCamera(): void {
