@@ -272,15 +272,18 @@ export function WsDebugOverlay({
             pass,
           });
 
-          downloadJson(
-            {
-              createdAt: new Date().toISOString(),
-              steps,
-              intervalMs,
-              samples,
-            },
-            `m16_2_1_probe_${Date.now()}.json`,
-          );
+          const payload = {
+            createdAt: new Date().toISOString(),
+            steps,
+            intervalMs,
+            samples,
+          };
+
+          if (import.meta.env.DEV) {
+            (window as any).__probeLastResult = payload;
+          }
+
+          downloadJson(payload, `m16_2_1_probe_${Date.now()}.json`);
         }, 150);
       }
     }, intervalMs);
@@ -547,12 +550,13 @@ export function WsDebugOverlay({
         <button onClick={onLobby}>Lobby</button>
         <button onClick={onCreateRoom}>Create Room</button>
         <button onClick={onStartMatch}>Start Match</button>
-        <button onClick={runProbe}>Probe 20 moves</button>
+        <button data-testid="probe-btn" onClick={runProbe}>Probe 20 moves</button>
         {import.meta.env.DEV && <button onClick={() => triggerDebugDrift(10)}>Force Drift (10 ticks)</button>}
       </div>
 
       {probeSummary && (
         <div
+          data-testid="probe-summary"
           style={{
             marginTop: 8,
             padding: 6,
