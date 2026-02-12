@@ -31,6 +31,7 @@ export class LocalPredictionController {
   private predictionError = 0;
   private predictionErrorEma = 0;
   private missingHistoryCount = 0;
+  private reconcileReason: 'none' | 'soft' | 'hard' = 'none';
   private readonly PRED_ERR_EMA_ALPHA = 0.12;
 
   // thresholds / smoothing
@@ -101,6 +102,7 @@ export class LocalPredictionController {
     this.notePredictionErrorFromHistory(lastInputSeq, serverX, serverY);
 
     this.lastAckSeq = lastInputSeq;
+    this.reconcileReason = 'none';
 
     // Canonical reconciliation for simulation:
     // authoritative server base first, then replay unacknowledged inputs.
@@ -128,6 +130,7 @@ export class LocalPredictionController {
         this.biasY = 0;
         this.lastHardCorrectionTime = now;
         this.correctionCount += 1;
+        this.reconcileReason = 'hard';
       }
       return;
     }
@@ -136,6 +139,7 @@ export class LocalPredictionController {
       this.inSoftCorrection = false;
     } else if (!this.inSoftCorrection && drift >= this.SOFT_ENTER) {
       this.inSoftCorrection = true;
+      this.reconcileReason = 'soft';
     }
 
     if (!this.inSoftCorrection) return;
@@ -173,6 +177,7 @@ export class LocalPredictionController {
       predictionErrorEma: this.predictionErrorEma,
       historySize: this.history.size,
       missingHistoryCount: this.missingHistoryCount,
+      reconcileReason: this.reconcileReason,
     };
   }
 }
