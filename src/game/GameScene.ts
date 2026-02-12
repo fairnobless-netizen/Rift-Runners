@@ -1335,10 +1335,16 @@ export class GameScene extends Phaser.Scene {
     this.localInputQueue.push(input);
   }
 
-  private applyLocalMove(dx: number, dy: number) {
-    const nextX = clamp(this.player.gridX + dx, 0, this.matchGridW - 1);
-    const nextY = clamp(this.player.gridY + dy, 0, this.matchGridH - 1);
+  private applyLocalMove(dx: number, dy: number): boolean {
+    const nextX = this.player.gridX + dx;
+    const nextY = this.player.gridY + dy;
+
+    if (!isInsideArena(nextX, nextY) || !canOccupyCell(this.arena, nextX, nextY)) {
+      return false;
+    }
+
     this.setLocalPlayerPosition(nextX, nextY);
+    return true;
   }
 
   private placeLocalPlayerSpriteAt(x: number, y: number) {
@@ -1489,6 +1495,3 @@ export class GameScene extends Phaser.Scene {
   }
 }
 
-function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v));
-}
