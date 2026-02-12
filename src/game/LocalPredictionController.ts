@@ -36,8 +36,9 @@ export class LocalPredictionController {
   // thresholds / smoothing
   private readonly SOFT_ENTER = 0.3;
   private readonly SOFT_EXIT = 0.2;
-  private readonly HARD_ENTER = 1.3;
-  private readonly HARD_EXIT = 1.1;
+  // M16.2.3: HARD snap based on prediction mismatch (EMA), not visual drift
+  private readonly PRED_HARD_ENTER = 1.0;
+  private readonly PRED_HARD_EXIT = 0.85;
   private readonly HARD_CORRECTION_COOLDOWN_MS = 200;
   private readonly BIAS_DECAY = 0.85;
 
@@ -117,9 +118,12 @@ export class LocalPredictionController {
     const drift = Math.hypot(serverX - localX, serverY - localY);
     this.drift = drift;
 
-    if (this.inHardCorrection && drift <= this.HARD_EXIT) {
+    // M16.2.3: HARD correction gating uses predictionErrorEma
+    const predErrEma = this.predictionErrorEma;
+
+    if (this.inHardCorrection && predErrEma <= this.PRED_HARD_EXIT) {
       this.inHardCorrection = false;
-    } else if (!this.inHardCorrection && drift >= this.HARD_ENTER) {
+    } else if (!this.inHardCorrection && predErrEma >= this.PRED_HARD_ENTER) {
       const now = Date.now();
       if (now - this.lastHardCorrectionTime >= this.HARD_CORRECTION_COOLDOWN_MS) {
         this.inHardCorrection = true;
@@ -171,6 +175,8 @@ export class LocalPredictionController {
       // NEW (M16.2.1)
       predictionError: this.predictionError,
       predictionErrorEma: this.predictionErrorEma,
+      predHardEnter: this.PRED_HARD_ENTER,
+      predHardExit: this.PRED_HARD_EXIT,
       historySize: this.history.size,
       missingHistoryCount: this.missingHistoryCount,
     };

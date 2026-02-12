@@ -14,6 +14,8 @@ type PredictionStats = {
   // M16.2.1
   predictionError?: number;
   predictionErrorEma?: number;
+  predHardEnter?: number;
+  predHardExit?: number;
   historySize?: number;
   missingHistoryCount?: number;
 };
@@ -495,7 +497,7 @@ export function WsDebugOverlay({
 
       <div style={{ marginTop: 8 }}>
         {predictionStats
-          ? `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${predictionStats.lastAckSeq}, unacked=${predictionStats.pendingCount}, predErr=${(predictionStats.predictionError ?? 0).toFixed(3)}, predErrEma=${(predictionStats.predictionErrorEma ?? 0).toFixed(3)}, hist=${predictionStats.historySize ?? 0}, missHist=${predictionStats.missingHistoryCount ?? 0}, hardSnaps=${predictionStats.correctionCount}, softCorrections=${predictionStats.softCorrectionCount}, drift=${predictionStats.drift.toFixed(3)}, bias=(${predictionStats.biasX.toFixed(3)}, ${predictionStats.biasY.toFixed(3)}), dropped=${predictionStats.droppedInputCount}`
+          ? `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${predictionStats.lastAckSeq}, unacked=${predictionStats.pendingCount}, predErr=${(predictionStats.predictionError ?? 0).toFixed(3)}, predErrEma=${(predictionStats.predictionErrorEma ?? 0).toFixed(3)}, hardT=(${(predictionStats.predHardEnter ?? 0).toFixed(2)}/${(predictionStats.predHardExit ?? 0).toFixed(2)}), hist=${predictionStats.historySize ?? 0}, missHist=${predictionStats.missingHistoryCount ?? 0}, hardSnaps=${predictionStats.correctionCount}, softCorrections=${predictionStats.softCorrectionCount}, drift=${predictionStats.drift.toFixed(3)}, bias=(${predictionStats.biasX.toFixed(3)}, ${predictionStats.biasY.toFixed(3)}), dropped=${predictionStats.droppedInputCount}`
           : 'Prediction: —'}
       </div>
 
