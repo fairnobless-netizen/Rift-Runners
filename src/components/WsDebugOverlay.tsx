@@ -60,6 +60,39 @@ type TelemetrySnapshotSummary = {
   sampleCount: number;
 };
 
+type TelemetrySample = {
+  drift: number;
+  hardCorrectionCount: number;
+  softCorrectionCount: number;
+  pendingInputs: number;
+  delayTicks: number;
+  targetBufferPairs: number;
+  underrunRate: number;
+};
+
+type TelemetryExportSnapshot = {
+  createdAt: string;
+  presetName: string;
+  netSimConfig: {
+    latencyMs: number;
+    jitterMs: number;
+    drop: number;
+  };
+  wsStatus: {
+    connected: boolean;
+  };
+  captureWindow: {
+    sampleCount: number;
+    durationMs: number;
+    cadenceMs: number;
+  };
+  summary: TelemetrySnapshotSummary;
+  samples: TelemetrySample[];
+};
+
+const TELEMETRY_DURATION_MS = 10_000;
+const TELEMETRY_CADENCE_MS = 100;
+
 export function WsDebugOverlay({
   connected,
   messages,
@@ -107,17 +140,8 @@ export function WsDebugOverlay({
 
   const [isTelemetryRecording, setIsTelemetryRecording] = useState(false);
   const [telemetrySummary, setTelemetrySummary] = useState<TelemetrySnapshotSummary | null>(null);
-  const telemetrySamplesRef = useRef<
-    {
-      drift: number;
-      hardCorrectionCount: number;
-      softCorrectionCount: number;
-      pendingInputs: number;
-      delayTicks: number;
-      targetBufferPairs: number;
-      underrunRate: number;
-    }[]
-  >([]);
+  const [telemetryExportSnapshot, setTelemetryExportSnapshot] = useState<TelemetryExportSnapshot | null>(null);
+  const telemetrySamplesRef = useRef<TelemetrySample[]>([]);
   const telemetryTimeoutRef = useRef<number | null>(null);
 
   const latestStatsRef = useRef<{ predictionStats: PredictionStats | null; tickDebugStats: TickDebugStats | null }>({
@@ -144,7 +168,7 @@ export function WsDebugOverlay({
         targetBufferPairs: latest.tickDebugStats.targetBufferPairs,
         underrunRate: latest.tickDebugStats.underrunRate,
       });
-    }, 100);
+    }, TELEMETRY_CADENCE_MS);
 
     return () => {
       window.clearInterval(sampleIntervalId);
@@ -164,6 +188,7 @@ export function WsDebugOverlay({
     const samples = telemetrySamplesRef.current;
     if (samples.length === 0) {
       setTelemetrySummary(null);
+      setTelemetryExportSnapshot(null);
       setIsTelemetryRecording(false);
       return;
     }
@@ -206,6 +231,27 @@ export function WsDebugOverlay({
     console.table(summary);
     console.groupEnd();
 
+    const presetName = netSimPresets.find((preset) => preset.id === netSim.presetId)?.label ?? netSim.presetId;
+    setTelemetryExportSnapshot({
+      createdAt: new Date().toISOString(),
+      presetName,
+      netSimConfig: {
+        latencyMs: netSim.latencyMs,
+        jitterMs: netSim.jitterMs,
+        drop: netSim.dropRate,
+      },
+      wsStatus: {
+        connected,
+      },
+      captureWindow: {
+        sampleCount: summary.sampleCount,
+        durationMs: TELEMETRY_DURATION_MS,
+        cadenceMs: TELEMETRY_CADENCE_MS,
+      },
+      summary,
+      samples,
+    });
+
     setTelemetrySummary(summary);
     setIsTelemetryRecording(false);
   };
@@ -213,13 +259,36 @@ export function WsDebugOverlay({
   const startTelemetryRecording = () => {
     telemetrySamplesRef.current = [];
     setTelemetrySummary(null);
+    setTelemetryExportSnapshot(null);
     setIsTelemetryRecording(true);
     if (telemetryTimeoutRef.current !== null) {
       window.clearTimeout(telemetryTimeoutRef.current);
     }
     telemetryTimeoutRef.current = window.setTimeout(() => {
       finishTelemetryRecording();
-    }, 10_000);
+    }, TELEMETRY_DURATION_MS);
+  };
+
+  const handleDownloadTelemetryJson = () => {
+    if (!telemetryExportSnapshot) return;
+
+    const sanitizePreset = (preset: string) => preset.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '');
+    const timestamp = telemetryExportSnapshot.createdAt
+      .replace(/:/g, '-')
+      .replace('T', '_')
+      .replace(/\.\d+Z$/, '')
+      .replace('Z', '');
+    const filename = `rift_telemetry_${sanitizePreset(telemetryExportSnapshot.presetName)}_${timestamp}.json`;
+    const json = JSON.stringify(telemetryExportSnapshot, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
   };
   return (
     <div
@@ -268,6 +337,9 @@ export function WsDebugOverlay({
           </select>
           <button onClick={startTelemetryRecording} disabled={isTelemetryRecording || !predictionStats || !tickDebugStats}>
             {isTelemetryRecording ? 'Recording…' : 'Record 10s Telemetry'}
+          </button>
+          <button onClick={handleDownloadTelemetryJson} disabled={!telemetryExportSnapshot || isTelemetryRecording}>
+            Download JSON
           </button>
         </div>
       )}
