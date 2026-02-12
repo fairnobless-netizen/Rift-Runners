@@ -1,0 +1,63 @@
+name: Probe Artifacts
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  probe-artifacts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run probe (when available)
+        shell: bash
+        run: |
+          set -u
+          mkdir -p artifacts
+
+          if [ -f scripts/probe-artifacts.mjs ]; then
+            if node scripts/probe-artifacts.mjs; then
+              cat > artifacts/probe-status.json <<'JSON'
+{"status":"ran","runner":"node scripts/probe-artifacts.mjs"}
+JSON
+            else
+              code=$?
+              cat > artifacts/probe-status.json <<JSON
+{"status":"failed","runner":"node scripts/probe-artifacts.mjs","exitCode":${code}}
+JSON
+            fi
+          elif npm run | grep -q "probe:artifacts"; then
+            if npm run probe:artifacts; then
+              cat > artifacts/probe-status.json <<'JSON'
+{"status":"ran","runner":"npm run probe:artifacts"}
+JSON
+            else
+              code=$?
+              cat > artifacts/probe-status.json <<JSON
+{"status":"failed","runner":"npm run probe:artifacts","exitCode":${code}}
+JSON
+            fi
+          else
+            cat > artifacts/probe-status.json <<'JSON'
+{"status":"skipped","reason":"No probe script found (expected scripts/probe-artifacts.mjs or npm script probe:artifacts)."}
+JSON
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-artifacts
+          path: artifacts/
+          if-no-files-found: warn
