@@ -87,8 +87,10 @@ type TelemetryExportSnapshot = {
     cadenceMs: number;
   };
   summary: TelemetrySnapshotSummary;
-  samples: TelemetrySample[];
+  samples?: TelemetrySample[];
 };
+
+type TelemetryRun = TelemetryExportSnapshot;
 
 const TELEMETRY_DURATION_MS = 10_000;
 const TELEMETRY_CADENCE_MS = 100;
@@ -141,8 +143,32 @@ export function WsDebugOverlay({
   const [isTelemetryRecording, setIsTelemetryRecording] = useState(false);
   const [telemetrySummary, setTelemetrySummary] = useState<TelemetrySnapshotSummary | null>(null);
   const [telemetryExportSnapshot, setTelemetryExportSnapshot] = useState<TelemetryExportSnapshot | null>(null);
+  const [telemetryRuns, setTelemetryRuns] = useState<TelemetryRun[]>([]);
   const telemetrySamplesRef = useRef<TelemetrySample[]>([]);
   const telemetryTimeoutRef = useRef<number | null>(null);
+
+  const sanitizePreset = (preset: string) => preset.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '');
+
+  const formatExportTimestamp = (createdAt: string) =>
+    createdAt.replace(/:/g, '-').replace('T', '_').replace(/\.\d+Z$/, '').replace('Z', '');
+
+  const triggerJsonDownload = (data: unknown, filename: string) => {
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadTelemetryRun = (run: TelemetryRun) => {
+    const filename = `rift_telemetry_${sanitizePreset(run.presetName)}_${formatExportTimestamp(run.createdAt)}.json`;
+    triggerJsonDownload(run, filename);
+  };
 
   const latestStatsRef = useRef<{ predictionStats: PredictionStats | null; tickDebugStats: TickDebugStats | null }>({
     predictionStats,
@@ -232,7 +258,7 @@ export function WsDebugOverlay({
     console.groupEnd();
 
     const presetName = netSimPresets.find((preset) => preset.id === netSim.presetId)?.label ?? netSim.presetId;
-    setTelemetryExportSnapshot({
+    const nextRun: TelemetryRun = {
       createdAt: new Date().toISOString(),
       presetName,
       netSimConfig: {
@@ -250,7 +276,12 @@ export function WsDebugOverlay({
       },
       summary,
       samples,
-    });
+    };
+
+    setTelemetryExportSnapshot(nextRun);
+    if (import.meta.env.DEV) {
+      setTelemetryRuns((prev) => [...prev, nextRun].slice(-20));
+    }
 
     setTelemetrySummary(summary);
     setIsTelemetryRecording(false);
@@ -272,24 +303,21 @@ export function WsDebugOverlay({
   const handleDownloadTelemetryJson = () => {
     if (!telemetryExportSnapshot) return;
 
-    const sanitizePreset = (preset: string) => preset.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '');
-    const timestamp = telemetryExportSnapshot.createdAt
-      .replace(/:/g, '-')
-      .replace('T', '_')
-      .replace(/\.\d+Z$/, '')
-      .replace('Z', '');
-    const filename = `rift_telemetry_${sanitizePreset(telemetryExportSnapshot.presetName)}_${timestamp}.json`;
-    const json = JSON.stringify(telemetryExportSnapshot, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
+    downloadTelemetryRun(telemetryExportSnapshot);
   };
+
+  const handleDownloadAllTelemetryRunsJson = () => {
+    if (telemetryRuns.length === 0) return;
+    const filename = `rift_telemetry_all_${formatExportTimestamp(new Date().toISOString())}.json`;
+    triggerJsonDownload(telemetryRuns, filename);
+  };
+
+  const formatRunTime = (iso: string) => {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleTimeString('en-GB', { hour12: false });
+  };
+
   return (
     <div
       style={{
@@ -399,6 +427,59 @@ export function WsDebugOverlay({
           <div>avg delayTicks: {telemetrySummary.avgDelayTicks.toFixed(2)}</div>
           <div>avg targetBufferPairs: {telemetrySummary.avgTargetBufferPairs.toFixed(2)}</div>
           <div>underrunRate: {(telemetrySummary.underrunRate * 100).toFixed(2)}%</div>
+
+          <div style={{ marginTop: 8, marginBottom: 4 }}>Telemetry Runs ({telemetryRuns.length}/20)</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+            <button onClick={handleDownloadAllTelemetryRunsJson} disabled={telemetryRuns.length === 0 || isTelemetryRecording}>
+              Download All JSON
+            </button>
+            <button onClick={() => setTelemetryRuns([])} disabled={telemetryRuns.length === 0 || isTelemetryRecording}>
+              Clear
+            </button>
+          </div>
+
+          {telemetryRuns.length === 0 ? (
+            <div style={{ opacity: 0.75 }}>No telemetry runs recorded yet.</div>
+          ) : (
+            <div style={{ maxHeight: 180, overflow: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left' }}>time</th>
+                    <th style={{ textAlign: 'left' }}>preset</th>
+                    <th style={{ textAlign: 'right' }}>avgDrift</th>
+                    <th style={{ textAlign: 'right' }}>maxDrift</th>
+                    <th style={{ textAlign: 'right' }}>hard</th>
+                    <th style={{ textAlign: 'right' }}>soft</th>
+                    <th style={{ textAlign: 'right' }}>avgDelay</th>
+                    <th style={{ textAlign: 'right' }}>avgBuf</th>
+                    <th style={{ textAlign: 'right' }}>underrunRate</th>
+                    <th style={{ textAlign: 'left' }}>action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...telemetryRuns].reverse().map((run) => (
+                    <tr key={`${run.createdAt}-${run.presetName}`}>
+                      <td>{formatRunTime(run.createdAt)}</td>
+                      <td>{run.presetName}</td>
+                      <td style={{ textAlign: 'right' }}>{run.summary.avgDrift.toFixed(3)}</td>
+                      <td style={{ textAlign: 'right' }}>{run.summary.maxDrift.toFixed(3)}</td>
+                      <td style={{ textAlign: 'right' }}>{run.summary.hardCorrectionCount}</td>
+                      <td style={{ textAlign: 'right' }}>{run.summary.softCorrectionCount}</td>
+                      <td style={{ textAlign: 'right' }}>{run.summary.avgDelayTicks.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right' }}>{run.summary.avgTargetBufferPairs.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right' }}>{(run.summary.underrunRate * 100).toFixed(2)}%</td>
+                      <td>
+                        <button onClick={() => downloadTelemetryRun(run)} disabled={isTelemetryRecording}>
+                          Download
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
