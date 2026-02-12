@@ -7,7 +7,9 @@
     "dev": "vite",
     "dev:5174": "npm run dev -- --port 5174",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:probe": "playwright test e2e/probe.spec.ts"
   },
   "dependencies": {
     "phaser": "^3.90.0",
@@ -19,6 +21,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "typescript": "^5.6.2",
-    "vite": "^5.4.8"
+    "vite": "^5.4.8",
+    "@playwright/test": "1.49.1"
   }
 }
