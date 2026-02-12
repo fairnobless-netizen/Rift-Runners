@@ -625,6 +625,7 @@ export default function GameView(): JSX.Element {
         tickDebugStats={tickDebugStats}
         rttMs={ws.rttMs}
         rttJitterMs={ws.rttJitterMs}
+        localInputSeq={inputSeqRef.current}
         onLobby={() => ws.send({ type: 'lobby:list' })}
         onCreateRoom={() => ws.send({ type: 'room:create' })}
         onStartMatch={() => ws.send({ type: 'match:start' })}

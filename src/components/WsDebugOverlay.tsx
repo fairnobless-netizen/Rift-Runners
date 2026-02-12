@@ -111,6 +111,7 @@ export function WsDebugOverlay({
   onCreateRoom,
   onStartMatch,
   onMove,
+  localInputSeq,
 }: {
   connected: boolean;
   messages: any[];
@@ -131,6 +132,7 @@ export function WsDebugOverlay({
   onCreateRoom: () => void;
   onStartMatch: () => void;
   onMove: (dir: 'up' | 'down' | 'left' | 'right') => void;
+  localInputSeq: number;
 }) {
   const lastSnapshot = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -412,7 +414,7 @@ export function WsDebugOverlay({
 
       <div style={{ marginTop: 8 }}>
         {predictionStats
-          ? `Prediction: pending=${predictionStats.pendingCount}, hardSnaps=${predictionStats.correctionCount}, softCorrections=${predictionStats.softCorrectionCount}, drift=${predictionStats.drift.toFixed(3)}, bias=(${predictionStats.biasX.toFixed(3)}, ${predictionStats.biasY.toFixed(3)}), dropped=${predictionStats.droppedInputCount}, lastAckSeq=${predictionStats.lastAckSeq}`
+          ? `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${predictionStats.lastAckSeq}, unacked=${predictionStats.pendingCount}, hardSnaps=${predictionStats.correctionCount}, softCorrections=${predictionStats.softCorrectionCount}, drift=${predictionStats.drift.toFixed(3)}, bias=(${predictionStats.biasX.toFixed(3)}, ${predictionStats.biasY.toFixed(3)}), dropped=${predictionStats.droppedInputCount}`
           : 'Prediction: —'}
       </div>
 
