@@ -155,6 +155,80 @@ export function WsDebugOverlay({
   const telemetrySamplesRef = useRef<TelemetrySample[]>([]);
   const telemetryTimeoutRef = useRef<number | null>(null);
 
+  // --- M16.2.1 probe ---
+  const latestPredictionStatsRef = useRef<PredictionStats | null>(null);
+  const latestLocalInputSeqRef = useRef<number>(0);
+
+  useEffect(() => {
+    latestPredictionStatsRef.current = predictionStats ?? null;
+  }, [predictionStats]);
+
+  useEffect(() => {
+    latestLocalInputSeqRef.current = localInputSeq;
+  }, [localInputSeq]);
+
+  const downloadJson = (data: unknown, filename: string) => {
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const runProbe = () => {
+    const steps = 20;
+    const intervalMs = 80;
+
+    const dirs: Array<'up' | 'down' | 'left' | 'right'> = ['right', 'right', 'down', 'left', 'up'];
+
+    const samples: any[] = [];
+    let i = 0;
+
+    const timer = window.setInterval(() => {
+      const dir = dirs[i % dirs.length];
+      onMove(dir);
+
+      // sample after move has been queued (next tick)
+      window.setTimeout(() => {
+        const ps = latestPredictionStatsRef.current;
+        samples.push({
+          t: Date.now(),
+          step: i + 1,
+          dir,
+          inputSeq: latestLocalInputSeqRef.current,
+          ack: ps?.lastAckSeq ?? null,
+          unacked: ps?.pendingCount ?? null,
+          predErr: ps?.predictionError ?? null,
+          predErrEma: ps?.predictionErrorEma ?? null,
+          hist: ps?.historySize ?? null,
+          missHist: ps?.missingHistoryCount ?? null,
+          drift: ps?.drift ?? null,
+        });
+      }, 0);
+
+      i += 1;
+      if (i >= steps) {
+        window.clearInterval(timer);
+
+        // finalize after a short delay to catch last render
+        window.setTimeout(() => {
+          downloadJson(
+            {
+              createdAt: new Date().toISOString(),
+              steps,
+              intervalMs,
+              samples,
+            },
+            `m16_2_1_probe_${Date.now()}.json`,
+          );
+        }, 150);
+      }
+    }, intervalMs);
+  };
+
   const sanitizePreset = (preset: string) => preset.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '');
 
   const formatExportTimestamp = (createdAt: string) =>
@@ -412,10 +486,11 @@ export function WsDebugOverlay({
         extrapCount: {tickDebugStats?.extrapCount ?? 0} | stallCount: {tickDebugStats?.stallCount ?? 0} | extrapTicks: {tickDebugStats?.extrapolatingTicks ?? 0} | stalled: {String(tickDebugStats?.stalled ?? false)}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
         <button onClick={onLobby}>Lobby</button>
         <button onClick={onCreateRoom}>Create Room</button>
         <button onClick={onStartMatch}>Start Match</button>
+        <button onClick={runProbe}>Probe 20 moves</button>
       </div>
 
       <div style={{ marginTop: 8 }}>
