@@ -80,16 +80,29 @@ export function useWsClient(token?: string) {
   }, [netSimConfig]);
 
   const [connected, setConnected] = useState(false);
+  const [online, setOnline] = useState(() => window.navigator.onLine);
   const [messages, setMessages] = useState<WsServerMessage[]>([]);
 
-  // M14.7 RTT (EMA + jitter EMA)
   const pingSeqRef = useRef(0);
-  const pingSentAtRef = useRef(new Map<number, number>()); // id -> perfNow at actual send time
+  const pingSentAtRef = useRef(new Map<number, number>());
   const rttEmaRef = useRef<number | null>(null);
   const rttJitterEmaRef = useRef<number>(0);
 
   const [rttMs, setRttMs] = useState<number | null>(null);
   const [rttJitterMs, setRttJitterMs] = useState<number>(0);
+
+  useEffect(() => {
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -102,75 +115,80 @@ export function useWsClient(token?: string) {
     if (configuredWsUrl) {
       try {
         const normalized = new URL(configuredWsUrl);
-        if (normalized.pathname === '/' || normalized.pathname === '') {
-          normalized.pathname = '/ws';
-        }
+        if (normalized.pathname === '/' || normalized.pathname === '') normalized.pathname = '/ws';
         wsUrl = normalized.toString();
       } catch {
         wsUrl = defaultWsUrl;
       }
     }
 
-    const client = new WsClient({
-      url: wsUrl,
-      token,
-      onOpen: () => setConnected(true),
-      onClose: () => setConnected(false),
-      onMessage: (msg) => {
-        // Handle pong without polluting messages
-        if (msg.type === 'pong') {
-          const sentPerf = pingSentAtRef.current.get(msg.id);
-          if (typeof sentPerf === 'number') {
-            pingSentAtRef.current.delete(msg.id);
+    let isDisposed = false;
+    let reconnectTimer: number | undefined;
 
-            const now = performance.now();
-            const sample = Math.max(0, now - sentPerf);
+    const connect = () => {
+      if (isDisposed || clientRef.current) return;
 
-            const prev = rttEmaRef.current;
-            const alpha = 0.15;
-            const next = prev == null ? sample : prev + alpha * (sample - prev);
-            rttEmaRef.current = next;
-
-            const jitterSample = prev == null ? 0 : Math.abs(sample - prev);
-            const jAlpha = 0.2;
-            rttJitterEmaRef.current = rttJitterEmaRef.current + jAlpha * (jitterSample - rttJitterEmaRef.current);
-
-            setRttMs(next);
-            setRttJitterMs(rttJitterEmaRef.current);
+      const client = new WsClient({
+        url: wsUrl,
+        token,
+        onOpen: () => {
+          if (isDisposed) return;
+          setConnected(true);
+        },
+        onClose: () => {
+          if (isDisposed) return;
+          setConnected(false);
+          clientRef.current = null;
+          reconnectTimer = window.setTimeout(connect, 1200);
+        },
+        onMessage: (msg) => {
+          if (msg.type === 'pong') {
+            const sentPerf = pingSentAtRef.current.get(msg.id);
+            if (typeof sentPerf === 'number') {
+              pingSentAtRef.current.delete(msg.id);
+              const sample = Math.max(0, performance.now() - sentPerf);
+              const prev = rttEmaRef.current;
+              const next = prev == null ? sample : prev + 0.15 * (sample - prev);
+              rttEmaRef.current = next;
+              const jitterSample = prev == null ? 0 : Math.abs(sample - prev);
+              rttJitterEmaRef.current = rttJitterEmaRef.current + 0.2 * (jitterSample - rttJitterEmaRef.current);
+              setRttMs(next);
+              setRttJitterMs(rttJitterEmaRef.current);
+            }
+            return;
           }
-          return;
-        }
 
-        const config = netSimConfigRef.current;
-        const shouldSimulateSnapshot = import.meta.env.DEV && msg.type === 'match:snapshot' && config.enabled;
-        if (shouldSimulateSnapshot && shouldDrop(config)) return;
+          const config = netSimConfigRef.current;
+          const shouldSimulateSnapshot = import.meta.env.DEV && msg.type === 'match:snapshot' && config.enabled;
+          if (shouldSimulateSnapshot && shouldDrop(config)) return;
 
-        const delayMs = shouldSimulateSnapshot ? getNetDelayMs(config) : 0;
-        window.setTimeout(() => {
-          setMessages((prev) => [...prev.slice(-50), msg]);
-        }, delayMs);
-      },
-    });
+          const delayMs = shouldSimulateSnapshot ? getNetDelayMs(config) : 0;
+          window.setTimeout(() => {
+            setMessages((prev) => [...prev.slice(-50), msg]);
+          }, delayMs);
+        },
+      });
 
-    clientRef.current = client;
-    client.connect();
+      clientRef.current = client;
+      client.connect();
+    };
 
-    // Ping loop (1s).
+    connect();
+
     const pingTimer = window.setInterval(() => {
       const c = clientRef.current;
       if (!c) return;
-
       const id = ++pingSeqRef.current;
       pingSentAtRef.current.set(id, performance.now());
-      const msg: WsClientMessage = { type: 'ping', id, t: Date.now() };
-      c.send(msg);
+      c.send({ type: 'ping', id, t: Date.now() });
     }, 1000);
 
     return () => {
+      isDisposed = true;
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       window.clearInterval(pingTimer);
       pingSentAtRef.current.clear();
-
-      client.disconnect();
+      clientRef.current?.disconnect();
       clientRef.current = null;
       setConnected(false);
     };
@@ -178,6 +196,7 @@ export function useWsClient(token?: string) {
 
   return {
     connected,
+    online,
     messages,
     netSimConfig,
     netSimPresets: NET_SIM_PRESETS,
@@ -189,23 +208,14 @@ export function useWsClient(token?: string) {
     },
     setNetSimPreset: (presetId: NetSimPresetId) => {
       if (!import.meta.env.DEV) return;
-
       const preset = NET_SIM_PRESETS.find((candidate) => candidate.id === presetId);
       if (!preset) return;
-
-      setNetSimConfig((prev) => ({
-        ...prev,
-        presetId: preset.id,
-        latencyMs: preset.latencyMs,
-        jitterMs: preset.jitterMs,
-        dropRate: preset.dropRate,
-      }));
+      setNetSimConfig((prev) => ({ ...prev, presetId: preset.id, latencyMs: preset.latencyMs, jitterMs: preset.jitterMs, dropRate: preset.dropRate }));
     },
     send: (msg: WsClientMessage) => {
       const config = netSimConfigRef.current;
       const shouldSimulateInput = import.meta.env.DEV && msg.type === 'match:input' && config.enabled;
       if (shouldSimulateInput && shouldDrop(config)) return;
-
       const delayMs = shouldSimulateInput ? getNetDelayMs(config) : 0;
       window.setTimeout(() => {
         clientRef.current?.send(msg);

@@ -32,8 +32,10 @@ import {
   type WalletLedgerEntry,
 } from '../game/wallet';
 import { WsDebugOverlay } from './WsDebugOverlay';
+import { ConnectionStatusBadge } from './ConnectionStatusBadge';
 import { useWsClient } from '../ws/useWsClient';
 import { resolveDevIdentity } from '../utils/devIdentity';
+import { DEBUG_UI_ENABLED } from '../debugFlags';
 
 
 const defaultStats: PlayerStats = {
@@ -130,6 +132,8 @@ export default function GameView(): JSX.Element {
   const [predictionStats, setPredictionStats] = useState<PredictionStats | null>(null);
   const [tickDebugStats, setTickDebugStats] = useState<TickDebugStats | null>(null);
   const ws = useWsClient(token || undefined);
+
+  const connectionStatus = !ws.online ? 'offline' : ws.connected ? 'connected' : 'reconnecting';
 
 
   const setMovementFromDirection = (direction: Direction | null): void => {
@@ -609,7 +613,12 @@ export default function GameView(): JSX.Element {
         </aside>
       </section>
 
-      <WsDebugOverlay
+      <ConnectionStatusBadge status={connectionStatus} />
+
+      {DEBUG_UI_ENABLED && <div className="debug-ui-badge">DEBUG UI</div>}
+
+      {DEBUG_UI_ENABLED && (
+        <WsDebugOverlay
         connected={ws.connected}
         messages={ws.messages}
         identity={{
@@ -643,7 +652,8 @@ export default function GameView(): JSX.Element {
           scene.onLocalMatchInput({ seq, dx, dy });
           ws.send({ type: 'match:input', seq, payload: { kind: 'move', dir } });
         }}
-      />
+        />
+      )}
     </main>
   );
 }

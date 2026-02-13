@@ -299,3 +299,68 @@ button:disabled {
     padding-left: calc(1.25rem + var(--safe-left));
   }
 }
+
+.error-boundary {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  gap: 0.8rem;
+  text-align: center;
+  padding: 1rem;
+}
+
+.error-boundary pre {
+  max-width: min(90vw, 960px);
+  max-height: 220px;
+  overflow: auto;
+  text-align: left;
+  background: #0f1630cc;
+  border: 1px solid #29345d;
+  border-radius: 8px;
+  padding: 0.6rem;
+}
+
+.connection-status-badge {
+  position: fixed;
+  right: calc(0.8rem + var(--safe-right));
+  bottom: calc(0.8rem + var(--safe-bottom));
+  font-size: 0.72rem;
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid #425180;
+  background: #0f1630cc;
+  color: #c3d0f7;
+  pointer-events: none;
+  z-index: 25;
+}
+
+.connection-status-badge--connected {
+  border-color: #3e8b66;
+  color: #90e8bd;
+}
+
+.connection-status-badge--reconnecting {
+  border-color: #a07b39;
+  color: #f5da8e;
+}
+
+.connection-status-badge--offline {
+  border-color: #915357;
+  color: #f4a6ac;
+}
+
+.debug-ui-badge {
+  position: fixed;
+  left: calc(0.8rem + var(--safe-left));
+  bottom: calc(0.8rem + var(--safe-bottom));
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid #6d58ad;
+  background: #2a1b4acc;
+  color: #e7deff;
+  border-radius: 999px;
+  padding: 0.24rem 0.44rem;
+  pointer-events: none;
+  z-index: 25;
+}
