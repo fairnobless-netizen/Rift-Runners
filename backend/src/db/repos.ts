@@ -239,6 +239,157 @@ export async function saveCampaign(params: {
   return { updatedAt: now };
 }
 
+
+
+export type StoreCatalogItemRecord = {
+  sku: string;
+  category: string;
+  title: string;
+  description: string;
+  priceStars: number;
+  active: boolean;
+  sortOrder: number;
+};
+
+export async function listStoreCatalog(): Promise<StoreCatalogItemRecord[]> {
+  const { rows } = await pgQuery<{
+    sku: string;
+    category: string;
+    title: string;
+    description: string;
+    price_stars: number;
+    active: boolean;
+    sort_order: number;
+  }>(
+    `
+    SELECT sku, category, title, description, price_stars, active, sort_order
+    FROM store_items
+    WHERE active = TRUE
+    ORDER BY category ASC, sort_order ASC, sku ASC
+    `,
+  );
+
+  return rows.map((row) => ({
+    sku: String(row.sku),
+    category: String(row.category),
+    title: String(row.title),
+    description: String(row.description ?? ''),
+    priceStars: Number(row.price_stars ?? 0),
+    active: Boolean(row.active),
+    sortOrder: Number(row.sort_order ?? 0),
+  }));
+}
+
+export async function listOwnedSkus(tgUserId: string): Promise<string[]> {
+  const { rows } = await pgQuery<{ sku: string }>(
+    `SELECT sku FROM store_ownership WHERE tg_user_id = $1 ORDER BY acquired_at DESC`,
+    [tgUserId],
+  );
+  return rows.map((row) => String(row.sku));
+}
+
+export async function buyStoreSkuTx(params: {
+  tgUserId: string;
+  sku: string;
+}): Promise<{ wallet: { tgUserId: string; stars: number; crystals: number }; ownedSkus: string[] }> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+  const now = Date.now();
+
+  try {
+    await client.query('BEGIN');
+
+    const itemRes = await client.query<{
+      sku: string;
+      active: boolean;
+      price_stars: number;
+    }>(
+      `SELECT sku, active, price_stars FROM store_items WHERE sku = $1 LIMIT 1`,
+      [params.sku],
+    );
+
+    const item = itemRes.rows[0];
+    if (!item || !item.active) {
+      await client.query('ROLLBACK');
+      const error = new Error('sku_not_found');
+      (error as any).code = 'SKU_NOT_FOUND';
+      throw error;
+    }
+
+    const ownRes = await client.query<{ sku: string }>(
+      `SELECT sku FROM store_ownership WHERE tg_user_id = $1 AND sku = $2 LIMIT 1`,
+      [params.tgUserId, params.sku],
+    );
+
+    if (ownRes.rows[0]) {
+      await client.query('ROLLBACK');
+      const error = new Error('already_owned');
+      (error as any).code = 'ALREADY_OWNED';
+      throw error;
+    }
+
+    await client.query(`INSERT INTO wallets (tg_user_id, stars, crystals) VALUES ($1, 0, 0) ON CONFLICT DO NOTHING`, [params.tgUserId]);
+    const walletRes = await client.query<{ stars: number; crystals: number }>(
+      `SELECT stars, crystals FROM wallets WHERE tg_user_id = $1 FOR UPDATE`,
+      [params.tgUserId],
+    );
+
+    const stars0 = Number(walletRes.rows[0]?.stars ?? 0);
+    const crystals0 = Number(walletRes.rows[0]?.crystals ?? 0);
+    const priceStars = Math.max(0, Math.floor(Number(item.price_stars ?? 0)));
+
+    if (priceStars > stars0) {
+      await client.query('ROLLBACK');
+      const error = new Error('insufficient_funds');
+      (error as any).code = 'INSUFFICIENT_FUNDS';
+      throw error;
+    }
+
+    const stars1 = stars0 - priceStars;
+
+    await client.query(
+      `UPDATE wallets SET stars = $2, crystals = $3 WHERE tg_user_id = $1`,
+      [params.tgUserId, stars1, crystals0],
+    );
+
+    await client.query(
+      `
+      INSERT INTO ledger_entries (id, tg_user_id, type, currency, amount, meta, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `,
+      [
+        `led_store_${now}_${Math.random().toString(16).slice(2, 8)}`,
+        params.tgUserId,
+        'purchase',
+        'stars',
+        -priceStars,
+        { source: 'store_buy', sku: params.sku },
+        now,
+      ],
+    );
+
+    await client.query(
+      `INSERT INTO store_ownership (tg_user_id, sku) VALUES ($1, $2)`,
+      [params.tgUserId, params.sku],
+    );
+
+    const ownedRows = await client.query<{ sku: string }>(
+      `SELECT sku FROM store_ownership WHERE tg_user_id = $1 ORDER BY acquired_at DESC`,
+      [params.tgUserId],
+    );
+
+    await client.query('COMMIT');
+    return {
+      wallet: { tgUserId: params.tgUserId, stars: stars1, crystals: crystals0 },
+      ownedSkus: ownedRows.rows.map((row) => String(row.sku)),
+    };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
 export async function createPurchaseIntent(params: {
   id: string;
   tgUserId: string;

@@ -23,9 +23,9 @@ import {
 
 import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../game/types';
 import {
-  confirmPurchase,
-  createPurchaseIntent,
-  fetchCatalog,
+  buyShopSku,
+  fetchShopCatalog,
+  fetchShopOwned,
   fetchLedger,
   fetchWallet,
   type ShopCatalogItem,
@@ -135,9 +135,14 @@ export default function GameView(): JSX.Element {
   const [localTgUserId, setLocalTgUserId] = useState<string | undefined>(devIdentity.localFallbackTgUserId);
   const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
   const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
-  const [catalog, setCatalog] = useState<ShopCatalogItem[]>([]);
+  const [storeItems, setStoreItems] = useState<ShopCatalogItem[]>([]);
   const [ledger, setLedger] = useState<WalletLedgerEntry[]>([]);
   const [purchaseBusySku, setPurchaseBusySku] = useState<string | null>(null);
+  const [isStoreOpen, setIsStoreOpen] = useState(false);
+  const [storeTab, setStoreTab] = useState<'boosts' | 'cosmetics' | 'packs'>('boosts');
+  const [ownedSkus, setOwnedSkus] = useState<string[]>([]);
+  const [storeLoading, setStoreLoading] = useState(false);
+  const [storeError, setStoreError] = useState<string | null>(null);
   const [predictionStats, setPredictionStats] = useState<PredictionStats | null>(null);
   const [tickDebugStats, setTickDebugStats] = useState<TickDebugStats | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -287,13 +292,11 @@ export default function GameView(): JSX.Element {
 
         await loadSettingsAndAccount(token);
 
-        const [w, nextCatalog, nextLedger] = await Promise.all([
+        const [w, nextLedger] = await Promise.all([
           fetchWallet(),
-          fetchCatalog(),
           fetchLedger(20),
         ]);
         if (w) setWallet(w);
-        setCatalog(nextCatalog);
         setLedger(nextLedger);
       } catch {
         // keep silent (dev may run without backend)
@@ -539,18 +542,35 @@ export default function GameView(): JSX.Element {
     zoomApiRef.current?.setZoom(clamped);
   };
 
+  const loadStore = useCallback(async (): Promise<void> => {
+    setStoreLoading(true);
+    setStoreError(null);
+    try {
+      const [items, owned] = await Promise.all([fetchShopCatalog(), fetchShopOwned()]);
+      setStoreItems(items);
+      setOwnedSkus(owned);
+    } catch {
+      setStoreError('Failed to load store');
+    } finally {
+      setStoreLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isStoreOpen) return;
+    void loadStore();
+  }, [isStoreOpen, loadStore]);
+
   const onBuy = async (sku: string): Promise<void> => {
     if (purchaseBusySku) return;
 
     setPurchaseBusySku(sku);
     try {
-      const intent = await createPurchaseIntent(sku);
-      if (!intent) return;
+      const result = await buyShopSku(sku);
+      if (!result) return;
 
-      const confirmed = await confirmPurchase(intent.intentId);
-      if (!confirmed) return;
-
-      setWallet(confirmed.wallet);
+      setWallet(result.wallet);
+      setOwnedSkus(result.ownedSkus);
       const nextLedger = await fetchLedger(20);
       setLedger(nextLedger);
     } finally {
@@ -619,6 +639,7 @@ export default function GameView(): JSX.Element {
               <button type="button" className="nav-btn" aria-label="Map placeholder">🗺️</button>
               <button type="button" className="nav-btn" aria-label="Quest placeholder">📜</button>
               <button type="button" className="nav-btn" aria-label="Inventory placeholder">🎒</button>
+              <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}>🛍️</button>
               <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>⚙️</button>
             </div>
           </div>
@@ -704,21 +725,6 @@ export default function GameView(): JSX.Element {
               >
                 Reset
               </button>
-              <div className="shop-panel">
-                {catalog.map((item) => (
-                  <button
-                    key={item.sku}
-                    type="button"
-                    className="shop-buy-btn"
-                    disabled={!item.available || purchaseBusySku !== null}
-                    onClick={() => {
-                      void onBuy(item.sku);
-                    }}
-                  >
-                    Buy {item.title} ({item.priceStars}⭐)
-                  </button>
-                ))}
-              </div>
               <button
                 type="button"
                 className="bomb-btn"
@@ -741,6 +747,57 @@ export default function GameView(): JSX.Element {
           </div>
         </aside>
       </section>
+
+
+      {isStoreOpen && (
+        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Store">
+          <div className="settings-modal">
+            <div className="settings-header">
+              <strong>Store</strong>
+              <button type="button" onClick={() => setIsStoreOpen(false)}>Close</button>
+            </div>
+            <div className="settings-tabs">
+              <button type="button" className={storeTab === 'boosts' ? 'active' : ''} onClick={() => setStoreTab('boosts')}>Boosts</button>
+              <button type="button" className={storeTab === 'cosmetics' ? 'active' : ''} onClick={() => setStoreTab('cosmetics')}>Cosmetics</button>
+              <button type="button" className={storeTab === 'packs' ? 'active' : ''} onClick={() => setStoreTab('packs')}>Packs</button>
+            </div>
+            <div className="settings-panel">
+              {storeLoading ? (
+                <div>Loading store...</div>
+              ) : storeError ? (
+                <div>{storeError}</div>
+              ) : storeItems.filter((item) => item.category === storeTab).length === 0 ? (
+                <div>No items in this category yet.</div>
+              ) : (
+                storeItems
+                  .filter((item) => item.category === storeTab)
+                  .map((item) => {
+                    const isOwned = ownedSkus.includes(item.sku);
+                    return (
+                      <div key={item.sku} className="store-card">
+                        <div className="store-card-head">
+                          <strong>{item.title}</strong>
+                          <span>{item.priceStars}⭐</span>
+                        </div>
+                        <div className="store-card-desc">{item.description || '—'}</div>
+                        <button
+                          type="button"
+                          className="shop-buy-btn"
+                          disabled={isOwned || purchaseBusySku !== null}
+                          onClick={() => {
+                            void onBuy(item.sku);
+                          }}
+                        >
+                          {isOwned ? 'Owned' : purchaseBusySku === item.sku ? 'Buying...' : 'Buy'}
+                        </button>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {settingsOpen && (
         <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
