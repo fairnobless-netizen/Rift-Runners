@@ -485,16 +485,18 @@ export default function GameView(): JSX.Element {
       <section className="hud">
         <h1>Rift Runners MVP</h1>
         <div className="stats-row">
-          <span>Player: {profileName}</span>
-          <span>Stage: {campaign.stage}</span>
-          <span>Zone: {campaign.zone}</span>
-          <span>Bombs: {stats.placed}/{stats.capacity}</span>
-          <span>Range: {stats.range}</span>
-          <span>Score: {stats.score}</span>
-          <span>Stars: {wallet.stars}</span>
-          <span>Crystals: {wallet.crystals}</span>
-          <span>Ledger: {ledger.length}</span>
-          <span style={{ opacity: 0.7 }}>{syncStatus === 'synced' ? 'Synced' : 'Offline'}</span>
+          <span className="hud-metric hud-metric--primary">Player: {profileName}</span>
+          <span className="hud-metric">Stage: {campaign.stage}</span>
+          <span className="hud-metric">Zone: {campaign.zone}</span>
+          <span className="hud-metric">Bombs: {stats.placed}/{stats.capacity}</span>
+          <span className="hud-metric">Range: {stats.range}</span>
+          <span className="hud-metric">Score: {stats.score}</span>
+          <span className="hud-metric">Stars: {wallet.stars}</span>
+          <span className="hud-metric hud-metric--secondary">Crystals: {wallet.crystals}</span>
+          <span className="hud-metric hud-metric--secondary">Ledger: {ledger.length}</span>
+          <span className="hud-metric hud-metric--secondary" style={{ opacity: 0.7 }}>
+            {syncStatus === 'synced' ? 'Synced' : 'Offline'}
+          </span>
         </div>
       </section>
 
