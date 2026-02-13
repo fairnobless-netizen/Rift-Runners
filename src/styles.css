@@ -90,14 +90,46 @@ body {
 .stats-row {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: space-between;
+  gap: 0.45rem;
   margin-top: 0;
   min-width: 0;
   flex-wrap: nowrap;
-  overflow-x: auto;
+  overflow: hidden;
+  width: 100%;
   scrollbar-width: none;
   font-size: 0.8rem;
   line-height: 1.15;
+}
+
+.hud-left,
+.hud-right {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.hud-left {
+  flex: 0 1 auto;
+}
+
+.hud-right {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.hud-right::-webkit-scrollbar {
+  display: none;
+}
+
+.hud-lives {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
 }
 
 .stats-row::-webkit-scrollbar {
@@ -162,6 +194,9 @@ body {
 
 .left-nav {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.5rem * var(--ui-scale-left));
 }
 
 .nav-grid {
@@ -207,7 +242,7 @@ body {
 .right-stack {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: calc(0.55rem * var(--ui-scale-right));
   flex: 1;
   width: 100%;
@@ -245,6 +280,23 @@ body {
   text-transform: uppercase;
 }
 
+
+.nav-btn--multiplayer {
+  width: 100%;
+  margin-top: calc(0.65rem * var(--ui-scale-left));
+}
+
+.right-panel--actions {
+  gap: calc(0.75rem * var(--ui-scale-right));
+}
+
+.boost-slot--upper {
+  margin-bottom: calc(0.4rem * var(--ui-scale-right));
+}
+
+.boost-slot--lower {
+  margin-top: calc(0.4rem * var(--ui-scale-right));
+}
 .game-shell {
   position: relative;
   display: flex;
@@ -450,9 +502,9 @@ button:disabled {
 }
 
 @media (orientation: landscape) and (max-width: 860px) {
-  .hud-metric:nth-child(4),
-  .hud-metric:nth-child(5),
-  .hud-metric:nth-child(7) {
+  .hud-right .hud-metric:nth-child(3),
+  .hud-right .hud-metric:nth-child(4),
+  .hud-right .hud-metric:nth-child(6) {
     display: none;
   }
 }
@@ -504,6 +556,10 @@ button:disabled {
     width: min(100%, calc(100vw - var(--safe-left) - var(--safe-right) - 1.4rem));
     max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - var(--tg-top-overlay) - var(--header-h) - 168px);
     height: auto;
+  }
+
+  .nav-btn--multiplayer {
+    margin-top: 0.35rem;
   }
 
   .joystick-pad {
