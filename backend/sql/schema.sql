@@ -155,3 +155,28 @@ CREATE TABLE IF NOT EXISTS leaderboard_submit_limits (
   tg_user_id TEXT PRIMARY KEY REFERENCES users(tg_user_id) ON DELETE CASCADE,
   last_submit_at BIGINT NOT NULL DEFAULT 0
 );
+
+-- =========================================
+-- MULTIPLAYER ROOMS (Stage 4.1A)
+-- =========================================
+
+CREATE TABLE IF NOT EXISTS rooms (
+  room_code TEXT PRIMARY KEY,                 -- short code used for join
+  owner_tg_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  capacity INTEGER NOT NULL,                  -- 2/3/4
+  status TEXT NOT NULL DEFAULT 'OPEN',        -- OPEN | CLOSED
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rooms_owner_created
+  ON rooms (owner_tg_user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS room_members (
+  room_code TEXT NOT NULL REFERENCES rooms(room_code) ON DELETE CASCADE,
+  tg_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (room_code, tg_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_members_room
+  ON room_members (room_code);

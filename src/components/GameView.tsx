@@ -24,14 +24,21 @@ import {
 import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../game/types';
 import {
   buyShopSku,
+  createRoom,
   fetchLeaderboard,
+  fetchMyRooms,
+  fetchRoom,
   fetchShopCatalog,
   fetchShopOwned,
   fetchLedger,
   fetchWallet,
+  joinRoom,
   type LeaderboardMeEntry,
   type LeaderboardMode,
   type LeaderboardTopEntry,
+  type MyRoomEntry,
+  type RoomMember,
+  type RoomState,
   type ShopCatalogItem,
   type WalletLedgerEntry,
 } from '../game/wallet';
@@ -71,6 +78,8 @@ type AccountInfo = {
   referralLink: string;
   nameChangeRemaining: number;
 };
+
+type MultiplayerTab = 'rooms';
 
 type TickDebugStats = {
   snapshotTick: number;
@@ -157,6 +166,14 @@ export default function GameView(): JSX.Element {
   const [leaderboardMe, setLeaderboardMe] = useState<LeaderboardMeEntry | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
+  const [multiplayerOpen, setMultiplayerOpen] = useState(false);
+  const [multiplayerTab, setMultiplayerTab] = useState<MultiplayerTab>('rooms');
+  const [roomsLoading, setRoomsLoading] = useState(false);
+  const [roomsError, setRoomsError] = useState<string | null>(null);
+  const [joinCodeDraft, setJoinCodeDraft] = useState('');
+  const [myRooms, setMyRooms] = useState<MyRoomEntry[]>([]);
+  const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
+  const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>({ musicEnabled: true, sfxEnabled: true });
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
@@ -588,6 +605,74 @@ export default function GameView(): JSX.Element {
     }
   }, []);
 
+  const loadRooms = useCallback(async (): Promise<void> => {
+    setRoomsLoading(true);
+    setRoomsError(null);
+    try {
+      const rooms = await fetchMyRooms();
+      setMyRooms(rooms);
+
+      if (currentRoom?.roomCode) {
+        const roomData = await fetchRoom(currentRoom.roomCode);
+        if (roomData) {
+          setCurrentRoom(roomData.room);
+          setCurrentRoomMembers(roomData.members);
+        }
+      }
+    } catch {
+      setRoomsError('Failed to load rooms');
+    } finally {
+      setRoomsLoading(false);
+    }
+  }, [currentRoom?.roomCode]);
+
+  const joinRoomByCode = useCallback(async (roomCodeRaw: string): Promise<void> => {
+    const roomCode = roomCodeRaw.trim().toUpperCase();
+    if (!roomCode) return;
+
+    setRoomsError(null);
+    const result = await joinRoom(roomCode);
+    if (!result) {
+      setRoomsError('Join failed');
+      return;
+    }
+
+    if (result.error) {
+      setRoomsError(result.error);
+      return;
+    }
+
+    setCurrentRoom(result.room);
+    setCurrentRoomMembers(result.members);
+    setJoinCodeDraft(roomCode);
+
+    const rooms = await fetchMyRooms();
+    setMyRooms(rooms);
+  }, []);
+
+  const onCreateRoom = useCallback(async (capacity: 2 | 3 | 4): Promise<void> => {
+    setRoomsError(null);
+    const created = await createRoom(capacity);
+    if (!created) {
+      setRoomsError('Failed to create room');
+      return;
+    }
+
+    await joinRoomByCode(created.roomCode);
+  }, [joinRoomByCode]);
+
+  const onCopyInviteLink = useCallback(async (): Promise<void> => {
+    if (!currentRoom?.roomCode) return;
+
+    const inviteUrl = `${window.location.origin}${window.location.pathname}?startapp=room_${currentRoom.roomCode}`;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+    } catch {
+      setRoomsError('Failed to copy invite link');
+    }
+  }, [currentRoom?.roomCode]);
+
+
   useEffect(() => {
     if (!isStoreOpen) return;
     void loadStore();
@@ -597,6 +682,27 @@ export default function GameView(): JSX.Element {
     if (!leaderboardOpen) return;
     void loadLeaderboard(leaderboardMode);
   }, [leaderboardMode, leaderboardOpen, loadLeaderboard]);
+
+  useEffect(() => {
+    if (!multiplayerOpen) return;
+    void loadRooms();
+  }, [loadRooms, multiplayerOpen]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    const search = new URLSearchParams(window.location.search);
+    const startappRaw = search.get('startapp') ?? '';
+    if (!startappRaw.startsWith('room_')) return;
+
+    const deepLinkRoomCode = startappRaw.slice(5).trim().toUpperCase();
+    if (!deepLinkRoomCode) return;
+
+    setMultiplayerOpen(true);
+    setMultiplayerTab('rooms');
+    setJoinCodeDraft(deepLinkRoomCode);
+    void joinRoomByCode(deepLinkRoomCode);
+  }, [joinRoomByCode, token]);
 
   const onBuy = async (sku: string): Promise<void> => {
     if (purchaseBusySku) return;
@@ -675,7 +781,7 @@ export default function GameView(): JSX.Element {
             <div className="nav-grid">
               <button type="button" className="nav-btn" aria-label="Map placeholder">🗺️</button>
               <button type="button" className="nav-btn" aria-label="Leaderboard" onClick={() => setLeaderboardOpen(true)}>🏆</button>
-              <button type="button" className="nav-btn" aria-label="Inventory placeholder">🎒</button>
+              <button type="button" className="nav-btn" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>👥</button>
               <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}>🛍️</button>
               <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>⚙️</button>
             </div>
@@ -885,6 +991,85 @@ export default function GameView(): JSX.Element {
                     );
                   })
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {multiplayerOpen && (
+        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Multiplayer">
+          <div className="settings-modal">
+            <div className="settings-header">
+              <strong>Multiplayer</strong>
+              <button type="button" onClick={() => setMultiplayerOpen(false)}>Close</button>
+            </div>
+            <div className="settings-tabs">
+              <button type="button" className={multiplayerTab === 'rooms' ? 'active' : ''} onClick={() => setMultiplayerTab('rooms')}>Rooms</button>
+            </div>
+
+            <div className="settings-panel">
+              <div className="room-create-row">
+                <span>Create room</span>
+                <div className="room-create-actions">
+                  <button type="button" onClick={() => { void onCreateRoom(2); }}>2p</button>
+                  <button type="button" onClick={() => { void onCreateRoom(3); }}>3p</button>
+                  <button type="button" onClick={() => { void onCreateRoom(4); }}>4p</button>
+                </div>
+              </div>
+
+              <div className="room-join-row">
+                <input
+                  type="text"
+                  value={joinCodeDraft}
+                  onChange={(event) => setJoinCodeDraft(event.target.value.toUpperCase())}
+                  placeholder="Room code"
+                />
+                <button type="button" onClick={() => { void joinRoomByCode(joinCodeDraft); }}>Join</button>
+              </div>
+
+              {roomsError ? <div>{roomsError}</div> : null}
+              {roomsLoading ? <div>Loading rooms...</div> : null}
+
+              <div className="room-section">
+                <strong>My rooms</strong>
+                {myRooms.length === 0 ? (
+                  <div>No joined rooms yet.</div>
+                ) : (
+                  myRooms.map((room) => (
+                    <button
+                      key={room.roomCode}
+                      type="button"
+                      className="room-list-item"
+                      onClick={() => { void joinRoomByCode(room.roomCode); }}
+                    >
+                      <span>{room.roomCode}</span>
+                      <span>{room.memberCount}/{room.capacity}</span>
+                      <span>{room.status}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <div className="room-section">
+                <strong>Current room</strong>
+                {!currentRoom ? (
+                  <div>Not in a room.</div>
+                ) : (
+                  <>
+                    <div className="settings-kv"><span>Code</span><strong>{currentRoom.roomCode}</strong></div>
+                    <div className="settings-kv"><span>Status</span><strong>{currentRoomMembers.length >= currentRoom.capacity ? 'full' : 'waiting'}</strong></div>
+                    <button type="button" onClick={() => { void onCopyInviteLink(); }}>Copy invite link</button>
+                    <div className="room-members-list">
+                      {currentRoomMembers.map((member) => (
+                        <div key={member.tgUserId} className="settings-kv">
+                          <span>{member.displayName}</span>
+                          <strong>{member.tgUserId}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>
