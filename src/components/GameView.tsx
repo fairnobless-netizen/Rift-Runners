@@ -93,6 +93,11 @@ type AccountInfo = {
 
 type MultiplayerTab = 'rooms' | 'friends';
 type GameFlowPhase = 'intro' | 'start' | 'playing';
+type TutorialStep = {
+  id: string;
+  title: string;
+  body: string;
+};
 
 type TickDebugStats = {
   snapshotTick: number;
@@ -146,6 +151,7 @@ function mapRoomError(error?: string): string {
 const JOYSTICK_RADIUS = 56;
 const JOYSTICK_DEADZONE = 10;
 const INTRO_PLACEHOLDER_MS = 5500;
+const ONBOARDING_DONE_KEY = 'rift_onboarding_v1_done';
 
 export default function GameView(): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -153,6 +159,11 @@ export default function GameView(): JSX.Element {
   const sceneRef = useRef<GameScene | null>(null);
   const inputSeqRef = useRef(0);
   const joystickPadRef = useRef<HTMLDivElement | null>(null);
+  const hudLivesRef = useRef<HTMLSpanElement | null>(null);
+  const bombBtnRef = useRef<HTMLButtonElement | null>(null);
+  const detonateBtnRef = useRef<HTMLButtonElement | null>(null);
+  const multiplayerBtnRef = useRef<HTMLButtonElement | null>(null);
+  const tutorialStepTargetRef = useRef<HTMLElement | null>(null);
   const controlsRef = useRef<ControlsState>({
     up: false,
     down: false,
@@ -214,6 +225,10 @@ export default function GameView(): JSX.Element {
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
   const [gameFlowPhase, setGameFlowPhase] = useState<GameFlowPhase>('intro');
+  const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
+  const [tutorialActive, setTutorialActive] = useState(false);
+  const [tutorialTargetRect, setTutorialTargetRect] = useState<DOMRect | null>(null);
+  const [onboardingDone, setOnboardingDone] = useState<boolean>(() => localStorage.getItem(ONBOARDING_DONE_KEY) === '1');
   const bootSplashSeen = localStorage.getItem('rift_boot_v1_done') === '1';
   const [showBootSplash, setShowBootSplash] = useState<boolean>(() => !bootSplashSeen);
   const [bootSplashProgress, setBootSplashProgress] = useState<number>(() => (bootSplashSeen ? 1 : 0));
@@ -224,7 +239,62 @@ export default function GameView(): JSX.Element {
   const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
   const baseHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
   const arenaAspectRatio = `${baseWidth} / ${baseHeight}`;
-  const isInputLocked = gameFlowPhase !== 'playing';
+  const tutorialSteps: TutorialStep[] = [
+    { id: 'lives', title: 'Lives HUD', body: 'Верхний левый HUD показывает игроков и их lives.' },
+    { id: 'bomb', title: 'Bomb', body: 'Кнопка Bomb ставит бомбу рядом с персонажем.' },
+    { id: 'detonate', title: 'Detonate', body: 'Detonate взрывает ваши бомбы вручную, когда способность разблокирована.' },
+    { id: 'multiplayer', title: 'Multiplayer', body: 'Иконка Multiplayer открывает комнаты и друзей.' },
+    { id: 'joystick', title: 'Joystick', body: 'Удерживайте и тяните джойстик для движения.' },
+  ];
+  const currentTutorialStep = tutorialSteps[tutorialStepIndex] ?? null;
+
+  const myRoomMember = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
+  const waitingForOtherPlayer = Boolean(
+    multiplayerOpen
+    && multiplayerTab === 'rooms'
+    && currentRoom
+    && ((myRoomMember?.ready ?? false) || startingRoom)
+    && (currentRoom.phase ?? 'LOBBY') !== 'STARTED',
+  );
+
+  const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive || waitingForOtherPlayer;
+
+  useEffect(() => {
+    if (!tutorialActive || !currentTutorialStep) {
+      tutorialStepTargetRef.current = null;
+      setTutorialTargetRect(null);
+      return;
+    }
+
+    const nextTarget =
+      currentTutorialStep.id === 'lives'
+        ? hudLivesRef.current
+        : currentTutorialStep.id === 'bomb'
+          ? bombBtnRef.current
+          : currentTutorialStep.id === 'detonate'
+            ? detonateBtnRef.current
+            : currentTutorialStep.id === 'multiplayer'
+              ? multiplayerBtnRef.current
+              : joystickPadRef.current;
+
+    tutorialStepTargetRef.current = nextTarget;
+
+    const updateRect = (): void => {
+      const rect = tutorialStepTargetRef.current?.getBoundingClientRect() ?? null;
+      setTutorialTargetRect(rect);
+    };
+
+    updateRect();
+    window.addEventListener('resize', updateRect);
+    window.addEventListener('scroll', updateRect, true);
+    const rafId = window.requestAnimationFrame(updateRect);
+
+    return () => {
+      window.removeEventListener('resize', updateRect);
+      window.removeEventListener('scroll', updateRect, true);
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [currentTutorialStep, tutorialActive]);
 
 
   const setMovementFromDirection = (direction: Direction | null): void => {
@@ -1089,6 +1159,24 @@ export default function GameView(): JSX.Element {
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
     : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
 
+  const onStartGame = (): void => {
+    setGameFlowPhase('playing');
+    if (!onboardingDone) {
+      setTutorialStepIndex(0);
+      setTutorialActive(true);
+    }
+  };
+
+  const onTutorialNext = (): void => {
+    if (tutorialStepIndex >= tutorialSteps.length - 1) {
+      setTutorialActive(false);
+      setOnboardingDone(true);
+      localStorage.setItem(ONBOARDING_DONE_KEY, '1');
+      return;
+    }
+    setTutorialStepIndex((prev) => prev + 1);
+  };
+
   return (
     <main className="page">
       {showBootSplash && (
@@ -1115,9 +1203,37 @@ export default function GameView(): JSX.Element {
           ) : (
             <div className="game-flow-card">
               <h2>Ready to start?</h2>
-              <button type="button" className="game-flow-start-btn" onClick={() => setGameFlowPhase('playing')}>Start</button>
+              <button type="button" className="game-flow-start-btn" onClick={onStartGame}>Start</button>
             </div>
           )}
+        </div>
+      )}
+      {gameFlowPhase === 'playing' && tutorialActive && currentTutorialStep && (
+        <div className="tutorial-overlay" role="dialog" aria-modal="true" aria-label="Tutorial spotlight">
+          {tutorialTargetRect ? (
+            <div
+              className="tutorial-spotlight"
+              style={{
+                left: tutorialTargetRect.left,
+                top: tutorialTargetRect.top,
+                width: tutorialTargetRect.width,
+                height: tutorialTargetRect.height,
+              }}
+            />
+          ) : null}
+          <div className="tutorial-card">
+            <strong>{currentTutorialStep.title}</strong>
+            <p>{currentTutorialStep.body}</p>
+            <button type="button" onClick={onTutorialNext}>{tutorialStepIndex >= tutorialSteps.length - 1 ? 'Finish' : 'Next'}</button>
+          </div>
+        </div>
+      )}
+      {gameFlowPhase === 'playing' && waitingForOtherPlayer && (
+        <div className="waiting-overlay" role="status" aria-live="polite">
+          <div className="waiting-overlay__card">
+            <strong>Waiting for other player…</strong>
+            <p>Вы готовы. Ждём, пока второй игрок нажмёт Ready.</p>
+          </div>
         </div>
       )}
       <section className="hud">
@@ -1129,7 +1245,7 @@ export default function GameView(): JSX.Element {
                   {member ? (
                     <>
                       <span className="hud-slot-name" title={member.displayName}>{member.displayName}</span>
-                      <span className="hud-lives" aria-label="Lives" title="Lives">❤️❤️❤️</span>
+                      <span ref={index === 0 ? hudLivesRef : undefined} className="hud-lives" aria-label="Lives" title="Lives">❤️❤️❤️</span>
                     </>
                   ) : null}
                 </div>
@@ -1161,7 +1277,7 @@ export default function GameView(): JSX.Element {
               <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>⚙️</button>
               <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}>🛍️</button>
             </div>
-            <button type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>👥</button>
+            <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>👥</button>
           </div>
 
           <div className="left-joystick">
@@ -1249,6 +1365,7 @@ export default function GameView(): JSX.Element {
               <div className="right-panel right-panel--actions" aria-label="Action buttons">
                 <div className="boost-slot boost-slot--upper" aria-hidden="true">Boost</div>
                 <button
+                  ref={detonateBtnRef}
                   type="button"
                   className="detonate-btn"
                   onTouchStart={requestDetonate}
@@ -1258,6 +1375,7 @@ export default function GameView(): JSX.Element {
                   Detonate
                 </button>
                 <button
+                  ref={bombBtnRef}
                   type="button"
                   className="bomb-btn"
                   onTouchStart={requestBomb}
