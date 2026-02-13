@@ -131,6 +131,10 @@ export default function GameView(): JSX.Element {
   const [tickDebugStats, setTickDebugStats] = useState<TickDebugStats | null>(null);
   const ws = useWsClient(token || undefined);
 
+  const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
+  const baseHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
+  const arenaAspectRatio = `${baseWidth} / ${baseHeight}`;
+
 
   const setMovementFromDirection = (direction: Direction | null): void => {
     controlsRef.current.up = direction === 'up';
@@ -322,9 +326,6 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     if (!mountRef.current) return;
-
-    const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
-    const baseHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
 
     const scene = new GameScene(controlsRef.current);
     sceneRef.current = scene;
@@ -541,7 +542,11 @@ export default function GameView(): JSX.Element {
           </div>
         </aside>
 
-        <section className="game-shell">
+        <section
+          className="game-shell"
+          // Keep world aspect ratio on the host element to avoid tall RESIZE viewport "empty bottom".
+          style={{ ['--arena-ar' as string]: arenaAspectRatio }}
+        >
           <div className="game-canvas" ref={mountRef} />
         </section>
 
