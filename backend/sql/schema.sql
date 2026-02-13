@@ -90,6 +90,28 @@ CREATE TABLE IF NOT EXISTS store_ownership (
 CREATE INDEX IF NOT EXISTS idx_store_ownership_user
   ON store_ownership (tg_user_id);
 
+-- =========================================
+-- STORE SEED (Stage 2.1) — idempotent
+-- =========================================
+-- Note: ON CONFLICT DO NOTHING makes this safe to run on every startup migration.
+
+INSERT INTO store_items (sku, category, title, description, price_stars, active, sort_order, grants_json)
+VALUES
+  -- Packs
+  ('pack.stars.50',   'packs', 'Stars x50',   'Small star pack',   0, TRUE, 10, '{"stars":50}'::jsonb),
+  ('pack.stars.200',  'packs', 'Stars x200',  'Medium star pack',  0, TRUE, 20, '{"stars":200}'::jsonb),
+  ('pack.stars.500',  'packs', 'Stars x500',  'Large star pack',   0, TRUE, 30, '{"stars":500}'::jsonb),
+
+  -- Boosts (example consumables / unlocks; MVP: still treat as owned = true, can evolve later)
+  ('boost.bomb.plus1', 'boosts', 'Bomb +1', 'Adds one extra bomb charge (MVP)', 25, TRUE, 10, '{"boost":"bomb_plus1","value":1}'::jsonb),
+  ('boost.score.5pct', 'boosts', 'Score +5%', 'Permanent score bonus (MVP)',    75, TRUE, 20, '{"boost":"score_bonus","value":5}'::jsonb),
+
+  -- Cosmetics
+  ('cosmetic.frame.dark', 'cosmetics', 'Dark Frame', 'Cosmetic frame style (MVP)', 40, TRUE, 10, '{"cosmetic":"frame_dark"}'::jsonb),
+  ('cosmetic.trail.spark', 'cosmetics', 'Spark Trail', 'Cosmetic trail effect (MVP)', 60, TRUE, 20, '{"cosmetic":"trail_spark"}'::jsonb)
+
+ON CONFLICT (sku) DO NOTHING;
+
 -- =========================
 -- Settings + Account meta
 -- =========================
