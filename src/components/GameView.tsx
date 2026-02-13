@@ -93,7 +93,6 @@ type TickDebugStats = {
 };
 
 const JOYSTICK_RADIUS = 56;
-const JOYSTICK_KNOB_RADIUS = 22;
 const JOYSTICK_DEADZONE = 10;
 
 export default function GameView(): JSX.Element {
@@ -520,8 +519,6 @@ export default function GameView(): JSX.Element {
               className="joystick-knob"
               style={{
                 transform: `translate(calc(-50% + ${joystickOffset.x}px), calc(-50% + ${joystickOffset.y}px))`,
-                width: `${JOYSTICK_KNOB_RADIUS * 2}px`,
-                height: `${JOYSTICK_KNOB_RADIUS * 2}px`,
               }}
             />
           </div>
