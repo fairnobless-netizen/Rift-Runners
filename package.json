@@ -14,11 +14,12 @@
     "dev:backend": "npm --prefix backend run dev:4101",
     "dev:frontend": "npm run dev:5174",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:shared": "tsc -p shared/tsconfig.json --noEmit",
     "typecheck:backend": "npm --prefix backend run typecheck",
     "build:frontend": "vite build",
     "build:backend": "npm --prefix backend run build",
     "build:all": "npm run build:frontend && npm run build:backend",
-    "ci": "npm run typecheck && npm run typecheck:backend && npm run build:all"
+    "ci": "npm run typecheck && npm run typecheck:shared && npm run typecheck:backend && npm run build:all"
   },
   "dependencies": {
     "phaser": "^3.90.0",
