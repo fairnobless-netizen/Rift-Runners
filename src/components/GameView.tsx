@@ -1020,13 +1020,26 @@ export default function GameView(): JSX.Element {
     }
   };
 
+  const isMultiplayerHud = currentRoomMembers.length > 1;
+  const hudSlots = isMultiplayerHud
+    ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
+    : [{ displayName: `Player: ${profileName}` }];
+
   return (
     <main className="page">
       <section className="hud">
         <div className="stats-row">
-          <div className="hud-left">
-            <span className="hud-metric hud-metric--primary">Player: {profileName}</span>
-            <span className="hud-lives" aria-label="Lives" title="Lives">❤️❤️❤️</span>
+          <div className={`hud-left ${isMultiplayerHud ? 'hud-left--slots' : ''}`}>
+            {hudSlots.map((slot, index) => (
+              <div key={`hud-slot-${index}`} className={`hud-player-slot ${slot ? '' : 'hud-player-slot--empty'}`.trim()}>
+                {slot ? (
+                  <>
+                    <span className="hud-player-name" title={slot.displayName}>{slot.displayName}</span>
+                    <span className="hud-lives" aria-label="Lives" title="Lives">❤️❤️❤️</span>
+                  </>
+                ) : null}
+              </div>
+            ))}
           </div>
           <div className="hud-right">
             <span className="hud-metric">Stage: {campaign.stage}</span>
@@ -1053,7 +1066,7 @@ export default function GameView(): JSX.Element {
               <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>⚙️</button>
               <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}>🛍️</button>
             </div>
-            <button type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>👥</button>
+            <button type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}><span className="nav-btn-icon" aria-hidden="true">👥</span></button>
           </div>
 
           <div className="left-joystick">
@@ -1135,16 +1148,10 @@ export default function GameView(): JSX.Element {
               </button>
             </div>
 
+            <div className="right-panel-middle" aria-hidden="true" />
+
             <div className="right-panel right-panel--actions" aria-label="Action buttons">
               <div className="boost-slot boost-slot--upper" aria-hidden="true">Boost</div>
-              <button
-                type="button"
-                className="bomb-btn"
-                onTouchStart={requestBomb}
-                onMouseDown={requestBomb}
-              >
-                Bomb
-              </button>
               <button
                 type="button"
                 className="detonate-btn"
@@ -1154,8 +1161,18 @@ export default function GameView(): JSX.Element {
               >
                 Detonate
               </button>
+              <button
+                type="button"
+                className="bomb-btn"
+                onTouchStart={requestBomb}
+                onMouseDown={requestBomb}
+              >
+                Bomb
+              </button>
               <div className="boost-slot boost-slot--lower" aria-hidden="true">Boost</div>
             </div>
+
+            <div className="right-panel-middle" aria-hidden="true" />
           </div>
         </aside>
       </section>
