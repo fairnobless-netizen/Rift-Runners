@@ -571,3 +571,25 @@ button:disabled {
   width: 100%;
   min-width: 0;
 }
+
+
+.store-card {
+  border: 1px solid #2c3b6c;
+  border-radius: 10px;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.store-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.store-card-desc {
+  color: #c3cfef;
+  font-size: 0.88rem;
+}

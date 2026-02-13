@@ -60,6 +60,36 @@ CREATE TABLE IF NOT EXISTS purchase_intents (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_purchase_provider_txn_id ON purchase_intents(provider_txn_id) WHERE provider_txn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_purchase_user_created ON purchase_intents(tg_user_id, created_at DESC);
 
+-- =========================================
+-- STORE (Stage 2)
+-- =========================================
+
+CREATE TABLE IF NOT EXISTS store_items (
+  sku TEXT PRIMARY KEY,
+  category TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  price_stars INTEGER NOT NULL DEFAULT 0,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  grants_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_store_items_active_sort
+  ON store_items (active, category, sort_order);
+
+CREATE TABLE IF NOT EXISTS store_ownership (
+  tg_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  sku TEXT NOT NULL REFERENCES store_items(sku) ON DELETE CASCADE,
+  acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tg_user_id, sku)
+);
+
+CREATE INDEX IF NOT EXISTS idx_store_ownership_user
+  ON store_ownership (tg_user_id);
+
 -- =========================
 -- Settings + Account meta
 -- =========================

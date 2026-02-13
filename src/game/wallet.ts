@@ -14,11 +14,12 @@ export type WalletLedgerEntry = {
 
 export type ShopCatalogItem = {
   sku: string;
+  category: string;
   title: string;
-  desc: string;
+  description: string;
   priceStars: number;
-  grants: { stars?: number; crystals?: number };
-  available: boolean;
+  active: boolean;
+  sortOrder: number;
 };
 
 function getToken(): string | null {
@@ -69,7 +70,7 @@ export async function fetchLedger(limit = 50): Promise<WalletLedgerEntry[]> {
   }
 }
 
-export async function fetchCatalog(): Promise<ShopCatalogItem[]> {
+export async function fetchShopCatalog(): Promise<ShopCatalogItem[]> {
   try {
     const res = await fetch('/api/shop/catalog');
     const json = await res.json();
@@ -77,6 +78,46 @@ export async function fetchCatalog(): Promise<ShopCatalogItem[]> {
     return json.items as ShopCatalogItem[];
   } catch {
     return [];
+  }
+}
+
+export async function fetchShopOwned(): Promise<string[]> {
+  const token = getToken();
+  if (!token) return [];
+
+  try {
+    const res = await fetch('/api/shop/owned', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json();
+    if (!json?.ok || !Array.isArray(json.ownedSkus)) return [];
+    return json.ownedSkus.map((sku: unknown) => String(sku));
+  } catch {
+    return [];
+  }
+}
+
+export async function buyShopSku(sku: string): Promise<{ wallet: Wallet; ownedSkus: string[] } | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/shop/buy', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ sku }),
+    });
+    const json = await res.json();
+    if (!json?.ok) return null;
+    return {
+      wallet: parseWallet(json.wallet),
+      ownedSkus: Array.isArray(json.ownedSkus) ? json.ownedSkus.map((v: unknown) => String(v)) : [],
+    };
+  } catch {
+    return null;
   }
 }
 
