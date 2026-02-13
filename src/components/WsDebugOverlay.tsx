@@ -461,57 +461,84 @@ export function WsDebugOverlay({
     return date.toLocaleTimeString('en-GB', { hour12: false });
   };
 
+  const collapsedStorageKey = 'ws-debug-overlay-collapsed';
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(collapsedStorageKey) === '1';
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(collapsedStorageKey, isCollapsed ? '1' : '0');
+  }, [isCollapsed]);
+
   return (
-    <>
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        pointerEvents: 'none',
+        zIndex: 10000,
+      }}
+    >
       <div
         style={{
-          position: 'fixed',
-          right: 10,
+          position: 'absolute',
+          left: 10,
           bottom: 10,
-          zIndex: 10000,
-          pointerEvents: 'none',
+          pointerEvents: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          maxWidth: 320,
         }}
       >
-        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', pointerEvents: 'auto' }}>
-          <button data-testid="probe-btn" onClick={runProbe}>Probe 20 moves</button>
-        </div>
-
-        {probeSummary && (
-          <div
-            data-testid="probe-summary"
-            style={{
-              marginTop: 8,
-              padding: 6,
-              fontSize: 12,
-              borderRadius: 6,
-              background: probeSummary.pass ? '#0b3d1a' : '#3d0b0b',
-              color: probeSummary.pass ? '#5cff8d' : '#ff6b6b',
-              pointerEvents: 'auto',
-            }}
-          >
-            Probe result: moved={probeSummary.moved}, blocked={probeSummary.blocked} — {probeSummary.pass ? 'PASS' : 'FAIL'}
-          </div>
+        {showDebugUi && isCollapsed && (
+          <button onClick={() => setIsCollapsed(false)}>
+            Open WS Debug
+          </button>
         )}
+        <button data-testid="probe-btn" onClick={runProbe}>Probe 20 moves</button>
+        <div
+          data-testid="probe-summary"
+          style={{
+            padding: 6,
+            fontSize: 12,
+            borderRadius: 6,
+            background: probeSummary ? (probeSummary.pass ? '#0b3d1a' : '#3d0b0b') : 'rgba(0,0,0,0.75)',
+            color: probeSummary ? (probeSummary.pass ? '#5cff8d' : '#ff6b6b') : '#a5a5a5',
+          }}
+        >
+          {probeSummary
+            ? `Probe result: moved=${probeSummary.moved}, blocked=${probeSummary.blocked} — ${probeSummary.pass ? 'PASS' : 'FAIL'}`
+            : 'Probe result: not run'}
+        </div>
       </div>
 
-      {showDebugUi && (
+      {showDebugUi && !isCollapsed && (
         <div
           style={{
-            position: 'fixed',
+            position: 'absolute',
             right: 10,
-            bottom: 64,
+            top: 10,
+            bottom: 10,
             width: 360,
+            overflow: 'auto',
             background: 'rgba(0,0,0,0.82)',
             color: '#0f0',
             fontSize: 12,
             padding: 10,
             zIndex: 9999,
             borderRadius: 10,
+            pointerEvents: 'auto',
           }}
         >
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <div>WS: {connected ? 'CONNECTED' : 'OFFLINE'}</div>
-        <div>{lastSnapshot ? `tick: ${lastSnapshot.tick}` : 'no snapshot'}</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div>{lastSnapshot ? `tick: ${lastSnapshot.tick}` : 'no snapshot'}</div>
+          <button onClick={() => setIsCollapsed(true)}>Collapse</button>
+        </div>
       </div>
 
       <div style={{ marginTop: 8 }}>
@@ -683,7 +710,7 @@ export function WsDebugOverlay({
       </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
