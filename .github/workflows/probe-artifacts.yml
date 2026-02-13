@@ -9,6 +9,8 @@ on:
 jobs:
   probe-artifacts:
     runs-on: ubuntu-latest
+    env:
+      GIT_SHA: ${{ github.sha }}
     timeout-minutes: 10
 
     steps:

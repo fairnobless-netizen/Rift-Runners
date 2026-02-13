@@ -9,6 +9,8 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      GIT_SHA: ${{ github.sha }}
 
     steps:
       - name: Checkout

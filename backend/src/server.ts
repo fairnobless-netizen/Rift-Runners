@@ -12,10 +12,20 @@ import { shopRouter } from './api/shop.routes';
 import { startWsGateway } from './ws/gateway';
 
 const app = express();
-const frontendDistPath = path.resolve(__dirname, '../../dist');
-const frontendIndexPath = path.join(frontendDistPath, 'index.html');
 
-app.use(cors());
+const rawPort = Number(process.env.PORT ?? 4101);
+const port = Number.isFinite(rawPort) && rawPort > 0 ? Math.floor(rawPort) : 4101;
+const frontendDistDir = process.env.FRONTEND_DIST_DIR ?? '../dist';
+const backendRootPath = path.resolve(__dirname, '..');
+const frontendDistPath = path.resolve(backendRootPath, frontendDistDir);
+const frontendIndexPath = path.join(frontendDistPath, 'index.html');
+const corsOrigin = process.env.CORS_ORIGIN;
+
+if (corsOrigin) {
+  app.use(cors({ origin: corsOrigin }));
+} else {
+  app.use(cors());
+}
 app.use(express.json());
 
 // public
@@ -41,12 +51,16 @@ app.get('*', (req, res, next) => {
   res.sendFile(frontendIndexPath);
 });
 
-const port = Number(process.env.PORT ?? 3001);
 const server = http.createServer(app);
 
-startWsGateway(server);
+const wsServer = startWsGateway(server);
 
 server.listen(port, () => {
   // eslint-disable-next-line no-console
-  console.log(`Backend listening on port ${port}`);
+  console.log('Boot summary', {
+    port,
+    distDir: frontendDistPath,
+    nodeEnv: process.env.NODE_ENV ?? 'development',
+    wsEnabled: wsServer ? 'yes' : 'no',
+  });
 });
