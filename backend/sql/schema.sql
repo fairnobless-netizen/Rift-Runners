@@ -181,6 +181,18 @@ CREATE TABLE IF NOT EXISTS room_members (
 CREATE INDEX IF NOT EXISTS idx_room_members_room
   ON room_members (room_code);
 
+ALTER TABLE rooms
+  ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'LOBBY';
+
+ALTER TABLE rooms
+  ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NULL;
+
+ALTER TABLE rooms
+  ADD COLUMN IF NOT EXISTS started_by_tg_user_id TEXT NULL REFERENCES users(tg_user_id) ON DELETE SET NULL;
+
+ALTER TABLE room_members
+  ADD COLUMN IF NOT EXISTS ready BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- =========================================
 -- FRIENDS (Stage 4.1B)
 -- =========================================

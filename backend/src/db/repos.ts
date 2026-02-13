@@ -804,6 +804,9 @@ export type RoomRecord = {
   ownerTgUserId: string;
   capacity: number;
   status: string;
+  phase: string;
+  startedAt?: string | null;
+  startedByTgUserId?: string | null;
   createdAt: string;
 };
 
@@ -811,12 +814,14 @@ export type RoomMemberRecord = {
   tgUserId: string;
   displayName: string;
   joinedAt: string;
+  ready: boolean;
 };
 
 export type MyRoomRecord = {
   roomCode: string;
   capacity: number;
   status: string;
+  phase: string;
   createdAt: string;
   memberCount: number;
 };
@@ -890,10 +895,13 @@ export async function getRoomByCode(roomCode: string): Promise<RoomRecord | null
     owner_tg_user_id: string;
     capacity: number;
     status: string;
+    phase: string | null;
+    started_at: string | null;
+    started_by_tg_user_id: string | null;
     created_at: string;
   }>(
     `
-    SELECT room_code, owner_tg_user_id, capacity, status, created_at
+    SELECT room_code, owner_tg_user_id, capacity, status, COALESCE(phase, 'LOBBY') AS phase, started_at, started_by_tg_user_id, created_at
     FROM rooms
     WHERE room_code = $1
     LIMIT 1
@@ -908,14 +916,17 @@ export async function getRoomByCode(roomCode: string): Promise<RoomRecord | null
     ownerTgUserId: String(row.owner_tg_user_id),
     capacity: Number(row.capacity),
     status: String(row.status),
+    phase: String(row.phase ?? 'LOBBY'),
+    startedAt: row.started_at == null ? null : String(row.started_at),
+    startedByTgUserId: row.started_by_tg_user_id == null ? null : String(row.started_by_tg_user_id),
     createdAt: String(row.created_at),
   };
 }
 
 export async function listRoomMembers(roomCode: string): Promise<RoomMemberRecord[]> {
-  const { rows } = await pgQuery<{ tg_user_id: string; display_name: string; joined_at: string }>(
+  const { rows } = await pgQuery<{ tg_user_id: string; display_name: string; joined_at: string; ready: boolean | null }>(
     `
-    SELECT rm.tg_user_id, u.display_name, rm.joined_at
+    SELECT rm.tg_user_id, u.display_name, rm.joined_at, rm.ready
     FROM room_members rm
     JOIN users u ON u.tg_user_id = rm.tg_user_id
     WHERE rm.room_code = $1
@@ -928,6 +939,7 @@ export async function listRoomMembers(roomCode: string): Promise<RoomMemberRecor
     tgUserId: String(row.tg_user_id),
     displayName: String(row.display_name ?? 'Unknown'),
     joinedAt: String(row.joined_at),
+    ready: Boolean(row.ready ?? false),
   }));
 }
 
@@ -936,16 +948,19 @@ export async function listMyRooms(tgUserId: string): Promise<MyRoomRecord[]> {
     room_code: string;
     capacity: number;
     status: string;
+    phase: string | null;
+    started_at: string | null;
+    started_by_tg_user_id: string | null;
     created_at: string;
     member_count: number;
   }>(
     `
-    SELECT r.room_code, r.capacity, r.status, r.created_at, COUNT(rm.tg_user_id)::int AS member_count
+    SELECT r.room_code, r.capacity, r.status, COALESCE(r.phase, 'LOBBY') AS phase, r.created_at, COUNT(rm.tg_user_id)::int AS member_count
     FROM room_members m
     JOIN rooms r ON r.room_code = m.room_code
     LEFT JOIN room_members rm ON rm.room_code = r.room_code
     WHERE m.tg_user_id = $1
-    GROUP BY r.room_code, r.capacity, r.status, r.created_at
+    GROUP BY r.room_code, r.capacity, r.status, r.phase, r.created_at
     ORDER BY r.created_at DESC
     LIMIT 10
     `,
@@ -956,6 +971,9 @@ export async function listMyRooms(tgUserId: string): Promise<MyRoomRecord[]> {
     roomCode: String(row.room_code),
     capacity: Number(row.capacity),
     status: String(row.status),
+    phase: String(row.phase ?? 'LOBBY'),
+    startedAt: row.started_at == null ? null : String(row.started_at),
+    startedByTgUserId: row.started_by_tg_user_id == null ? null : String(row.started_by_tg_user_id),
     createdAt: String(row.created_at),
     memberCount: Number(row.member_count ?? 0),
   }));
@@ -968,8 +986,8 @@ export async function joinRoomTx(tgUserId: string, roomCode: string): Promise<{ 
   try {
     await client.query('BEGIN');
 
-    const roomRes = await client.query<{ room_code: string; capacity: number; status: string }>(
-      `SELECT room_code, capacity, status FROM rooms WHERE room_code = $1 FOR UPDATE`,
+    const roomRes = await client.query<{ room_code: string; capacity: number; status: string; phase: string | null; started_at: string | null }>(
+      `SELECT room_code, capacity, status, phase, started_at FROM rooms WHERE room_code = $1 FOR UPDATE`,
       [roomCode],
     );
 
@@ -983,6 +1001,12 @@ export async function joinRoomTx(tgUserId: string, roomCode: string): Promise<{ 
     if (String(room.status) !== 'OPEN') {
       const error = new Error('room_closed');
       (error as any).code = 'ROOM_CLOSED';
+      throw error;
+    }
+
+    if (String(room.phase ?? 'LOBBY') === 'STARTED' || room.started_at != null) {
+      const error = new Error('room_started');
+      (error as any).code = 'ROOM_STARTED';
       throw error;
     }
 
@@ -1011,9 +1035,9 @@ export async function joinRoomTx(tgUserId: string, roomCode: string): Promise<{ 
       );
     }
 
-    const memberRows = await client.query<{ tg_user_id: string; display_name: string; joined_at: string }>(
+    const memberRows = await client.query<{ tg_user_id: string; display_name: string; joined_at: string; ready: boolean | null }>(
       `
-      SELECT rm.tg_user_id, u.display_name, rm.joined_at
+      SELECT rm.tg_user_id, u.display_name, rm.joined_at, rm.ready
       FROM room_members rm
       JOIN users u ON u.tg_user_id = rm.tg_user_id
       WHERE rm.room_code = $1
@@ -1031,6 +1055,205 @@ export async function joinRoomTx(tgUserId: string, roomCode: string): Promise<{ 
         tgUserId: String(row.tg_user_id),
         displayName: String(row.display_name ?? 'Unknown'),
         joinedAt: String(row.joined_at),
+        ready: Boolean(row.ready ?? false),
+      })),
+    };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function setRoomMemberReadyTx(params: {
+  tgUserId: string;
+  roomCode: string;
+  ready: boolean;
+}): Promise<{ room: RoomRecord; members: RoomMemberRecord[] }> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const roomRes = await client.query<{ room_code: string; owner_tg_user_id: string; capacity: number; status: string; phase: string | null; started_at: string | null; started_by_tg_user_id: string | null; created_at: string }>(
+      `SELECT room_code, owner_tg_user_id, capacity, status, COALESCE(phase, 'LOBBY') AS phase, started_at, started_by_tg_user_id, created_at FROM rooms WHERE room_code = $1 FOR UPDATE`,
+      [params.roomCode],
+    );
+    const roomRow = roomRes.rows[0];
+    if (!roomRow) {
+      const error = new Error('room_not_found');
+      (error as any).code = 'ROOM_NOT_FOUND';
+      throw error;
+    }
+
+    const membershipRes = await client.query<{ exists: number }>(
+      `SELECT 1 AS exists FROM room_members WHERE room_code = $1 AND tg_user_id = $2 LIMIT 1`,
+      [params.roomCode, params.tgUserId],
+    );
+    if (!membershipRes.rows[0]) {
+      const error = new Error('not_a_member');
+      (error as any).code = 'NOT_A_MEMBER';
+      throw error;
+    }
+
+    if (String(roomRow.status) !== 'OPEN') {
+      const error = new Error('room_closed');
+      (error as any).code = 'ROOM_CLOSED';
+      throw error;
+    }
+
+    if (String(roomRow.phase ?? 'LOBBY') === 'STARTED' || roomRow.started_at != null) {
+      const error = new Error('room_started');
+      (error as any).code = 'ROOM_STARTED';
+      throw error;
+    }
+
+    await client.query(
+      `UPDATE room_members SET ready = $3 WHERE room_code = $1 AND tg_user_id = $2`,
+      [params.roomCode, params.tgUserId, params.ready],
+    );
+
+    const membersRes = await client.query<{ tg_user_id: string; display_name: string; joined_at: string; ready: boolean | null }>(
+      `
+      SELECT rm.tg_user_id, u.display_name, rm.joined_at, rm.ready
+      FROM room_members rm
+      JOIN users u ON u.tg_user_id = rm.tg_user_id
+      WHERE rm.room_code = $1
+      ORDER BY rm.joined_at ASC
+      `,
+      [params.roomCode],
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      room: {
+        roomCode: String(roomRow.room_code),
+        ownerTgUserId: String(roomRow.owner_tg_user_id),
+        capacity: Number(roomRow.capacity),
+        status: String(roomRow.status),
+        phase: String(roomRow.phase ?? 'LOBBY'),
+        startedAt: roomRow.started_at == null ? null : String(roomRow.started_at),
+        startedByTgUserId: roomRow.started_by_tg_user_id == null ? null : String(roomRow.started_by_tg_user_id),
+        createdAt: String(roomRow.created_at),
+      },
+      members: membersRes.rows.map((row) => ({
+        tgUserId: String(row.tg_user_id),
+        displayName: String(row.display_name ?? 'Unknown'),
+        joinedAt: String(row.joined_at),
+        ready: Boolean(row.ready ?? false),
+      })),
+    };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function startRoomTx(params: {
+  ownerTgUserId: string;
+  roomCode: string;
+}): Promise<{ room: RoomRecord; members: RoomMemberRecord[] }> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const roomRes = await client.query<{ room_code: string; owner_tg_user_id: string; capacity: number; status: string; phase: string | null; started_at: string | null; started_by_tg_user_id: string | null; created_at: string }>(
+      `SELECT room_code, owner_tg_user_id, capacity, status, COALESCE(phase, 'LOBBY') AS phase, started_at, started_by_tg_user_id, created_at FROM rooms WHERE room_code = $1 FOR UPDATE`,
+      [params.roomCode],
+    );
+
+    const roomRow = roomRes.rows[0];
+    if (!roomRow) {
+      const error = new Error('room_not_found');
+      (error as any).code = 'ROOM_NOT_FOUND';
+      throw error;
+    }
+
+    if (String(roomRow.owner_tg_user_id) !== params.ownerTgUserId) {
+      const error = new Error('forbidden');
+      (error as any).code = 'FORBIDDEN';
+      throw error;
+    }
+
+    if (String(roomRow.status) !== 'OPEN') {
+      const error = new Error('room_closed');
+      (error as any).code = 'ROOM_CLOSED';
+      throw error;
+    }
+
+    if (String(roomRow.phase ?? 'LOBBY') === 'STARTED' || roomRow.started_at != null) {
+      const error = new Error('room_started');
+      (error as any).code = 'ROOM_STARTED';
+      throw error;
+    }
+
+    const membersRes = await client.query<{ tg_user_id: string; display_name: string; joined_at: string; ready: boolean | null }>(
+      `
+      SELECT rm.tg_user_id, u.display_name, rm.joined_at, rm.ready
+      FROM room_members rm
+      JOIN users u ON u.tg_user_id = rm.tg_user_id
+      WHERE rm.room_code = $1
+      ORDER BY rm.joined_at ASC
+      `,
+      [params.roomCode],
+    );
+
+    const memberCount = membersRes.rows.length;
+    if (memberCount < 2) {
+      const error = new Error('not_enough_players');
+      (error as any).code = 'NOT_ENOUGH_PLAYERS';
+      throw error;
+    }
+
+    if (memberCount > Number(roomRow.capacity)) {
+      const error = new Error('not_enough_players');
+      (error as any).code = 'NOT_ENOUGH_PLAYERS';
+      throw error;
+    }
+
+    const allReady = membersRes.rows.every((row) => Boolean(row.ready ?? false));
+    if (!allReady) {
+      const error = new Error('not_all_ready');
+      (error as any).code = 'NOT_ALL_READY';
+      throw error;
+    }
+
+    await client.query(
+      `UPDATE rooms SET phase = 'STARTED', started_at = now(), started_by_tg_user_id = $2 WHERE room_code = $1`,
+      [params.roomCode, params.ownerTgUserId],
+    );
+
+    const startedRoomRes = await client.query<{ room_code: string; owner_tg_user_id: string; capacity: number; status: string; phase: string | null; started_at: string | null; started_by_tg_user_id: string | null; created_at: string }>(
+      `SELECT room_code, owner_tg_user_id, capacity, status, COALESCE(phase, 'LOBBY') AS phase, started_at, started_by_tg_user_id, created_at FROM rooms WHERE room_code = $1 LIMIT 1`,
+      [params.roomCode],
+    );
+
+    await client.query('COMMIT');
+
+    const startedRoom = startedRoomRes.rows[0]!;
+    return {
+      room: {
+        roomCode: String(startedRoom.room_code),
+        ownerTgUserId: String(startedRoom.owner_tg_user_id),
+        capacity: Number(startedRoom.capacity),
+        status: String(startedRoom.status),
+        phase: String(startedRoom.phase ?? 'LOBBY'),
+        startedAt: startedRoom.started_at == null ? null : String(startedRoom.started_at),
+        startedByTgUserId: startedRoom.started_by_tg_user_id == null ? null : String(startedRoom.started_by_tg_user_id),
+        createdAt: String(startedRoom.created_at),
+      },
+      members: membersRes.rows.map((row) => ({
+        tgUserId: String(row.tg_user_id),
+        displayName: String(row.display_name ?? 'Unknown'),
+        joinedAt: String(row.joined_at),
+        ready: Boolean(row.ready ?? false),
       })),
     };
   } catch (e) {

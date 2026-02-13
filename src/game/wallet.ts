@@ -49,6 +49,7 @@ export type RoomMember = {
   tgUserId: string;
   displayName: string;
   joinedAt: string;
+  ready?: boolean;
 };
 
 export type RoomState = {
@@ -56,6 +57,7 @@ export type RoomState = {
   ownerTgUserId?: string;
   capacity: number;
   status: string;
+  phase?: string;
   createdAt?: string;
 };
 
@@ -63,6 +65,7 @@ export type MyRoomEntry = {
   roomCode: string;
   capacity: number;
   status: string;
+  phase?: string;
   createdAt: string;
   memberCount: number;
 };
@@ -435,12 +438,14 @@ export async function joinRoom(roomCode: string): Promise<{ room: RoomState; mem
         roomCode: String(json.room?.roomCode ?? ''),
         capacity: Number(json.room?.capacity ?? 0),
         status: String(json.room?.status ?? 'OPEN'),
+        phase: String(json.room?.phase ?? 'LOBBY'),
       },
       members: Array.isArray(json.members)
         ? json.members.map((member: any) => ({
           tgUserId: String(member?.tgUserId ?? ''),
           displayName: String(member?.displayName ?? 'Unknown'),
           joinedAt: String(member?.joinedAt ?? ''),
+          ready: Boolean(member?.ready ?? false),
         }))
         : [],
     };
@@ -464,6 +469,7 @@ export async function fetchMyRooms(): Promise<MyRoomEntry[]> {
       roomCode: String(room?.roomCode ?? ''),
       capacity: Number(room?.capacity ?? 0),
       status: String(room?.status ?? 'OPEN'),
+      phase: String(room?.phase ?? 'LOBBY'),
       createdAt: String(room?.createdAt ?? ''),
       memberCount: Number(room?.memberCount ?? 0),
     }));
@@ -495,6 +501,7 @@ export async function fetchRoom(roomCode: string): Promise<{ room: RoomState; me
         ownerTgUserId: String(json.room.ownerTgUserId ?? ''),
         capacity: Number(json.room.capacity ?? 0),
         status: String(json.room.status ?? 'OPEN'),
+        phase: String(json.room.phase ?? 'LOBBY'),
         createdAt: String(json.room.createdAt ?? ''),
       },
       members: Array.isArray(json.members)
@@ -502,6 +509,7 @@ export async function fetchRoom(roomCode: string): Promise<{ room: RoomState; me
           tgUserId: String(member?.tgUserId ?? ''),
           displayName: String(member?.displayName ?? 'Unknown'),
           joinedAt: String(member?.joinedAt ?? ''),
+          ready: Boolean(member?.ready ?? false),
         }))
         : [],
     };
@@ -551,6 +559,97 @@ export async function closeRoom(roomCode: string): Promise<{ ok: boolean; roomCo
     const json = await res.json();
     if (!json?.ok) return { ok: false, error: String(json?.error ?? 'close_failed') };
     return { ok: true, roomCode: String(json.roomCode ?? roomCode) };
+  } catch {
+    return null;
+  }
+}
+
+
+export async function setRoomReady(roomCode: string, ready: boolean): Promise<{ room: RoomState; members: RoomMember[]; error?: string } | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/rooms/ready', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ roomCode, ready }),
+    });
+    const json = await res.json();
+    if (!json?.ok) {
+      return {
+        room: { roomCode: String(roomCode).toUpperCase(), capacity: 0, status: 'UNKNOWN', phase: 'LOBBY' },
+        members: [],
+        error: String(json?.error ?? 'ready_failed'),
+      };
+    }
+
+    return {
+      room: {
+        roomCode: String(json.room?.roomCode ?? ''),
+        ownerTgUserId: String(json.room?.ownerTgUserId ?? ''),
+        capacity: Number(json.room?.capacity ?? 0),
+        status: String(json.room?.status ?? 'OPEN'),
+        phase: String(json.room?.phase ?? 'LOBBY'),
+        createdAt: String(json.room?.createdAt ?? ''),
+      },
+      members: Array.isArray(json.members)
+        ? json.members.map((member: any) => ({
+          tgUserId: String(member?.tgUserId ?? ''),
+          displayName: String(member?.displayName ?? 'Unknown'),
+          joinedAt: String(member?.joinedAt ?? ''),
+          ready: Boolean(member?.ready ?? false),
+        }))
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function startRoom(roomCode: string): Promise<{ room: RoomState; members: RoomMember[]; error?: string } | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/rooms/start', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ roomCode }),
+    });
+    const json = await res.json();
+    if (!json?.ok) {
+      return {
+        room: { roomCode: String(roomCode).toUpperCase(), capacity: 0, status: 'UNKNOWN', phase: 'LOBBY' },
+        members: [],
+        error: String(json?.error ?? 'start_failed'),
+      };
+    }
+
+    return {
+      room: {
+        roomCode: String(json.room?.roomCode ?? ''),
+        ownerTgUserId: String(json.room?.ownerTgUserId ?? ''),
+        capacity: Number(json.room?.capacity ?? 0),
+        status: String(json.room?.status ?? 'OPEN'),
+        phase: String(json.room?.phase ?? 'LOBBY'),
+        createdAt: String(json.room?.createdAt ?? ''),
+      },
+      members: Array.isArray(json.members)
+        ? json.members.map((member: any) => ({
+          tgUserId: String(member?.tgUserId ?? ''),
+          displayName: String(member?.displayName ?? 'Unknown'),
+          joinedAt: String(member?.joinedAt ?? ''),
+          ready: Boolean(member?.ready ?? false),
+        }))
+        : [],
+    };
   } catch {
     return null;
   }
