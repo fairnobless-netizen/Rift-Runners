@@ -1020,13 +1020,28 @@ export default function GameView(): JSX.Element {
     }
   };
 
+  const isMultiplayerHud = currentRoomMembers.length >= 2;
+  const hudSlots = isMultiplayerHud
+    ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
+    : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
+
   return (
     <main className="page">
       <section className="hud">
         <div className="stats-row">
           <div className="hud-left">
-            <span className="hud-metric hud-metric--primary">Player: {profileName}</span>
-            <span className="hud-lives" aria-label="Lives" title="Lives">❤️❤️❤️</span>
+            <div className={`hud-slots ${isMultiplayerHud ? 'hud-slots--multiplayer' : 'hud-slots--single'}`}>
+              {hudSlots.map((member, index) => (
+                <div key={member?.tgUserId ?? `empty-${index}`} className={`hud-slot ${member ? '' : 'hud-slot--empty'}`}>
+                  {member ? (
+                    <>
+                      <span className="hud-slot-name" title={member.displayName}>{member.displayName}</span>
+                      <span className="hud-lives" aria-label="Lives" title="Lives">❤️❤️❤️</span>
+                    </>
+                  ) : null}
+                </div>
+              ))}
+            </div>
           </div>
           <div className="hud-right">
             <span className="hud-metric">Stage: {campaign.stage}</span>
@@ -1110,51 +1125,55 @@ export default function GameView(): JSX.Element {
 
         <aside className="control-column control-column--right" aria-label="Action controls">
           <div className="right-stack">
-            <div className="right-panel right-panel--zoom" aria-label="Zoom panel">
-              <input
-                id="zoom"
-                type="range"
-                className="zoom-slider"
-                min={GAME_CONFIG.minZoom}
-                max={GAME_CONFIG.maxZoom}
-                step={0.05}
-                value={zoom}
-                onChange={(event) => onZoomInput(Number(event.target.value))}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (confirm('Reset campaign progress?')) {
-                    const state = resetCampaignState();
-                    // TODO: notify GameScene about new campaign state if needed
-                    setCampaign(state);
-                  }
-                }}
-              >
-                Reset
-              </button>
+            <div className="right-stack-top">
+              <div className="right-panel right-panel--zoom" aria-label="Zoom panel">
+                <input
+                  id="zoom"
+                  type="range"
+                  className="zoom-slider"
+                  min={GAME_CONFIG.minZoom}
+                  max={GAME_CONFIG.maxZoom}
+                  step={0.05}
+                  value={zoom}
+                  onChange={(event) => onZoomInput(Number(event.target.value))}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm('Reset campaign progress?')) {
+                      const state = resetCampaignState();
+                      // TODO: notify GameScene about new campaign state if needed
+                      setCampaign(state);
+                    }
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
             </div>
 
-            <div className="right-panel right-panel--actions" aria-label="Action buttons">
-              <div className="boost-slot boost-slot--upper" aria-hidden="true">Boost</div>
-              <button
-                type="button"
-                className="bomb-btn"
-                onTouchStart={requestBomb}
-                onMouseDown={requestBomb}
-              >
-                Bomb
-              </button>
-              <button
-                type="button"
-                className="detonate-btn"
-                onTouchStart={requestDetonate}
-                onMouseDown={requestDetonate}
-                disabled={!isRemoteDetonateUnlocked}
-              >
-                Detonate
-              </button>
-              <div className="boost-slot boost-slot--lower" aria-hidden="true">Boost</div>
+            <div className="right-stack-middle">
+              <div className="right-panel right-panel--actions" aria-label="Action buttons">
+                <div className="boost-slot boost-slot--upper" aria-hidden="true">Boost</div>
+                <button
+                  type="button"
+                  className="detonate-btn"
+                  onTouchStart={requestDetonate}
+                  onMouseDown={requestDetonate}
+                  disabled={!isRemoteDetonateUnlocked}
+                >
+                  Detonate
+                </button>
+                <button
+                  type="button"
+                  className="bomb-btn"
+                  onTouchStart={requestBomb}
+                  onMouseDown={requestBomb}
+                >
+                  Bomb
+                </button>
+                <div className="boost-slot boost-slot--lower" aria-hidden="true">Boost</div>
+              </div>
             </div>
           </div>
         </aside>
