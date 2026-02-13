@@ -28,6 +28,7 @@ body {
 }
 
 .page {
+  position: relative; /* IMPORTANT: anchor for WsDebugOverlay absolute root */
   display: flex;
   flex-direction: column;
   gap: 0.8rem;

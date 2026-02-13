@@ -170,6 +170,34 @@ export function WsDebugOverlay({
     blocked: number;
     pass: boolean;
   } | null>(null);
+
+  // --- M16.26b tray state (persisted) ---
+  const TRAY_STORAGE_KEY = 'ws-debug-overlay-collapsed';
+
+  const [trayCollapsed, setTrayCollapsed] = useState<boolean>(() => {
+    // SSR-safe default: collapsed
+    return true;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(TRAY_STORAGE_KEY);
+      if (raw === null) return;
+      setTrayCollapsed(raw === '1' || raw === 'true');
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(TRAY_STORAGE_KEY, trayCollapsed ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [trayCollapsed]);
   const telemetrySamplesRef = useRef<TelemetrySample[]>([]);
   const telemetryTimeoutRef = useRef<number | null>(null);
 
@@ -462,18 +490,54 @@ export function WsDebugOverlay({
   };
 
   return (
-    <>
+    <div
+      // IMPORTANT: out-of-flow overlay root, anchored to nearest positioned parent (.page)
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 9999,
+        pointerEvents: 'none', // root does not steal input
+      }}
+    >
+      {/* Bottom-left tray chip (ALWAYS rendered so probe is always available for CI) */}
       <div
         style={{
-          position: 'fixed',
-          right: 10,
+          position: 'absolute',
+          left: 10,
           bottom: 10,
           zIndex: 10000,
           pointerEvents: 'none',
         }}
       >
-        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', pointerEvents: 'auto' }}>
-          <button data-testid="probe-btn" onClick={runProbe}>Probe 20 moves</button>
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            padding: '8px 10px',
+            borderRadius: 999,
+            background: 'rgba(0,0,0,0.78)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            pointerEvents: 'auto', // interactive children enabled
+          }}
+        >
+          {/* Probe must remain stable for Playwright */}
+          <button data-testid="probe-btn" onClick={runProbe}>
+            Probe 20 moves
+          </button>
+
+          {/* Tray toggle is shown only when debug UI is enabled */}
+          {showDebugUi && (
+            <button
+              type="button"
+              onClick={() => setTrayCollapsed((v) => !v)}
+              aria-label={trayCollapsed ? 'Expand WS debug panel' : 'Collapse WS debug panel'}
+              title={trayCollapsed ? 'Expand WS debug panel' : 'Collapse WS debug panel'}
+            >
+              {trayCollapsed ? 'WS ▸' : 'WS ▾'}
+            </button>
+          )}
         </div>
 
         {probeSummary && (
@@ -483,23 +547,26 @@ export function WsDebugOverlay({
               marginTop: 8,
               padding: 6,
               fontSize: 12,
-              borderRadius: 6,
+              borderRadius: 8,
               background: probeSummary.pass ? '#0b3d1a' : '#3d0b0b',
               color: probeSummary.pass ? '#5cff8d' : '#ff6b6b',
               pointerEvents: 'auto',
+              maxWidth: 420,
             }}
           >
-            Probe result: moved={probeSummary.moved}, blocked={probeSummary.blocked} — {probeSummary.pass ? 'PASS' : 'FAIL'}
+            Probe result: moved={probeSummary.moved}, blocked={probeSummary.blocked} —{' '}
+            {probeSummary.pass ? 'PASS' : 'FAIL'}
           </div>
         )}
       </div>
 
-      {showDebugUi && (
+      {/* Top-right expanded panel (ONLY when debug UI enabled + tray expanded) */}
+      {showDebugUi && !trayCollapsed && (
         <div
           style={{
-            position: 'fixed',
+            position: 'absolute',
             right: 10,
-            bottom: 64,
+            top: 10,
             width: 360,
             background: 'rgba(0,0,0,0.82)',
             color: '#0f0',
@@ -507,183 +574,193 @@ export function WsDebugOverlay({
             padding: 10,
             zIndex: 9999,
             borderRadius: 10,
+            pointerEvents: 'auto', // interactive
           }}
         >
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <div>WS: {connected ? 'CONNECTED' : 'OFFLINE'}</div>
-        <div>{lastSnapshot ? `tick: ${lastSnapshot.tick}` : 'no snapshot'}</div>
-      </div>
-
-      <div style={{ marginTop: 8 }}>
-        Client: {identity.clientId ?? identity.id ?? '—'} | Name: {identity.displayName ?? '—'}
-      </div>
-
-      <div style={{ marginTop: 4 }}>
-        NetSim: {netSim.enabled ? 'ON' : 'OFF'} | latency={netSim.latencyMs}ms, jitter={netSim.jitterMs}ms, drop={netSim.dropRate}
-      </div>
-
-      {import.meta.env.DEV && (
-        <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <input
-              type="checkbox"
-              checked={netSim.enabled}
-              onChange={(ev) => onToggleNetSim(ev.currentTarget.checked)}
-            />
-            NetSim
-          </label>
-          <select value={netSim.presetId} onChange={(ev) => onSelectNetSimPreset(ev.currentTarget.value as NetSimPresetId)}>
-            {netSimPresets.map((preset) => (
-              <option key={preset.id} value={preset.id}>
-                {preset.label}
-              </option>
-            ))}
-          </select>
-          <button onClick={startTelemetryRecording} disabled={isTelemetryRecording || !predictionStats || !tickDebugStats}>
-            {isTelemetryRecording ? 'Recording…' : 'Record 10s Telemetry'}
-          </button>
-          <button onClick={handleDownloadTelemetryJson} disabled={!telemetryExportSnapshot || isTelemetryRecording}>
-            Download JSON
-          </button>
-        </div>
-      )}
-
-      <div style={{ marginTop: 4 }}>
-        snapshotTick: {tickDebugStats?.snapshotTick ?? '—'} | simulationTick: {tickDebugStats?.simulationTick ?? '—'}
-      </div>
-
-      <div style={{ marginTop: 4 }}>
-        renderTick: {tickDebugStats?.renderTick ?? '—'} | delayTicks(auto): {tickDebugStats?.delayTicks ?? '—'} | baseDelay: {tickDebugStats?.baseDelayTicks ?? '—'} (target {tickDebugStats?.baseDelayTargetTicks ?? '—'}) | range {tickDebugStats?.minDelayTicks ?? '—'}-{tickDebugStats?.maxDelayTicks ?? '—'}
-      </div>
-
-      <div style={{ marginTop: 4 }}>
-        targetBuffer: {tickDebugStats?.targetBufferPairs ?? '—'} (target {tickDebugStats?.targetBufferTargetPairs ?? '—'}) | reserve: {String(tickDebugStats?.bufferHasReserve ?? false)}
-      </div>
-
-      <div style={{ marginTop: 4 }}>
-        adaptiveEvery: {tickDebugStats?.adaptiveEveryTicks ?? '—'} (target {tickDebugStats?.adaptiveEveryTargetTicks ?? '—'})
-      </div>
-
-      <div style={{ marginTop: 4 }}>
-        limits: delay≤{tickDebugStats?.tuning.baseDelayMax ?? '—'}, buf {tickDebugStats?.tuning.targetBufferMin ?? '—'}..{tickDebugStats?.tuning.targetBufferMax ?? '—'}, cadence {tickDebugStats?.tuning.cadenceMin ?? '—'}..{tickDebugStats?.tuning.cadenceMax ?? '—'}
-      </div>
-
-      <div style={{ marginTop: 4 }}>
-        RTT: {(tickDebugStats?.rttMs ?? rttMs)?.toFixed(0) ?? '—'} ms | Jitter: {(tickDebugStats?.rttJitterMs ?? rttJitterMs).toFixed(0)} ms
-      </div>
-
-      <div style={{ marginTop: 4 }}>
-        bufferSize: {tickDebugStats?.bufferSize ?? 0} | underrunRate: {((tickDebugStats?.underrunRate ?? 0) * 100).toFixed(1)}% | underruns: {tickDebugStats?.underrunCount ?? 0} | lateRate(EMA): {((tickDebugStats?.lateSnapshotEma ?? 0) * 100).toFixed(1)}% | lateCount: {tickDebugStats?.lateSnapshotCount ?? 0}
-      </div>
-
-      <div style={{ marginTop: 4 }}>
-        extrapCount: {tickDebugStats?.extrapCount ?? 0} | stallCount: {tickDebugStats?.stallCount ?? 0} | extrapTicks: {tickDebugStats?.extrapolatingTicks ?? 0} | stalled: {String(tickDebugStats?.stalled ?? false)}
-      </div>
-
-      <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-        <button onClick={onLobby}>Lobby</button>
-        <button onClick={onCreateRoom}>Create Room</button>
-        <button onClick={onStartMatch}>Start Match</button>
-        {import.meta.env.DEV && <button onClick={() => triggerDebugDrift(10)}>Force Drift (10 ticks)</button>}
-      </div>
-
-      <div style={{ marginTop: 8 }}>
-        {predictionStats ? formatPredictionLine(localInputSeq, predictionStats) : 'Prediction: —'}
-      </div>
-      
-      {import.meta.env.DEV && telemetrySummary && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(0,255,0,0.25)' }}>
-          <div style={{ marginBottom: 4 }}>10s Telemetry Summary ({telemetrySummary.sampleCount} samples)</div>
-          <div>avg drift: {telemetrySummary.avgDrift.toFixed(3)}</div>
-          <div>max drift: {telemetrySummary.maxDrift.toFixed(3)}</div>
-          <div>hardCorrectionCount: {telemetrySummary.hardCorrectionCount}</div>
-          <div>softCorrectionCount: {telemetrySummary.softCorrectionCount}</div>
-          <div>avg pendingInputs: {telemetrySummary.avgPendingInputs.toFixed(2)}</div>
-          <div>avg delayTicks: {telemetrySummary.avgDelayTicks.toFixed(2)}</div>
-          <div>avg targetBufferPairs: {telemetrySummary.avgTargetBufferPairs.toFixed(2)}</div>
-          <div>underrunRate: {(telemetrySummary.underrunRate * 100).toFixed(2)}%</div>
-
-          <div style={{ marginTop: 8, marginBottom: 4 }}>Telemetry Runs ({telemetryRuns.length}/20)</div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-            <button onClick={handleDownloadAllTelemetryRunsJson} disabled={telemetryRuns.length === 0 || isTelemetryRecording}>
-              Download All JSON
-            </button>
-            <button onClick={() => setTelemetryRuns([])} disabled={telemetryRuns.length === 0 || isTelemetryRecording}>
-              Clear
-            </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div>WS: {connected ? 'CONNECTED' : 'OFFLINE'}</div>
+            <div>{lastSnapshot ? `tick: ${lastSnapshot.tick}` : 'no snapshot'}</div>
           </div>
 
-          {telemetryRuns.length === 0 ? (
-            <div style={{ opacity: 0.75 }}>No telemetry runs recorded yet.</div>
-          ) : (
-            <div style={{ maxHeight: 180, overflow: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left' }}>time</th>
-                    <th style={{ textAlign: 'left' }}>preset</th>
-                    <th style={{ textAlign: 'right' }}>avgDrift</th>
-                    <th style={{ textAlign: 'right' }}>maxDrift</th>
-                    <th style={{ textAlign: 'right' }}>hard</th>
-                    <th style={{ textAlign: 'right' }}>soft</th>
-                    <th style={{ textAlign: 'right' }}>avgDelay</th>
-                    <th style={{ textAlign: 'right' }}>avgBuf</th>
-                    <th style={{ textAlign: 'right' }}>underrunRate</th>
-                    <th style={{ textAlign: 'left' }}>action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...telemetryRuns].reverse().map((run) => (
-                    <tr key={`${run.createdAt}-${run.presetName}`}>
-                      <td>{formatRunTime(run.createdAt)}</td>
-                      <td>{run.presetName}</td>
-                      <td style={{ textAlign: 'right' }}>{run.summary.avgDrift.toFixed(3)}</td>
-                      <td style={{ textAlign: 'right' }}>{run.summary.maxDrift.toFixed(3)}</td>
-                      <td style={{ textAlign: 'right' }}>{run.summary.hardCorrectionCount}</td>
-                      <td style={{ textAlign: 'right' }}>{run.summary.softCorrectionCount}</td>
-                      <td style={{ textAlign: 'right' }}>{run.summary.avgDelayTicks.toFixed(2)}</td>
-                      <td style={{ textAlign: 'right' }}>{run.summary.avgTargetBufferPairs.toFixed(2)}</td>
-                      <td style={{ textAlign: 'right' }}>{(run.summary.underrunRate * 100).toFixed(2)}%</td>
-                      <td>
-                        <button onClick={() => downloadTelemetryRun(run)} disabled={isTelemetryRecording}>
-                          Download
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div style={{ marginTop: 8 }}>
+            Client: {identity.clientId ?? identity.id ?? '—'} | Name: {identity.displayName ?? '—'}
+          </div>
+
+          <div style={{ marginTop: 4 }}>
+            NetSim: {netSim.enabled ? 'ON' : 'OFF'} | latency={netSim.latencyMs}ms, jitter={netSim.jitterMs}ms,
+            drop={netSim.dropRate}
+          </div>
+
+          {import.meta.env.DEV && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={netSim.enabled}
+                  onChange={(ev) => onToggleNetSim(ev.currentTarget.checked)}
+                />
+                NetSim
+              </label>
+              <select
+                value={netSim.presetId}
+                onChange={(ev) => onSelectNetSimPreset(ev.currentTarget.value as NetSimPresetId)}
+              >
+                {netSimPresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+              <button onClick={startTelemetryRecording} disabled={isTelemetryRecording || !predictionStats || !tickDebugStats}>
+                {isTelemetryRecording ? 'Recording…' : 'Record 10s Telemetry'}
+              </button>
+              <button onClick={handleDownloadTelemetryJson} disabled={!telemetryExportSnapshot || isTelemetryRecording}>
+                Download JSON
+              </button>
             </div>
           )}
+
+          <div style={{ marginTop: 4 }}>
+            snapshotTick: {tickDebugStats?.snapshotTick ?? '—'} | simulationTick: {tickDebugStats?.simulationTick ?? '—'}
+          </div>
+
+          <div style={{ marginTop: 4 }}>
+            renderTick: {tickDebugStats?.renderTick ?? '—'} | delayTicks(auto): {tickDebugStats?.delayTicks ?? '—'} | baseDelay:{' '}
+            {tickDebugStats?.baseDelayTicks ?? '—'} (target {tickDebugStats?.baseDelayTargetTicks ?? '—'}) | range{' '}
+            {tickDebugStats?.minDelayTicks ?? '—'}-{tickDebugStats?.maxDelayTicks ?? '—'}
+          </div>
+
+          <div style={{ marginTop: 4 }}>
+            targetBuffer: {tickDebugStats?.targetBufferPairs ?? '—'} (target {tickDebugStats?.targetBufferTargetPairs ?? '—'}) | reserve:{' '}
+            {String(tickDebugStats?.bufferHasReserve ?? false)}
+          </div>
+
+          <div style={{ marginTop: 4 }}>
+            adaptiveEvery: {tickDebugStats?.adaptiveEveryTicks ?? '—'} (target {tickDebugStats?.adaptiveEveryTargetTicks ?? '—'})
+          </div>
+
+          <div style={{ marginTop: 4 }}>
+            limits: delay≤{tickDebugStats?.tuning.baseDelayMax ?? '—'}, buf {tickDebugStats?.tuning.targetBufferMin ?? '—'}..{tickDebugStats?.tuning.targetBufferMax ?? '—'},
+            cadence {tickDebugStats?.tuning.cadenceMin ?? '—'}..{tickDebugStats?.tuning.cadenceMax ?? '—'}
+          </div>
+
+          <div style={{ marginTop: 4 }}>
+            RTT: {(tickDebugStats?.rttMs ?? rttMs)?.toFixed(0) ?? '—'} ms | Jitter: {(tickDebugStats?.rttJitterMs ?? rttJitterMs).toFixed(0)} ms
+          </div>
+
+          <div style={{ marginTop: 4 }}>
+            bufferSize: {tickDebugStats?.bufferSize ?? 0} | underrunRate: {((tickDebugStats?.underrunRate ?? 0) * 100).toFixed(1)}% | underruns: {tickDebugStats?.underrunCount ?? 0} | lateRate(EMA):{' '}
+            {((tickDebugStats?.lateSnapshotEma ?? 0) * 100).toFixed(1)}% | lateCount: {tickDebugStats?.lateSnapshotCount ?? 0}
+          </div>
+
+          <div style={{ marginTop: 4 }}>
+            extrapCount: {tickDebugStats?.extrapCount ?? 0} | stallCount: {tickDebugStats?.stallCount ?? 0} | extrapTicks: {tickDebugStats?.extrapolatingTicks ?? 0} | stalled: {String(tickDebugStats?.stalled ?? false)}
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <button onClick={onLobby}>Lobby</button>
+            <button onClick={onCreateRoom}>Create Room</button>
+            <button onClick={onStartMatch}>Start Match</button>
+            {import.meta.env.DEV && <button onClick={() => triggerDebugDrift(10)}>Force Drift (10 ticks)</button>}
+          </div>
+
+          <div style={{ marginTop: 8 }}>
+            {predictionStats ? formatPredictionLine(localInputSeq, predictionStats) : 'Prediction: —'}
+          </div>
+
+          {import.meta.env.DEV && telemetrySummary && (
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(0,255,0,0.25)' }}>
+              <div style={{ marginBottom: 4 }}>10s Telemetry Summary ({telemetrySummary.sampleCount} samples)</div>
+              <div>avg drift: {telemetrySummary.avgDrift.toFixed(3)}</div>
+              <div>max drift: {telemetrySummary.maxDrift.toFixed(3)}</div>
+              <div>hardCorrectionCount: {telemetrySummary.hardCorrectionCount}</div>
+              <div>softCorrectionCount: {telemetrySummary.softCorrectionCount}</div>
+              <div>avg pendingInputs: {telemetrySummary.avgPendingInputs.toFixed(2)}</div>
+              <div>avg delayTicks: {telemetrySummary.avgDelayTicks.toFixed(2)}</div>
+              <div>avg targetBufferPairs: {telemetrySummary.avgTargetBufferPairs.toFixed(2)}</div>
+              <div>underrunRate: {(telemetrySummary.underrunRate * 100).toFixed(2)}%</div>
+
+              <div style={{ marginTop: 8, marginBottom: 4 }}>Telemetry Runs ({telemetryRuns.length}/20)</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                <button onClick={handleDownloadAllTelemetryRunsJson} disabled={telemetryRuns.length === 0 || isTelemetryRecording}>
+                  Download All JSON
+                </button>
+                <button onClick={() => setTelemetryRuns([])} disabled={telemetryRuns.length === 0 || isTelemetryRecording}>
+                  Clear
+                </button>
+              </div>
+
+              {telemetryRuns.length === 0 ? (
+                <div style={{ opacity: 0.75 }}>No telemetry runs recorded yet.</div>
+              ) : (
+                <div style={{ maxHeight: 180, overflow: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left' }}>time</th>
+                        <th style={{ textAlign: 'left' }}>preset</th>
+                        <th style={{ textAlign: 'right' }}>avgDrift</th>
+                        <th style={{ textAlign: 'right' }}>maxDrift</th>
+                        <th style={{ textAlign: 'right' }}>hard</th>
+                        <th style={{ textAlign: 'right' }}>soft</th>
+                        <th style={{ textAlign: 'right' }}>avgDelay</th>
+                        <th style={{ textAlign: 'right' }}>avgBuf</th>
+                        <th style={{ textAlign: 'right' }}>underrunRate</th>
+                        <th style={{ textAlign: 'left' }}>action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...telemetryRuns].reverse().map((run) => (
+                        <tr key={`${run.createdAt}-${run.presetName}`}>
+                          <td>{formatRunTime(run.createdAt)}</td>
+                          <td>{run.presetName}</td>
+                          <td style={{ textAlign: 'right' }}>{run.summary.avgDrift.toFixed(3)}</td>
+                          <td style={{ textAlign: 'right' }}>{run.summary.maxDrift.toFixed(3)}</td>
+                          <td style={{ textAlign: 'right' }}>{run.summary.hardCorrectionCount}</td>
+                          <td style={{ textAlign: 'right' }}>{run.summary.softCorrectionCount}</td>
+                          <td style={{ textAlign: 'right' }}>{run.summary.avgDelayTicks.toFixed(2)}</td>
+                          <td style={{ textAlign: 'right' }}>{run.summary.avgTargetBufferPairs.toFixed(2)}</td>
+                          <td style={{ textAlign: 'right' }}>{(run.summary.underrunRate * 100).toFixed(2)}%</td>
+                          <td>
+                            <button onClick={() => downloadTelemetryRun(run)} disabled={isTelemetryRecording}>
+                              Download
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ marginTop: 10 }}>
+            <div style={{ marginBottom: 6 }}>Move:</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, width: 180 }}>
+              <div />
+              <button onClick={() => onMove('up')}>↑</button>
+              <div />
+              <button onClick={() => onMove('left')}>←</button>
+              <button onClick={() => onMove('down')}>↓</button>
+              <button onClick={() => onMove('right')}>→</button>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 10 }}>
+            <div style={{ marginBottom: 6 }}>Snapshot preview:</div>
+            <MiniGrid snapshot={lastSnapshot} />
+          </div>
+
+          <div style={{ marginTop: 8 }}>
+            <div style={{ marginBottom: 6 }}>Last messages:</div>
+            <pre style={{ maxHeight: 120, overflow: 'auto', margin: 0 }}>
+              {JSON.stringify(messages.slice(-3), null, 2)}
+            </pre>
+          </div>
         </div>
       )}
-
-      <div style={{ marginTop: 10 }}>
-        <div style={{ marginBottom: 6 }}>Move:</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, width: 180 }}>
-          <div />
-          <button onClick={() => onMove('up')}>↑</button>
-          <div />
-          <button onClick={() => onMove('left')}>←</button>
-          <button onClick={() => onMove('down')}>↓</button>
-          <button onClick={() => onMove('right')}>→</button>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 10 }}>
-        <div style={{ marginBottom: 6 }}>Snapshot preview:</div>
-        <MiniGrid snapshot={lastSnapshot} />
-      </div>
-
-      <div style={{ marginTop: 8 }}>
-        <div style={{ marginBottom: 6 }}>Last messages:</div>
-        <pre style={{ maxHeight: 120, overflow: 'auto', margin: 0 }}>
-          {JSON.stringify(messages.slice(-3), null, 2)}
-        </pre>
-      </div>
-        </div>
-      )}
-    </>
+    </div>
   );
 }
 

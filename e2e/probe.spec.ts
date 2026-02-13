@@ -20,6 +20,8 @@ test('Probe 20 moves produces summary + artifacts', async ({ page }) => {
     fullPage: true,
   });
 
+  await page.waitForFunction(() => (window as any).__probeLastResult != null, null, { timeout: 30000 });
+
   const payload = await page.evaluate(() => (window as any).__probeLastResult ?? null);
 
   expect(payload).not.toBeNull();
