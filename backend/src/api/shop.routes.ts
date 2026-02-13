@@ -47,6 +47,9 @@ shopRouter.post('/shop/buy', async (req, res) => {
     if (error?.code === 'ALREADY_OWNED') {
       return res.status(409).json({ ok: false, error: 'already_owned' });
     }
+    if (error?.code === 'NOT_PURCHASABLE') {
+      return res.status(409).json({ ok: false, error: 'not_purchasable' });
+    }
     if (error?.code === 'INSUFFICIENT_FUNDS') {
       return res.status(409).json({ ok: false, error: 'insufficient_funds' });
     }

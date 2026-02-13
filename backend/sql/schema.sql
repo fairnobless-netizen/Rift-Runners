@@ -71,11 +71,15 @@ CREATE TABLE IF NOT EXISTS store_items (
   description TEXT NOT NULL DEFAULT '',
   price_stars INTEGER NOT NULL DEFAULT 0,
   active BOOLEAN NOT NULL DEFAULT TRUE,
+  purchase_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   sort_order INTEGER NOT NULL DEFAULT 0,
   grants_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE store_items
+  ADD COLUMN IF NOT EXISTS purchase_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 
 CREATE INDEX IF NOT EXISTS idx_store_items_active_sort
   ON store_items (active, category, sort_order);
@@ -95,20 +99,20 @@ CREATE INDEX IF NOT EXISTS idx_store_ownership_user
 -- =========================================
 -- Note: ON CONFLICT DO NOTHING makes this safe to run on every startup migration.
 
-INSERT INTO store_items (sku, category, title, description, price_stars, active, sort_order, grants_json)
+INSERT INTO store_items (sku, category, title, description, price_stars, active, purchase_enabled, sort_order, grants_json)
 VALUES
-  -- Packs
-  ('pack.stars.50',   'packs', 'Stars x50',   'Small star pack',   0, TRUE, 10, '{"stars":50}'::jsonb),
-  ('pack.stars.200',  'packs', 'Stars x200',  'Medium star pack',  0, TRUE, 20, '{"stars":200}'::jsonb),
-  ('pack.stars.500',  'packs', 'Stars x500',  'Large star pack',   0, TRUE, 30, '{"stars":500}'::jsonb),
+  -- Packs (visible but not purchasable until Stars)
+  ('pack.stars.50',   'packs', 'Stars x50',   'Small star pack',   0, TRUE, FALSE, 10, '{"stars":50}'::jsonb),
+  ('pack.stars.200',  'packs', 'Stars x200',  'Medium star pack',  0, TRUE, FALSE, 20, '{"stars":200}'::jsonb),
+  ('pack.stars.500',  'packs', 'Stars x500',  'Large star pack',   0, TRUE, FALSE, 30, '{"stars":500}'::jsonb),
 
   -- Boosts (example consumables / unlocks; MVP: still treat as owned = true, can evolve later)
-  ('boost.bomb.plus1', 'boosts', 'Bomb +1', 'Adds one extra bomb charge (MVP)', 25, TRUE, 10, '{"boost":"bomb_plus1","value":1}'::jsonb),
-  ('boost.score.5pct', 'boosts', 'Score +5%', 'Permanent score bonus (MVP)',    75, TRUE, 20, '{"boost":"score_bonus","value":5}'::jsonb),
+  ('boost.bomb.plus1', 'boosts', 'Bomb +1', 'Adds one extra bomb charge (MVP)', 25, TRUE, TRUE, 10, '{"boost":"bomb_plus1","value":1}'::jsonb),
+  ('boost.score.5pct', 'boosts', 'Score +5%', 'Permanent score bonus (MVP)',    75, TRUE, TRUE, 20, '{"boost":"score_bonus","value":5}'::jsonb),
 
   -- Cosmetics
-  ('cosmetic.frame.dark', 'cosmetics', 'Dark Frame', 'Cosmetic frame style (MVP)', 40, TRUE, 10, '{"cosmetic":"frame_dark"}'::jsonb),
-  ('cosmetic.trail.spark', 'cosmetics', 'Spark Trail', 'Cosmetic trail effect (MVP)', 60, TRUE, 20, '{"cosmetic":"trail_spark"}'::jsonb)
+  ('cosmetic.frame.dark', 'cosmetics', 'Dark Frame', 'Cosmetic frame style (MVP)', 40, TRUE, TRUE, 10, '{"cosmetic":"frame_dark"}'::jsonb),
+  ('cosmetic.trail.spark', 'cosmetics', 'Spark Trail', 'Cosmetic trail effect (MVP)', 60, TRUE, TRUE, 20, '{"cosmetic":"trail_spark"}'::jsonb)
 
 ON CONFLICT (sku) DO NOTHING;
 
