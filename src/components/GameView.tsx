@@ -24,6 +24,7 @@ import {
 import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../game/types';
 import {
   buyShopSku,
+  closeRoom,
   createRoom,
   fetchFriends,
   fetchLeaderboard,
@@ -34,6 +35,7 @@ import {
   fetchLedger,
   fetchWallet,
   joinRoom,
+  leaveRoom,
   requestFriend,
   respondFriend,
   type FriendEntry,
@@ -122,6 +124,15 @@ type TickDebugStats = {
     cadenceMax: number;
   };
 };
+
+function mapRoomError(error?: string): string {
+  if (error === 'room_full') return 'Room is full';
+  if (error === 'room_closed') return 'Room is closed';
+  if (error === 'room_not_found') return 'Room not found';
+  if (error === 'forbidden') return 'Only owner can close this room';
+  if (error) return error;
+  return 'Request failed';
+}
 
 const JOYSTICK_RADIUS = 56;
 const JOYSTICK_DEADZONE = 10;
@@ -626,10 +637,19 @@ export default function GameView(): JSX.Element {
 
       if (currentRoom?.roomCode) {
         const roomData = await fetchRoom(currentRoom.roomCode);
-        if (roomData) {
-          setCurrentRoom(roomData.room);
-          setCurrentRoomMembers(roomData.members);
+        if (!roomData || roomData.error === 'room_not_found') {
+          setCurrentRoom(null);
+          setCurrentRoomMembers([]);
+          return;
         }
+
+        if (roomData.error) {
+          setRoomsError(mapRoomError(roomData.error));
+          return;
+        }
+
+        setCurrentRoom(roomData.room);
+        setCurrentRoomMembers(roomData.members);
       }
     } catch {
       setRoomsError('Failed to load rooms');
@@ -650,7 +670,7 @@ export default function GameView(): JSX.Element {
     }
 
     if (result.error) {
-      setRoomsError(result.error);
+      setRoomsError(mapRoomError(result.error));
       return;
     }
 
@@ -672,6 +692,48 @@ export default function GameView(): JSX.Element {
 
     await joinRoomByCode(created.roomCode);
   }, [joinRoomByCode]);
+
+  const onLeaveRoom = useCallback(async (): Promise<void> => {
+    if (!currentRoom) return;
+
+    setRoomsError(null);
+    const result = await leaveRoom();
+    if (!result) {
+      setRoomsError('Leave failed');
+      return;
+    }
+
+    if (!result.ok) {
+      setRoomsError(mapRoomError(result.error));
+      return;
+    }
+
+    setCurrentRoom(null);
+    setCurrentRoomMembers([]);
+    const rooms = await fetchMyRooms();
+    setMyRooms(rooms);
+  }, [currentRoom]);
+
+  const onCloseRoom = useCallback(async (): Promise<void> => {
+    if (!currentRoom?.roomCode) return;
+
+    setRoomsError(null);
+    const result = await closeRoom(currentRoom.roomCode);
+    if (!result) {
+      setRoomsError('Close failed');
+      return;
+    }
+
+    if (!result.ok) {
+      setRoomsError(mapRoomError(result.error));
+      return;
+    }
+
+    setCurrentRoom(null);
+    setCurrentRoomMembers([]);
+    const rooms = await fetchMyRooms();
+    setMyRooms(rooms);
+  }, [currentRoom?.roomCode]);
 
   const onCopyInviteLink = useCallback(async (): Promise<void> => {
     if (!currentRoom?.roomCode) return;
@@ -788,6 +850,20 @@ export default function GameView(): JSX.Element {
     }
     void loadFriends();
   }, [loadFriends, loadRooms, multiplayerOpen, multiplayerTab]);
+
+  useEffect(() => {
+    if (!multiplayerOpen) return;
+    if (multiplayerTab !== 'rooms') return;
+    if (!currentRoom?.roomCode) return;
+
+    const id = window.setInterval(() => {
+      void loadRooms();
+    }, 2500);
+
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [currentRoom?.roomCode, loadRooms, multiplayerOpen, multiplayerTab]);
 
   useEffect(() => {
     if (!token) return;
@@ -1161,8 +1237,15 @@ export default function GameView(): JSX.Element {
                 ) : (
                   <>
                     <div className="settings-kv"><span>Code</span><strong>{currentRoom.roomCode}</strong></div>
-                    <div className="settings-kv"><span>Status</span><strong>{currentRoomMembers.length >= currentRoom.capacity ? 'full' : 'waiting'}</strong></div>
-                    <button type="button" onClick={() => { void onCopyInviteLink(); }}>Copy invite link</button>
+                    <div className="settings-kv"><span>Status</span><strong>{currentRoom.status}</strong></div>
+                    <div className="room-create-actions">
+                      <button type="button" onClick={() => { void onCopyInviteLink(); }}>Copy invite link</button>
+                      {currentRoom.ownerTgUserId && currentRoom.ownerTgUserId === localTgUserId ? (
+                        <button type="button" onClick={() => { void onCloseRoom(); }}>Close room</button>
+                      ) : (
+                        <button type="button" onClick={() => { void onLeaveRoom(); }}>Leave</button>
+                      )}
+                    </div>
                     <div className="room-members-list">
                       {currentRoomMembers.map((member) => (
                         <div key={member.tgUserId} className="settings-kv">
