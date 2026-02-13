@@ -7,6 +7,7 @@ export const gameEvents = new Phaser.Events.EventEmitter();
 export const EVENT_STATS = 'stats';
 export const EVENT_READY = 'ready';
 export const EVENT_CAMPAIGN_STATE = 'campaign_state';
+export const EVENT_ASSET_PROGRESS = 'asset_progress';
 
 export const EVENT_SIMULATION = 'simulation';
 
@@ -19,6 +20,11 @@ export const LEVEL_FAILED = 'LEVEL_FAILED';
 export interface ReadyPayload {
   setZoom: (zoom: number) => void;
   resetZoom: () => void;
+}
+
+export interface AssetProgressPayload {
+  progress: number;
+  fileKey?: string;
 }
 
 export function emitStats(stats: PlayerStats): void {
