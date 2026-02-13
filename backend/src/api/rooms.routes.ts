@@ -100,7 +100,12 @@ roomsRouter.post('/ready', async (req, res) => {
   const roomCode = String((req as any).body?.roomCode ?? '').trim().toUpperCase();
   if (!roomCode) return res.status(400).json({ ok: false, error: 'room_code_required' });
 
-  const ready = Boolean((req as any).body?.ready);
+  const readyRaw = (req as any).body?.ready;
+  if (typeof readyRaw !== 'boolean') {
+    return res.status(400).json({ ok: false, error: 'ready_invalid' });
+  }
+
+  const ready = readyRaw;
 
   try {
     const result = await setRoomMemberReadyTx({ tgUserId: session.tgUserId, roomCode, ready });
