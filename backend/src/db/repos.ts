@@ -1041,6 +1041,90 @@ export async function joinRoomTx(tgUserId: string, roomCode: string): Promise<{ 
   }
 }
 
+export async function leaveRoomTx(tgUserId: string): Promise<{ closedRoomCode?: string; leftRoomCode?: string }> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const membershipRes = await client.query<{ room_code: string; owner_tg_user_id: string }>(
+      `
+      SELECT rm.room_code, r.owner_tg_user_id
+      FROM room_members rm
+      JOIN rooms r ON r.room_code = rm.room_code
+      WHERE rm.tg_user_id = $1 AND r.status = 'OPEN'
+      ORDER BY rm.joined_at DESC
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [tgUserId],
+    );
+
+    const membership = membershipRes.rows[0];
+    if (!membership) {
+      const error = new Error('room_not_found');
+      (error as any).code = 'ROOM_NOT_FOUND';
+      throw error;
+    }
+
+    const roomCode = String(membership.room_code);
+    const ownerTgUserId = String(membership.owner_tg_user_id);
+
+    if (ownerTgUserId === tgUserId) {
+      await client.query(`UPDATE rooms SET status = 'CLOSED' WHERE room_code = $1`, [roomCode]);
+      await client.query(`DELETE FROM room_members WHERE room_code = $1`, [roomCode]);
+      await client.query('COMMIT');
+      return { closedRoomCode: roomCode };
+    }
+
+    await client.query(`DELETE FROM room_members WHERE room_code = $1 AND tg_user_id = $2`, [roomCode, tgUserId]);
+    await client.query('COMMIT');
+    return { leftRoomCode: roomCode };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function closeRoomTx(ownerTgUserId: string, roomCode: string): Promise<void> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const roomRes = await client.query<{ owner_tg_user_id: string }>(
+      `SELECT owner_tg_user_id FROM rooms WHERE room_code = $1 FOR UPDATE`,
+      [roomCode],
+    );
+
+    const room = roomRes.rows[0];
+    if (!room) {
+      const error = new Error('room_not_found');
+      (error as any).code = 'ROOM_NOT_FOUND';
+      throw error;
+    }
+
+    if (String(room.owner_tg_user_id) !== ownerTgUserId) {
+      const error = new Error('forbidden');
+      (error as any).code = 'FORBIDDEN';
+      throw error;
+    }
+
+    await client.query(`UPDATE rooms SET status = 'CLOSED' WHERE room_code = $1`, [roomCode]);
+    await client.query(`DELETE FROM room_members WHERE room_code = $1`, [roomCode]);
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 function getUtcDayKey(now = new Date()): string {
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, '0');

@@ -472,7 +472,7 @@ export async function fetchMyRooms(): Promise<MyRoomEntry[]> {
   }
 }
 
-export async function fetchRoom(roomCode: string): Promise<{ room: RoomState; members: RoomMember[] } | null> {
+export async function fetchRoom(roomCode: string): Promise<{ room: RoomState; members: RoomMember[]; error?: string } | null> {
   const token = getToken();
   if (!token) return null;
 
@@ -481,7 +481,13 @@ export async function fetchRoom(roomCode: string): Promise<{ room: RoomState; me
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = await res.json();
-    if (!json?.ok || !json.room) return null;
+    if (!json?.ok || !json.room) {
+      return {
+        room: { roomCode: String(roomCode).toUpperCase(), capacity: 0, status: 'UNKNOWN' },
+        members: [],
+        error: String(json?.error ?? 'room_fetch_failed'),
+      };
+    }
 
     return {
       room: {
@@ -499,6 +505,52 @@ export async function fetchRoom(roomCode: string): Promise<{ room: RoomState; me
         }))
         : [],
     };
+  } catch {
+    return null;
+  }
+}
+
+
+export async function leaveRoom(): Promise<{ ok: boolean; closedRoomCode?: string; leftRoomCode?: string; error?: string } | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/rooms/leave', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const json = await res.json();
+    if (!json?.ok) return { ok: false, error: String(json?.error ?? 'leave_failed') };
+    return {
+      ok: true,
+      closedRoomCode: typeof json.closedRoomCode === 'string' ? json.closedRoomCode : undefined,
+      leftRoomCode: typeof json.leftRoomCode === 'string' ? json.leftRoomCode : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function closeRoom(roomCode: string): Promise<{ ok: boolean; roomCode?: string; error?: string } | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/rooms/close', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ roomCode }),
+    });
+    const json = await res.json();
+    if (!json?.ok) return { ok: false, error: String(json?.error ?? 'close_failed') };
+    return { ok: true, roomCode: String(json.roomCode ?? roomCode) };
   } catch {
     return null;
   }

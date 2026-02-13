@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { resolveSessionFromRequest } from '../auth/session';
 import {
+  closeRoomTx,
   createRoomTx,
   getRoomByCode,
   joinRoomTx,
+  leaveRoomTx,
   listMyRooms,
   listRoomMembers,
 } from '../db/repos';
@@ -52,6 +54,37 @@ roomsRouter.post('/join', async (req, res) => {
     if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });
     if (error?.code === 'ROOM_FULL') return res.status(409).json({ ok: false, error: 'room_full' });
     if (error?.code === 'ROOM_CLOSED') return res.status(409).json({ ok: false, error: 'room_closed' });
+    return res.status(500).json({ ok: false, error: 'internal_error' });
+  }
+});
+
+
+roomsRouter.post('/leave', async (req, res) => {
+  const session = await resolveSessionFromRequest(req as any);
+  if (!session) return res.status(401).json({ ok: false, error: 'unauthorized' });
+
+  try {
+    const result = await leaveRoomTx(session.tgUserId);
+    return res.status(200).json({ ok: true, ...result });
+  } catch (error: any) {
+    if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });
+    return res.status(500).json({ ok: false, error: 'internal_error' });
+  }
+});
+
+roomsRouter.post('/close', async (req, res) => {
+  const session = await resolveSessionFromRequest(req as any);
+  if (!session) return res.status(401).json({ ok: false, error: 'unauthorized' });
+
+  const roomCode = String((req as any).body?.roomCode ?? '').trim().toUpperCase();
+  if (!roomCode) return res.status(400).json({ ok: false, error: 'room_code_required' });
+
+  try {
+    await closeRoomTx(session.tgUserId, roomCode);
+    return res.status(200).json({ ok: true, roomCode });
+  } catch (error: any) {
+    if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });
+    if (error?.code === 'FORBIDDEN') return res.status(403).json({ ok: false, error: 'forbidden' });
     return res.status(500).json({ ok: false, error: 'internal_error' });
   }
 });
