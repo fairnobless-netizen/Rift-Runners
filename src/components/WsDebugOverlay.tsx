@@ -150,6 +150,9 @@ export function WsDebugOverlay({
   localInputSeq: number;
   getLocalPlayerPosition?: () => { x: number; y: number } | null;
 }) {
+  const debugUiFlag = String(import.meta.env.VITE_DEBUG_UI ?? '').trim().toLowerCase();
+  const showDebugUi = debugUiFlag === '1' || debugUiFlag === 'true' || import.meta.env.DEV;
+
   const lastSnapshot = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -279,9 +282,7 @@ export function WsDebugOverlay({
             samples,
           };
 
-          if (import.meta.env.DEV) {
-            (window as any).__probeLastResult = payload;
-          }
+          (window as any).__probeLastResult = payload;
 
           downloadJson(payload, `m16_2_1_probe_${Date.now()}.json`);
         }, 150);
@@ -461,20 +462,53 @@ export function WsDebugOverlay({
   };
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        right: 10,
-        bottom: 10,
-        width: 360,
-        background: 'rgba(0,0,0,0.82)',
-        color: '#0f0',
-        fontSize: 12,
-        padding: 10,
-        zIndex: 9999,
-        borderRadius: 10,
-      }}
-    >
+    <>
+      <div
+        style={{
+          position: 'fixed',
+          right: 10,
+          bottom: 10,
+          zIndex: 10000,
+          pointerEvents: 'none',
+        }}
+      >
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', pointerEvents: 'auto' }}>
+          <button data-testid="probe-btn" onClick={runProbe}>Probe 20 moves</button>
+        </div>
+
+        {probeSummary && (
+          <div
+            data-testid="probe-summary"
+            style={{
+              marginTop: 8,
+              padding: 6,
+              fontSize: 12,
+              borderRadius: 6,
+              background: probeSummary.pass ? '#0b3d1a' : '#3d0b0b',
+              color: probeSummary.pass ? '#5cff8d' : '#ff6b6b',
+              pointerEvents: 'auto',
+            }}
+          >
+            Probe result: moved={probeSummary.moved}, blocked={probeSummary.blocked} — {probeSummary.pass ? 'PASS' : 'FAIL'}
+          </div>
+        )}
+      </div>
+
+      {showDebugUi && (
+        <div
+          style={{
+            position: 'fixed',
+            right: 10,
+            bottom: 64,
+            width: 360,
+            background: 'rgba(0,0,0,0.82)',
+            color: '#0f0',
+            fontSize: 12,
+            padding: 10,
+            zIndex: 9999,
+            borderRadius: 10,
+          }}
+        >
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <div>WS: {connected ? 'CONNECTED' : 'OFFLINE'}</div>
         <div>{lastSnapshot ? `tick: ${lastSnapshot.tick}` : 'no snapshot'}</div>
@@ -550,25 +584,8 @@ export function WsDebugOverlay({
         <button onClick={onLobby}>Lobby</button>
         <button onClick={onCreateRoom}>Create Room</button>
         <button onClick={onStartMatch}>Start Match</button>
-        <button data-testid="probe-btn" onClick={runProbe}>Probe 20 moves</button>
         {import.meta.env.DEV && <button onClick={() => triggerDebugDrift(10)}>Force Drift (10 ticks)</button>}
       </div>
-
-      {probeSummary && (
-        <div
-          data-testid="probe-summary"
-          style={{
-            marginTop: 8,
-            padding: 6,
-            fontSize: 12,
-            borderRadius: 6,
-            background: probeSummary.pass ? '#0b3d1a' : '#3d0b0b',
-            color: probeSummary.pass ? '#5cff8d' : '#ff6b6b',
-          }}
-        >
-          Probe result: moved={probeSummary.moved}, blocked={probeSummary.blocked} — {probeSummary.pass ? 'PASS' : 'FAIL'}
-        </div>
-      )}
 
       <div style={{ marginTop: 8 }}>
         {predictionStats ? formatPredictionLine(localInputSeq, predictionStats) : 'Prediction: —'}
@@ -664,7 +681,9 @@ export function WsDebugOverlay({
           {JSON.stringify(messages.slice(-3), null, 2)}
         </pre>
       </div>
-    </div>
+        </div>
+      )}
+    </>
   );
 }
 
