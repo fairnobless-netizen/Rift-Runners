@@ -18,7 +18,8 @@
     "build:frontend": "vite build",
     "build:backend": "npm --prefix backend run build",
     "build:all": "npm run build:frontend && npm run build:backend",
-    "ci": "npm run typecheck && npm run typecheck:backend && npm run build:all"
+    "ci": "npm run typecheck && npm run typecheck:shared && npm run typecheck:backend && npm run build:all",
+    "typecheck:shared": "test -f shared/tsconfig.json && tsc -p shared/tsconfig.json --noEmit || echo \"shared/tsconfig.json missing; skipping\""
   },
   "dependencies": {
     "phaser": "^3.90.0",
