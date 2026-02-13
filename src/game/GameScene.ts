@@ -44,6 +44,7 @@ import {
 import {
   DOOR_REVEALED,
   PREBOSS_DOOR_REVEALED,
+  EVENT_ASSET_PROGRESS,
   EVENT_READY,
   LEVEL_CLEARED,
   LEVEL_FAILED,
@@ -205,6 +206,20 @@ export class GameScene extends Phaser.Scene {
 
   preload(): void {
     this.ensureFallbackTexture();
+
+    this.load.on('progress', (progress: number) => {
+      gameEvents.emit(EVENT_ASSET_PROGRESS, { progress });
+    });
+
+    this.load.on('fileprogress', (file: Phaser.Loader.File) => {
+      const fileKey = typeof file?.key === 'string' ? file.key : undefined;
+      gameEvents.emit(EVENT_ASSET_PROGRESS, { progress: this.load.progress, fileKey });
+    });
+
+    this.load.once('complete', () => {
+      gameEvents.emit(EVENT_ASSET_PROGRESS, { progress: 1 });
+    });
+
     const seen = new Set<string>();
 
     for (const kind of Object.values(ASSET_REGISTRY)) {

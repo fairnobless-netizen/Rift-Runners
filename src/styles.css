@@ -637,6 +637,65 @@ button:disabled {
   }
 }
 
+
+.boot-splash {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: radial-gradient(circle at 50% 20%, #1a2140, #070a12 62%);
+  opacity: 1;
+  transition: opacity 300ms ease;
+}
+
+.boot-splash--closing {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-splash-card {
+  width: min(92vw, 560px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.boot-splash-card h2 {
+  margin: 0;
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.boot-splash-progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.boot-splash-progress-track {
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid #425180;
+  background: #0d1428;
+  overflow: hidden;
+}
+
+.boot-splash-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #53b8ff, #8f7dff);
+  transition: width 120ms linear;
+}
+
+.boot-splash-file {
+  min-height: 1.2em;
+  font-size: 0.8rem;
+  color: #b9c5ec;
+}
+
 .settings-overlay {
   position: absolute;
   inset: 0;

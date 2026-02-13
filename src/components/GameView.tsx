@@ -4,11 +4,13 @@ import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
 
 import {
+  EVENT_ASSET_PROGRESS,
   EVENT_CAMPAIGN_STATE,
   EVENT_READY,
   EVENT_SIMULATION,
   EVENT_STATS,
   gameEvents,
+  type AssetProgressPayload,
   type ReadyPayload,
 } from '../game/gameEvents';
 
@@ -209,6 +211,11 @@ export default function GameView(): JSX.Element {
   const [audioSettings, setAudioSettings] = useState<AudioSettings>({ musicEnabled: true, sfxEnabled: true });
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
+  const bootSplashSeen = localStorage.getItem('rift_boot_v1_done') === '1';
+  const [showBootSplash, setShowBootSplash] = useState<boolean>(() => !bootSplashSeen);
+  const [bootSplashProgress, setBootSplashProgress] = useState<number>(() => (bootSplashSeen ? 1 : 0));
+  const [bootSplashFileKey, setBootSplashFileKey] = useState<string>('');
+  const [bootSplashClosing, setBootSplashClosing] = useState(false);
   const ws = useWsClient(token || undefined);
 
   const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
@@ -436,6 +443,12 @@ export default function GameView(): JSX.Element {
     const onCampaignState = (nextCampaign: CampaignState): void => {
       setCampaign({ ...nextCampaign });
     };
+    const onAssetProgress = (payload: AssetProgressPayload): void => {
+      setBootSplashProgress(Math.max(0, Math.min(1, Number(payload.progress) || 0)));
+      if (payload.fileKey) {
+        setBootSplashFileKey(payload.fileKey);
+      }
+    };
     const onSimulation = async (event: SimulationEvent): Promise<void> => {
       if (event.type !== 'BOSS_DEFEATED') return;
 
@@ -449,12 +462,14 @@ export default function GameView(): JSX.Element {
     gameEvents.on(EVENT_STATS, onStats);
     gameEvents.on(EVENT_READY, onReady);
     gameEvents.on(EVENT_CAMPAIGN_STATE, onCampaignState);
+    gameEvents.on(EVENT_ASSET_PROGRESS, onAssetProgress);
     gameEvents.on(EVENT_SIMULATION, onSimulation);
 
     return () => {
       gameEvents.off(EVENT_STATS, onStats);
       gameEvents.off(EVENT_READY, onReady);
       gameEvents.off(EVENT_CAMPAIGN_STATE, onCampaignState);
+      gameEvents.off(EVENT_ASSET_PROGRESS, onAssetProgress);
       gameEvents.off(EVENT_SIMULATION, onSimulation);
     };
   }, [zoom]);
@@ -1020,6 +1035,22 @@ export default function GameView(): JSX.Element {
     }
   };
 
+  useEffect(() => {
+    if (!showBootSplash) return;
+    if (bootSplashProgress < 1) return;
+
+    localStorage.setItem('rift_boot_v1_done', '1');
+    setBootSplashClosing(true);
+    const timeoutId = window.setTimeout(() => {
+      setShowBootSplash(false);
+      setBootSplashClosing(false);
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [bootSplashProgress, showBootSplash]);
+
+  const bootProgressPercent = Math.round(bootSplashProgress * 100);
+
   const isMultiplayerHud = currentRoomMembers.length >= 2;
   const hudSlots = isMultiplayerHud
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
@@ -1027,6 +1058,20 @@ export default function GameView(): JSX.Element {
 
   return (
     <main className="page">
+      {showBootSplash && (
+        <div className={`boot-splash ${bootSplashClosing ? 'boot-splash--closing' : ''}`} role="status" aria-live="polite">
+          <div className="boot-splash-card">
+            <h2>Rift Runners</h2>
+            <div className="boot-splash-progress-row">
+              <div className="boot-splash-progress-track" aria-label="Asset loading progress">
+                <div className="boot-splash-progress-fill" style={{ width: `${bootProgressPercent}%` }} />
+              </div>
+              <strong>{bootProgressPercent}%</strong>
+            </div>
+            {bootSplashFileKey ? <div className="boot-splash-file">Loading: {bootSplashFileKey}</div> : null}
+          </div>
+        </div>
+      )}
       <section className="hud">
         <div className="stats-row">
           <div className="hud-left">
