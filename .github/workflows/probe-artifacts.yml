@@ -40,12 +40,12 @@ jobs:
       - name: Run Playwright Mobile Landscape UI E2E
         run: npm run test:e2e:ui
 
-      - name: Upload Probe artifacts
+      - name: Upload Playwright artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: probe-artifacts
-          path: artifacts/
+          path: artifacts/**
           if-no-files-found: warn
 
       - name: Cleanup Vite processes
