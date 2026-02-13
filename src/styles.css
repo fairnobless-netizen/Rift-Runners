@@ -696,6 +696,50 @@ button:disabled {
   color: #b9c5ec;
 }
 
+.game-flow-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: radial-gradient(circle at 50% 25%, #1b2447dd, #060911f5 65%);
+}
+
+.game-flow-card {
+  width: min(92vw, 520px);
+  border: 1px solid #3d4f8a;
+  border-radius: 14px;
+  background: #0c1226f0;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  text-align: center;
+}
+
+.game-flow-card h2 {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.game-flow-card p {
+  margin: 0;
+  color: #bec8ea;
+}
+
+.game-flow-start-btn {
+  min-width: 140px;
+  border-radius: 999px;
+  border: 1px solid #7f8dff;
+  padding: 0.65rem 1.2rem;
+  font-weight: 700;
+  background: linear-gradient(180deg, #8a95ff, #5964d8);
+  color: #ffffff;
+}
+
 .settings-overlay {
   position: absolute;
   inset: 0;

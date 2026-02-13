@@ -92,6 +92,7 @@ type AccountInfo = {
 };
 
 type MultiplayerTab = 'rooms' | 'friends';
+type GameFlowPhase = 'intro' | 'start' | 'playing';
 
 type TickDebugStats = {
   snapshotTick: number;
@@ -144,6 +145,7 @@ function mapRoomError(error?: string): string {
 
 const JOYSTICK_RADIUS = 56;
 const JOYSTICK_DEADZONE = 10;
+const INTRO_PLACEHOLDER_MS = 5500;
 
 export default function GameView(): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -211,6 +213,7 @@ export default function GameView(): JSX.Element {
   const [audioSettings, setAudioSettings] = useState<AudioSettings>({ musicEnabled: true, sfxEnabled: true });
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
+  const [gameFlowPhase, setGameFlowPhase] = useState<GameFlowPhase>('intro');
   const bootSplashSeen = localStorage.getItem('rift_boot_v1_done') === '1';
   const [showBootSplash, setShowBootSplash] = useState<boolean>(() => !bootSplashSeen);
   const [bootSplashProgress, setBootSplashProgress] = useState<number>(() => (bootSplashSeen ? 1 : 0));
@@ -221,6 +224,7 @@ export default function GameView(): JSX.Element {
   const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
   const baseHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
   const arenaAspectRatio = `${baseWidth} / ${baseHeight}`;
+  const isInputLocked = gameFlowPhase !== 'playing';
 
 
   const setMovementFromDirection = (direction: Direction | null): void => {
@@ -531,7 +535,29 @@ export default function GameView(): JSX.Element {
     [],
   );
 
+  useEffect(() => {
+    if (showBootSplash) return;
+    if (gameFlowPhase !== 'intro') return;
+
+    const timerId = window.setTimeout(() => {
+      setGameFlowPhase('start');
+    }, INTRO_PLACEHOLDER_MS);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [gameFlowPhase, showBootSplash]);
+
+  useEffect(() => {
+    if (!isInputLocked) return;
+    releaseJoystick();
+    controlsRef.current.placeBombRequested = false;
+    controlsRef.current.detonateRequested = false;
+  }, [isInputLocked]);
+
   const setDirection = (direction: Direction, active: boolean): void => {
+    if (isInputLocked) return;
+
     if (active) {
       setMovementFromDirection(direction);
       return;
@@ -543,6 +569,8 @@ export default function GameView(): JSX.Element {
   };
 
   const updateJoystickFromPointer = (clientX: number, clientY: number): void => {
+    if (isInputLocked) return;
+
     const pad = joystickPadRef.current;
     if (!pad) return;
 
@@ -574,6 +602,8 @@ export default function GameView(): JSX.Element {
   };
 
   const onJoystickPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (isInputLocked) return;
+
     const pad = joystickPadRef.current;
     if (!pad) return;
 
@@ -583,6 +613,7 @@ export default function GameView(): JSX.Element {
   };
 
   const onJoystickPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (isInputLocked) return;
     if (!joystickPressed) return;
     updateJoystickFromPointer(event.clientX, event.clientY);
   };
@@ -602,10 +633,12 @@ export default function GameView(): JSX.Element {
   };
 
   const requestBomb = (): void => {
+    if (isInputLocked) return;
     controlsRef.current.placeBombRequested = true;
   };
 
   const requestDetonate = (): void => {
+    if (isInputLocked) return;
     if (!isRemoteDetonateUnlocked) return;
     controlsRef.current.detonateRequested = true;
   };
@@ -1070,6 +1103,21 @@ export default function GameView(): JSX.Element {
             </div>
             {bootSplashFileKey ? <div className="boot-splash-file">Loading: {bootSplashFileKey}</div> : null}
           </div>
+        </div>
+      )}
+      {!showBootSplash && gameFlowPhase !== 'playing' && (
+        <div className="game-flow-overlay" role="status" aria-live="polite">
+          {gameFlowPhase === 'intro' ? (
+            <div className="game-flow-card">
+              <h2>Rift Runners</h2>
+              <p>Preparing mission briefing...</p>
+            </div>
+          ) : (
+            <div className="game-flow-card">
+              <h2>Ready to start?</h2>
+              <button type="button" className="game-flow-start-btn" onClick={() => setGameFlowPhase('playing')}>Start</button>
+            </div>
+          )}
         </div>
       )}
       <section className="hud">
