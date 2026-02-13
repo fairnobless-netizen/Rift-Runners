@@ -67,7 +67,7 @@ roomsRouter.post('/leave', async (req, res) => {
     const result = await leaveRoomTx(session.tgUserId);
     return res.status(200).json({ ok: true, ...result });
   } catch (error: any) {
-    if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });
+    if (error?.code === 'ROOM_NOT_JOINED') return res.status(200).json({ ok: true, roomCode: '' });
     return res.status(500).json({ ok: false, error: 'internal_error' });
   }
 });

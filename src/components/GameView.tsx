@@ -126,9 +126,9 @@ type TickDebugStats = {
 };
 
 function mapRoomError(error?: string): string {
-  if (error === 'room_full') return 'Room is full';
-  if (error === 'room_closed') return 'Room is closed';
-  if (error === 'room_not_found') return 'Room not found';
+  if (error === 'room_full') return 'Комната заполнена';
+  if (error === 'room_closed') return 'Комната закрыта';
+  if (error === 'room_not_found') return 'Комната не найдена';
   if (error === 'forbidden') return 'Only owner can close this room';
   if (error) return error;
   return 'Request failed';
@@ -188,6 +188,7 @@ export default function GameView(): JSX.Element {
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [joinCodeDraft, setJoinCodeDraft] = useState('');
+  const [joiningRoomCode, setJoiningRoomCode] = useState<string | null>(null);
   const [myRooms, setMyRooms] = useState<MyRoomEntry[]>([]);
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
@@ -661,26 +662,33 @@ export default function GameView(): JSX.Element {
   const joinRoomByCode = useCallback(async (roomCodeRaw: string): Promise<void> => {
     const roomCode = roomCodeRaw.trim().toUpperCase();
     if (!roomCode) return;
+    if (currentRoom?.roomCode === roomCode) return;
+    if (joiningRoomCode === roomCode) return;
 
     setRoomsError(null);
-    const result = await joinRoom(roomCode);
-    if (!result) {
-      setRoomsError('Join failed');
-      return;
+    setJoiningRoomCode(roomCode);
+    try {
+      const result = await joinRoom(roomCode);
+      if (!result) {
+        setRoomsError('Join failed');
+        return;
+      }
+
+      if (result.error) {
+        setRoomsError(mapRoomError(result.error));
+        return;
+      }
+
+      setCurrentRoom(result.room);
+      setCurrentRoomMembers(result.members);
+      setJoinCodeDraft(roomCode);
+
+      const rooms = await fetchMyRooms();
+      setMyRooms(rooms);
+    } finally {
+      setJoiningRoomCode((prev) => (prev === roomCode ? null : prev));
     }
-
-    if (result.error) {
-      setRoomsError(mapRoomError(result.error));
-      return;
-    }
-
-    setCurrentRoom(result.room);
-    setCurrentRoomMembers(result.members);
-    setJoinCodeDraft(roomCode);
-
-    const rooms = await fetchMyRooms();
-    setMyRooms(rooms);
-  }, []);
+  }, [currentRoom?.roomCode, joiningRoomCode]);
 
   const onCreateRoom = useCallback(async (capacity: 2 | 3 | 4): Promise<void> => {
     setRoomsError(null);
@@ -868,6 +876,22 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     if (!token) return;
 
+    const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    if (startParam?.startsWith('room_')) {
+      const deepLinkRoomCode = startParam.replace('room_', '').trim().toUpperCase();
+      if (!deepLinkRoomCode) return;
+
+      setMultiplayerOpen(true);
+      setMultiplayerTab('rooms');
+      setJoinCodeDraft(deepLinkRoomCode);
+      const timer = window.setTimeout(() => {
+        void joinRoomByCode(deepLinkRoomCode);
+      }, 300);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    }
+
     const search = new URLSearchParams(window.location.search);
     const startappRaw = search.get('startapp') ?? '';
     if (!startappRaw.startsWith('room_')) return;
@@ -878,7 +902,13 @@ export default function GameView(): JSX.Element {
     setMultiplayerOpen(true);
     setMultiplayerTab('rooms');
     setJoinCodeDraft(deepLinkRoomCode);
-    void joinRoomByCode(deepLinkRoomCode);
+    const timer = window.setTimeout(() => {
+      void joinRoomByCode(deepLinkRoomCode);
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, [joinRoomByCode, token]);
 
   const onBuy = async (sku: string): Promise<void> => {
@@ -1191,9 +1221,9 @@ export default function GameView(): JSX.Element {
               <div className="room-create-row">
                 <span>Create room</span>
                 <div className="room-create-actions">
-                  <button type="button" onClick={() => { void onCreateRoom(2); }}>2p</button>
-                  <button type="button" onClick={() => { void onCreateRoom(3); }}>3p</button>
-                  <button type="button" onClick={() => { void onCreateRoom(4); }}>4p</button>
+                  <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(2); }}>2p</button>
+                  <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(3); }}>3p</button>
+                  <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(4); }}>4p</button>
                 </div>
               </div>
 
@@ -1204,11 +1234,12 @@ export default function GameView(): JSX.Element {
                   onChange={(event) => setJoinCodeDraft(event.target.value.toUpperCase())}
                   placeholder="Room code"
                 />
-                <button type="button" onClick={() => { void joinRoomByCode(joinCodeDraft); }}>Join</button>
+                <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void joinRoomByCode(joinCodeDraft); }}>{joiningRoomCode ? 'Joining...' : 'Join'}</button>
               </div>
 
               {roomsError ? <div>{roomsError}</div> : null}
               {roomsLoading ? <div>Loading rooms...</div> : null}
+              {joiningRoomCode ? <div>Joining {joiningRoomCode}...</div> : null}
 
               <div className="room-section">
                 <strong>My rooms</strong>
@@ -1220,6 +1251,7 @@ export default function GameView(): JSX.Element {
                       key={room.roomCode}
                       type="button"
                       className="room-list-item"
+                      disabled={Boolean(joiningRoomCode)}
                       onClick={() => { void joinRoomByCode(room.roomCode); }}
                     >
                       <span>{room.roomCode}</span>

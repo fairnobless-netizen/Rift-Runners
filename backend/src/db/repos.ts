@@ -986,8 +986,8 @@ export async function joinRoomTx(tgUserId: string, roomCode: string): Promise<{ 
       throw error;
     }
 
-    const existsRes = await client.query<{ room_code: string }>(
-      `SELECT room_code FROM room_members WHERE room_code = $1 AND tg_user_id = $2 LIMIT 1`,
+    const existsRes = await client.query<{ exists: number }>(
+      `SELECT 1 AS exists FROM room_members WHERE room_code = $1 AND tg_user_id = $2 LIMIT 1`,
       [roomCode, tgUserId],
     );
 
@@ -1063,8 +1063,8 @@ export async function leaveRoomTx(tgUserId: string): Promise<{ closedRoomCode?: 
 
     const membership = membershipRes.rows[0];
     if (!membership) {
-      const error = new Error('room_not_found');
-      (error as any).code = 'ROOM_NOT_FOUND';
+      const error = new Error('room_not_joined');
+      (error as any).code = 'ROOM_NOT_JOINED';
       throw error;
     }
 
