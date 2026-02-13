@@ -242,6 +242,13 @@ body {
   gap: calc(0.5rem * var(--ui-scale-left));
 }
 
+.nav-secondary {
+  width: 100%;
+  display: flex;
+  justify-content: flex-start;
+  margin-top: calc(0.55rem * var(--ui-scale-left));
+}
+
 .nav-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -338,23 +345,20 @@ body {
 
 .nav-btn--multiplayer {
   width: calc((100% - var(--nav-grid-gap)) / 2);
-  aspect-ratio: 1 / 1;
-  font-size: calc(0.95rem * var(--ui-scale-left));
-  margin-top: calc(0.65rem * var(--ui-scale-left));
-  align-self: flex-start;
 }
 
 .right-panel--actions {
   --action-stack-gap: calc(0.95rem * var(--ui-scale-right));
+  --boost-separation-gap: calc(1.35rem * var(--ui-scale-right));
   gap: var(--action-stack-gap);
 }
 
 .boost-slot--upper {
-  margin-bottom: var(--action-stack-gap);
+  margin-bottom: var(--boost-separation-gap);
 }
 
 .boost-slot--lower {
-  margin-top: var(--action-stack-gap);
+  margin-top: var(--boost-separation-gap);
 }
 .game-shell {
   position: relative;
@@ -617,7 +621,7 @@ button:disabled {
     height: auto;
   }
 
-  .nav-btn--multiplayer {
+  .nav-secondary {
     margin-top: 0.35rem;
   }
 
