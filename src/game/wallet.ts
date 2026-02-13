@@ -23,6 +23,27 @@ export type ShopCatalogItem = {
   sortOrder: number;
 };
 
+export type LeaderboardMode = 'solo' | 'duo' | 'trio' | 'squad';
+
+export type LeaderboardTopEntry = {
+  rank: number;
+  tgUserId: string;
+  displayName: string;
+  score: number;
+};
+
+export type LeaderboardMeEntry = {
+  rank: number | null;
+  score: number;
+};
+
+export type LeaderboardResponse = {
+  ok: true;
+  mode: LeaderboardMode;
+  top: LeaderboardTopEntry[];
+  me: LeaderboardMeEntry | null;
+};
+
 function getToken(): string | null {
   try {
     const t = localStorage.getItem(SESSION_TOKEN_KEY);
@@ -168,6 +189,62 @@ export async function confirmPurchase(intentId: string): Promise<{ wallet: Walle
     return {
       wallet: parseWallet(json.wallet),
       ledgerEntry: json.ledgerEntry as WalletLedgerEntry,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchLeaderboard(mode: LeaderboardMode): Promise<LeaderboardResponse | null> {
+  const token = getToken();
+
+  try {
+    const res = await fetch(`/api/leaderboard/${encodeURIComponent(mode)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    const json = await res.json();
+    if (!json?.ok) return null;
+    return {
+      ok: true,
+      mode: String(json.mode ?? mode) as LeaderboardMode,
+      top: Array.isArray(json.top)
+        ? json.top.map((entry: any) => ({
+          rank: Number(entry?.rank ?? 0),
+          tgUserId: String(entry?.tgUserId ?? ''),
+          displayName: String(entry?.displayName ?? 'Unknown'),
+          score: Number(entry?.score ?? 0),
+        }))
+        : [],
+      me: json.me
+        ? {
+          rank: json.me.rank == null ? null : Number(json.me.rank),
+          score: Number(json.me.score ?? 0),
+        }
+        : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function submitLeaderboard(mode: LeaderboardMode, score: number): Promise<LeaderboardMeEntry | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/leaderboard/submit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ mode, score }),
+    });
+    const json = await res.json();
+    if (!json?.ok || !json.me) return null;
+    return {
+      rank: json.me.rank == null ? null : Number(json.me.rank),
+      score: Number(json.me.score ?? 0),
     };
   } catch {
     return null;

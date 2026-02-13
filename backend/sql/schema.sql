@@ -135,3 +135,23 @@ CREATE TABLE IF NOT EXISTS user_name_limits (
   updated_at BIGINT NOT NULL,
   PRIMARY KEY (tg_user_id, day_key)
 );
+
+-- =========================================
+-- LEADERBOARD (Stage 3)
+-- =========================================
+
+CREATE TABLE IF NOT EXISTS leaderboard_scores (
+  tg_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  mode TEXT NOT NULL,
+  best_score INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tg_user_id, mode)
+);
+
+CREATE INDEX IF NOT EXISTS idx_leaderboard_mode_score
+  ON leaderboard_scores (mode, best_score DESC);
+
+CREATE TABLE IF NOT EXISTS leaderboard_submit_limits (
+  tg_user_id TEXT PRIMARY KEY REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  last_submit_at BIGINT NOT NULL DEFAULT 0
+);

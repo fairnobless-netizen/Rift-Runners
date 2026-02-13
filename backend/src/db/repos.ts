@@ -480,6 +480,123 @@ export async function upsertUserSettings(params: {
   };
 }
 
+export type LeaderboardTopEntry = {
+  rank: number;
+  tgUserId: string;
+  displayName: string;
+  score: number;
+};
+
+export type LeaderboardMeEntry = {
+  rank: number | null;
+  score: number;
+};
+
+export async function listLeaderboardTop(mode: string, limit: number): Promise<LeaderboardTopEntry[]> {
+  const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+  const { rows } = await pgQuery<{
+    rank: number;
+    tg_user_id: string;
+    display_name: string;
+    best_score: number;
+  }>(
+    `
+    SELECT
+      ROW_NUMBER() OVER (ORDER BY ls.best_score DESC, ls.updated_at ASC, ls.tg_user_id ASC) AS rank,
+      ls.tg_user_id,
+      u.display_name,
+      ls.best_score
+    FROM leaderboard_scores ls
+    JOIN users u ON u.tg_user_id = ls.tg_user_id
+    WHERE ls.mode = $1
+    ORDER BY ls.best_score DESC, ls.updated_at ASC, ls.tg_user_id ASC
+    LIMIT $2
+    `,
+    [mode, safeLimit],
+  );
+
+  return rows.map((row) => ({
+    rank: Number(row.rank),
+    tgUserId: String(row.tg_user_id),
+    displayName: String(row.display_name ?? 'Unknown'),
+    score: Number(row.best_score ?? 0),
+  }));
+}
+
+export async function getMyLeaderboardEntry(tgUserId: string, mode: string): Promise<LeaderboardMeEntry | null> {
+  const { rows } = await pgQuery<{
+    best_score: number;
+    rank: number;
+  }>(
+    `
+    SELECT
+      mine.best_score,
+      (
+        SELECT COUNT(*)::int
+        FROM leaderboard_scores all_scores
+        WHERE all_scores.mode = mine.mode
+          AND (
+            all_scores.best_score > mine.best_score
+            OR (all_scores.best_score = mine.best_score AND all_scores.updated_at < mine.updated_at)
+            OR (all_scores.best_score = mine.best_score AND all_scores.updated_at = mine.updated_at AND all_scores.tg_user_id < mine.tg_user_id)
+          )
+      ) + 1 AS rank
+    FROM leaderboard_scores mine
+    WHERE mine.tg_user_id = $1 AND mine.mode = $2
+    LIMIT 1
+    `,
+    [tgUserId, mode],
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    rank: Number(row.rank),
+    score: Number(row.best_score ?? 0),
+  };
+}
+
+export async function submitLeaderboardScore(tgUserId: string, mode: string, score: number): Promise<void> {
+  const safeScore = Math.max(0, Math.floor(score));
+  await pgQuery(
+    `
+    INSERT INTO leaderboard_scores (tg_user_id, mode, best_score, updated_at)
+    VALUES ($1, $2, $3, now())
+    ON CONFLICT (tg_user_id, mode)
+    DO UPDATE SET
+      best_score = GREATEST(leaderboard_scores.best_score, EXCLUDED.best_score),
+      updated_at = now()
+    `,
+    [tgUserId, mode, safeScore],
+  );
+}
+
+export async function checkAndTouchLeaderboardSubmitLimit(tgUserId: string, cooldownMs = 30_000): Promise<boolean> {
+  const safeCooldownMs = Math.max(0, Math.floor(cooldownMs));
+  const now = Date.now();
+  const { rows } = await pgQuery<{ last_submit_at: number }>(
+    `SELECT last_submit_at FROM leaderboard_submit_limits WHERE tg_user_id = $1 LIMIT 1`,
+    [tgUserId],
+  );
+
+  const lastSubmitAt = Number(rows[0]?.last_submit_at ?? 0);
+  if (now - lastSubmitAt < safeCooldownMs) {
+    return false;
+  }
+
+  await pgQuery(
+    `
+    INSERT INTO leaderboard_submit_limits (tg_user_id, last_submit_at)
+    VALUES ($1, $2)
+    ON CONFLICT (tg_user_id)
+    DO UPDATE SET last_submit_at = EXCLUDED.last_submit_at
+    `,
+    [tgUserId, now],
+  );
+
+  return true;
+}
+
 function getUtcDayKey(now = new Date()): string {
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, '0');

@@ -9,6 +9,7 @@ import { profileRouter } from './api/profile.routes';
 import { authRouter } from './api/auth.routes';
 import { walletRouter } from './api/wallet.routes';
 import { shopRouter } from './api/shop.routes';
+import { leaderboardRouter } from './api/leaderboard.routes';
 import { runMigrationsFromSchemaSql } from './db/migrate';
 import { startWsGateway } from './ws/gateway';
 
@@ -38,6 +39,7 @@ app.use('/api', campaignRouter);
 app.use('/api', profileRouter);
 app.use('/api', walletRouter);
 app.use('/api', shopRouter);
+app.use('/api/leaderboard', leaderboardRouter);
 
 // frontend static
 app.use(express.static(frontendDistPath));
