@@ -600,3 +600,44 @@ button:disabled {
   color: #f6c76a;
   font-style: normal;
 }
+
+.room-create-row,
+.room-join-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.room-create-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.room-join-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.room-section {
+  border: 1px solid #2c3b6c;
+  border-radius: 10px;
+  padding: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.room-list-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  text-align: left;
+}
+
+.room-members-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
