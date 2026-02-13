@@ -38,8 +38,6 @@ import {
   leaveRoom,
   requestFriend,
   respondFriend,
-  setRoomReady,
-  startRoom,
   type FriendEntry,
   type IncomingFriendRequest,
   type LeaderboardMeEntry,
@@ -131,10 +129,7 @@ function mapRoomError(error?: string): string {
   if (error === 'room_full') return 'Room is full';
   if (error === 'room_closed') return 'Room is closed';
   if (error === 'room_not_found') return 'Room not found';
-  if (error === 'forbidden') return 'Forbidden';
-  if (error === 'room_started') return 'Room already started';
-  if (error === 'not_enough_players') return 'Need at least 2 players';
-  if (error === 'not_all_ready') return 'All players must be ready before start';
+  if (error === 'forbidden') return 'Only owner can close this room';
   if (error) return error;
   return 'Request failed';
 }
@@ -210,13 +205,6 @@ export default function GameView(): JSX.Element {
   const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
   const baseHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
   const arenaAspectRatio = `${baseWidth} / ${baseHeight}`;
-
-
-  const isRoomOwner = Boolean(currentRoom?.ownerTgUserId && currentRoom.ownerTgUserId === localTgUserId);
-  const selfMember = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
-  const memberCount = currentRoomMembers.length;
-  const allReady = memberCount > 0 && currentRoomMembers.every((member) => member.ready);
-  const canStartRoom = Boolean(currentRoom && currentRoom.phase === 'LOBBY' && isRoomOwner && memberCount >= 2 && allReady);
 
 
   const setMovementFromDirection = (direction: Direction | null): void => {
@@ -747,41 +735,6 @@ export default function GameView(): JSX.Element {
     setMyRooms(rooms);
   }, [currentRoom?.roomCode]);
 
-
-  const onToggleReady = useCallback(async (): Promise<void> => {
-    if (!currentRoom?.roomCode || !selfMember) return;
-
-    setRoomsError(null);
-    const result = await setRoomReady(currentRoom.roomCode, !selfMember.ready);
-    if (!result) {
-      setRoomsError('Ready toggle failed');
-      return;
-    }
-    if (!result.ok) {
-      setRoomsError(mapRoomError(result.error));
-      return;
-    }
-    if (result.room) setCurrentRoom(result.room);
-    setCurrentRoomMembers(result.members ?? []);
-  }, [currentRoom?.roomCode, selfMember]);
-
-  const onStartRoom = useCallback(async (): Promise<void> => {
-    if (!currentRoom?.roomCode) return;
-
-    setRoomsError(null);
-    const result = await startRoom(currentRoom.roomCode);
-    if (!result) {
-      setRoomsError('Start failed');
-      return;
-    }
-    if (!result.ok) {
-      setRoomsError(mapRoomError(result.error));
-      return;
-    }
-    if (result.room) setCurrentRoom(result.room);
-    setCurrentRoomMembers(result.members ?? []);
-  }, [currentRoom?.roomCode]);
-
   const onCopyInviteLink = useCallback(async (): Promise<void> => {
     if (!currentRoom?.roomCode) return;
 
@@ -1271,7 +1224,7 @@ export default function GameView(): JSX.Element {
                     >
                       <span>{room.roomCode}</span>
                       <span>{room.memberCount}/{room.capacity}</span>
-                      <span>{room.phase}</span>
+                      <span>{room.status}</span>
                     </button>
                   ))
                 )}
@@ -1285,14 +1238,8 @@ export default function GameView(): JSX.Element {
                   <>
                     <div className="settings-kv"><span>Code</span><strong>{currentRoom.roomCode}</strong></div>
                     <div className="settings-kv"><span>Status</span><strong>{currentRoom.status}</strong></div>
-                    <div className="settings-kv"><span>Phase</span><strong>{currentRoom.phase}</strong></div>
-                    {currentRoom.phase === 'STARTED' ? <div><strong>Match started</strong> — Starting...</div> : null}
                     <div className="room-create-actions">
                       <button type="button" onClick={() => { void onCopyInviteLink(); }}>Copy invite link</button>
-                      <button type="button" onClick={() => { void onToggleReady(); }} disabled={!selfMember || currentRoom.phase !== 'LOBBY'}>{selfMember?.ready ? 'Unready' : 'Ready'}</button>
-                      {isRoomOwner ? (
-                        <button type="button" onClick={() => { void onStartRoom(); }} disabled={!canStartRoom}>Start</button>
-                      ) : null}
                       {currentRoom.ownerTgUserId && currentRoom.ownerTgUserId === localTgUserId ? (
                         <button type="button" onClick={() => { void onCloseRoom(); }}>Close room</button>
                       ) : (
@@ -1303,7 +1250,7 @@ export default function GameView(): JSX.Element {
                       {currentRoomMembers.map((member) => (
                         <div key={member.tgUserId} className="settings-kv">
                           <span>{member.displayName}</span>
-                          <strong>{member.ready ? 'Ready' : 'Not ready'}</strong>
+                          <strong>{member.tgUserId}</strong>
                         </div>
                       ))}
                     </div>
