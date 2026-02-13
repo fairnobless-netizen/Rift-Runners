@@ -1,42 +1,30 @@
 name: CI
 
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+  push:
+    branches: ["main"]
+  workflow_dispatch:
 
 jobs:
-  build:
+  ci:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Use Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          registry-url: "https://registry.npmjs.org/"
 
-      # ---------- Frontend ----------
-      - name: Frontend install
-        run: |
-          npm config set fund false
-          npm config set audit false
-          npm install --no-audit --no-fund
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
 
-      - name: Frontend build
-        run: npm run build
+      - name: Install backend dependencies
+        run: npm --prefix backend install --no-audit --no-fund
 
-      # ---------- Backend ----------
-      - name: Backend install
-        working-directory: backend
-        run: |
-          npm config set fund false
-          npm config set audit false
-          npm install --no-audit --no-fund
-
-      - name: Backend build
-        working-directory: backend
-        run: npm run build
+      - name: Run fullstack CI
+        run: npm run ci
