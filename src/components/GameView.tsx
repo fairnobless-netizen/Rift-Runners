@@ -24,10 +24,14 @@ import {
 import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../game/types';
 import {
   buyShopSku,
+  fetchLeaderboard,
   fetchShopCatalog,
   fetchShopOwned,
   fetchLedger,
   fetchWallet,
+  type LeaderboardMeEntry,
+  type LeaderboardMode,
+  type LeaderboardTopEntry,
   type ShopCatalogItem,
   type WalletLedgerEntry,
 } from '../game/wallet';
@@ -147,6 +151,12 @@ export default function GameView(): JSX.Element {
   const [tickDebugStats, setTickDebugStats] = useState<TickDebugStats | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'audio' | 'account'>('audio');
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [leaderboardMode, setLeaderboardMode] = useState<LeaderboardMode>('solo');
+  const [leaderboardTop, setLeaderboardTop] = useState<LeaderboardTopEntry[]>([]);
+  const [leaderboardMe, setLeaderboardMe] = useState<LeaderboardMeEntry | null>(null);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>({ musicEnabled: true, sfxEnabled: true });
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
@@ -556,10 +566,37 @@ export default function GameView(): JSX.Element {
     }
   }, []);
 
+  const loadLeaderboard = useCallback(async (mode: LeaderboardMode): Promise<void> => {
+    setLeaderboardLoading(true);
+    setLeaderboardError(null);
+    try {
+      const response = await fetchLeaderboard(mode);
+      if (!response) {
+        setLeaderboardError('Failed to load leaderboard');
+        setLeaderboardTop([]);
+        setLeaderboardMe(null);
+        return;
+      }
+      setLeaderboardTop(response.top);
+      setLeaderboardMe(response.me);
+    } catch {
+      setLeaderboardError('Failed to load leaderboard');
+      setLeaderboardTop([]);
+      setLeaderboardMe(null);
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isStoreOpen) return;
     void loadStore();
   }, [isStoreOpen, loadStore]);
+
+  useEffect(() => {
+    if (!leaderboardOpen) return;
+    void loadLeaderboard(leaderboardMode);
+  }, [leaderboardMode, leaderboardOpen, loadLeaderboard]);
 
   const onBuy = async (sku: string): Promise<void> => {
     if (purchaseBusySku) return;
@@ -637,7 +674,7 @@ export default function GameView(): JSX.Element {
           <div className="left-nav" aria-label="Navigation quick controls">
             <div className="nav-grid">
               <button type="button" className="nav-btn" aria-label="Map placeholder">🗺️</button>
-              <button type="button" className="nav-btn" aria-label="Quest placeholder">📜</button>
+              <button type="button" className="nav-btn" aria-label="Leaderboard" onClick={() => setLeaderboardOpen(true)}>🏆</button>
               <button type="button" className="nav-btn" aria-label="Inventory placeholder">🎒</button>
               <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}>🛍️</button>
               <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>⚙️</button>
@@ -748,6 +785,56 @@ export default function GameView(): JSX.Element {
         </aside>
       </section>
 
+
+      {leaderboardOpen && (
+        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Leaderboard">
+          <div className="settings-modal">
+            <div className="settings-header">
+              <strong>Leaderboard</strong>
+              <button type="button" onClick={() => setLeaderboardOpen(false)}>Close</button>
+            </div>
+            <div className="settings-tabs">
+              {(['solo', 'duo', 'trio', 'squad'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={leaderboardMode === mode ? 'active' : ''}
+                  onClick={() => setLeaderboardMode(mode)}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <div className="settings-panel">
+              {leaderboardLoading ? (
+                <div>Loading leaderboard...</div>
+              ) : leaderboardError ? (
+                <div>{leaderboardError}</div>
+              ) : leaderboardTop.length === 0 ? (
+                <div>No scores yet for this mode.</div>
+              ) : (
+                leaderboardTop.map((entry) => (
+                  <div key={`${entry.rank}-${entry.tgUserId}`} className="settings-kv">
+                    <span>#{entry.rank} {entry.displayName}</span>
+                    <strong>{entry.score}</strong>
+                  </div>
+                ))
+              )}
+
+              <hr />
+              <div className="settings-kv"><span>You</span><strong /></div>
+              {leaderboardMe ? (
+                <div className="settings-kv">
+                  <span>Rank: {leaderboardMe.rank ?? '—'}</span>
+                  <strong>Score: {leaderboardMe.score}</strong>
+                </div>
+              ) : (
+                <div>No personal record yet.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {isStoreOpen && (
         <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Store">
