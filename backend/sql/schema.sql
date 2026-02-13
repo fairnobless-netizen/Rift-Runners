@@ -180,3 +180,30 @@ CREATE TABLE IF NOT EXISTS room_members (
 
 CREATE INDEX IF NOT EXISTS idx_room_members_room
   ON room_members (room_code);
+
+-- =========================================
+-- FRIENDS (Stage 4.1B)
+-- =========================================
+
+CREATE TABLE IF NOT EXISTS friend_edges (
+  tg_user_id_a TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  tg_user_id_b TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tg_user_id_a, tg_user_id_b)
+);
+
+-- Store requests as directional (from -> to)
+CREATE TABLE IF NOT EXISTS friend_requests (
+  from_tg_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  to_tg_user_id   TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'PENDING', -- PENDING | ACCEPTED | DECLINED
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (from_tg_user_id, to_tg_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_friend_requests_to_status_created
+  ON friend_requests (to_tg_user_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_friend_requests_from_status_created
+  ON friend_requests (from_tg_user_id, status, created_at DESC);

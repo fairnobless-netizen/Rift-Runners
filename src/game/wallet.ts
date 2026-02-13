@@ -67,6 +67,32 @@ export type MyRoomEntry = {
   memberCount: number;
 };
 
+
+export type FriendEntry = {
+  tgUserId: string;
+  displayName: string;
+  createdAt?: string;
+};
+
+export type IncomingFriendRequest = {
+  fromTgUserId: string;
+  displayName: string;
+  createdAt: string;
+};
+
+export type OutgoingFriendRequest = {
+  toTgUserId: string;
+  displayName: string;
+  createdAt: string;
+  status: string;
+};
+
+export type FriendsPayload = {
+  friends: FriendEntry[];
+  incoming: IncomingFriendRequest[];
+  outgoing: OutgoingFriendRequest[];
+};
+
 function getToken(): string | null {
   try {
     const t = localStorage.getItem(SESSION_TOKEN_KEY);
@@ -274,6 +300,89 @@ export async function submitLeaderboard(mode: LeaderboardMode, score: number): P
   }
 }
 
+
+
+export async function fetchFriends(): Promise<FriendsPayload | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/friends', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json();
+    if (!json?.ok) return null;
+
+    return {
+      friends: Array.isArray(json.friends)
+        ? json.friends.map((entry: any) => ({
+          tgUserId: String(entry?.tgUserId ?? ''),
+          displayName: String(entry?.displayName ?? 'Unknown'),
+          createdAt: entry?.createdAt ? String(entry.createdAt) : undefined,
+        }))
+        : [],
+      incoming: Array.isArray(json.incoming)
+        ? json.incoming.map((entry: any) => ({
+          fromTgUserId: String(entry?.fromTgUserId ?? ''),
+          displayName: String(entry?.displayName ?? 'Unknown'),
+          createdAt: String(entry?.createdAt ?? ''),
+        }))
+        : [],
+      outgoing: Array.isArray(json.outgoing)
+        ? json.outgoing.map((entry: any) => ({
+          toTgUserId: String(entry?.toTgUserId ?? ''),
+          displayName: String(entry?.displayName ?? 'Unknown'),
+          createdAt: String(entry?.createdAt ?? ''),
+          status: String(entry?.status ?? 'PENDING'),
+        }))
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function requestFriend(toTgUserId: string): Promise<{ ok: boolean; error?: string } | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/friends/request', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ toTgUserId }),
+    });
+    const json = await res.json();
+    if (!json?.ok) return { ok: false, error: String(json?.error ?? 'request_failed') };
+    return { ok: true };
+  } catch {
+    return null;
+  }
+}
+
+export async function respondFriend(fromTgUserId: string, action: 'accept' | 'decline'): Promise<{ ok: boolean; error?: string } | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/friends/respond', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ fromTgUserId, action }),
+    });
+    const json = await res.json();
+    if (!json?.ok) return { ok: false, error: String(json?.error ?? 'respond_failed') };
+    return { ok: true };
+  } catch {
+    return null;
+  }
+}
 
 export async function createRoom(capacity: 2 | 3 | 4): Promise<{ roomCode: string; capacity: number } | null> {
   const token = getToken();

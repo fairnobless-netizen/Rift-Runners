@@ -11,6 +11,7 @@ import { walletRouter } from './api/wallet.routes';
 import { shopRouter } from './api/shop.routes';
 import { leaderboardRouter } from './api/leaderboard.routes';
 import { roomsRouter } from './api/rooms.routes';
+import { friendsRouter } from './api/friends.routes';
 import { runMigrationsFromSchemaSql } from './db/migrate';
 import { startWsGateway } from './ws/gateway';
 
@@ -42,6 +43,7 @@ app.use('/api', walletRouter);
 app.use('/api', shopRouter);
 app.use('/api/leaderboard', leaderboardRouter);
 app.use('/api/rooms', roomsRouter);
+app.use('/api/friends', friendsRouter);
 
 // frontend static
 app.use(express.static(frontendDistPath));

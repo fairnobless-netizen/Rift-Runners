@@ -25,6 +25,7 @@ import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../
 import {
   buyShopSku,
   createRoom,
+  fetchFriends,
   fetchLeaderboard,
   fetchMyRooms,
   fetchRoom,
@@ -33,10 +34,15 @@ import {
   fetchLedger,
   fetchWallet,
   joinRoom,
+  requestFriend,
+  respondFriend,
+  type FriendEntry,
+  type IncomingFriendRequest,
   type LeaderboardMeEntry,
   type LeaderboardMode,
   type LeaderboardTopEntry,
   type MyRoomEntry,
+  type OutgoingFriendRequest,
   type RoomMember,
   type RoomState,
   type ShopCatalogItem,
@@ -79,7 +85,7 @@ type AccountInfo = {
   nameChangeRemaining: number;
 };
 
-type MultiplayerTab = 'rooms';
+type MultiplayerTab = 'rooms' | 'friends';
 
 type TickDebugStats = {
   snapshotTick: number;
@@ -174,6 +180,12 @@ export default function GameView(): JSX.Element {
   const [myRooms, setMyRooms] = useState<MyRoomEntry[]>([]);
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [friendsError, setFriendsError] = useState<string | null>(null);
+  const [friendTargetDraft, setFriendTargetDraft] = useState('');
+  const [friendsList, setFriendsList] = useState<FriendEntry[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<IncomingFriendRequest[]>([]);
+  const [outgoingRequests, setOutgoingRequests] = useState<OutgoingFriendRequest[]>([]);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>({ musicEnabled: true, sfxEnabled: true });
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
@@ -672,6 +684,91 @@ export default function GameView(): JSX.Element {
     }
   }, [currentRoom?.roomCode]);
 
+  const loadFriends = useCallback(async (): Promise<void> => {
+    setFriendsLoading(true);
+    setFriendsError(null);
+    try {
+      const payload = await fetchFriends();
+      if (!payload) {
+        setFriendsError('Failed to load friends');
+        setFriendsList([]);
+        setIncomingRequests([]);
+        setOutgoingRequests([]);
+        return;
+      }
+
+      setFriendsList(payload.friends);
+      setIncomingRequests(payload.incoming);
+      setOutgoingRequests(payload.outgoing);
+    } catch {
+      setFriendsError('Failed to load friends');
+      setFriendsList([]);
+      setIncomingRequests([]);
+      setOutgoingRequests([]);
+    } finally {
+      setFriendsLoading(false);
+    }
+  }, []);
+
+  const onSendFriendRequest = useCallback(async (): Promise<void> => {
+    const toTgUserId = friendTargetDraft.trim();
+    if (!toTgUserId) return;
+
+    setFriendsError(null);
+    const result = await requestFriend(toTgUserId);
+    if (!result) {
+      setFriendsError('Request failed');
+      return;
+    }
+    if (!result.ok) {
+      setFriendsError(result.error ?? 'Request failed');
+      return;
+    }
+
+    setFriendTargetDraft('');
+    await loadFriends();
+  }, [friendTargetDraft, loadFriends]);
+
+  const onRespondFriendRequest = useCallback(async (fromTgUserId: string, action: 'accept' | 'decline'): Promise<void> => {
+    setFriendsError(null);
+    const result = await respondFriend(fromTgUserId, action);
+    if (!result) {
+      setFriendsError('Action failed');
+      return;
+    }
+    if (!result.ok) {
+      setFriendsError(result.error ?? 'Action failed');
+      return;
+    }
+
+    await loadFriends();
+  }, [loadFriends]);
+
+  const onInviteFriend = useCallback(async (): Promise<void> => {
+    let roomCode = currentRoom?.roomCode;
+    if (!roomCode) {
+      const created = await createRoom(2);
+      if (!created) {
+        setFriendsError('Failed to create room for invite');
+        return;
+      }
+      roomCode = created.roomCode;
+      await joinRoomByCode(roomCode);
+    }
+
+    if (!roomCode) {
+      setFriendsError('No room to invite');
+      return;
+    }
+
+    const inviteUrl = `${window.location.origin}${window.location.pathname}?startapp=room_${roomCode}`;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+    } catch {
+      setFriendsError('Failed to copy invite link');
+    }
+  }, [currentRoom?.roomCode, joinRoomByCode]);
+
 
   useEffect(() => {
     if (!isStoreOpen) return;
@@ -685,8 +782,12 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     if (!multiplayerOpen) return;
-    void loadRooms();
-  }, [loadRooms, multiplayerOpen]);
+    if (multiplayerTab === 'rooms') {
+      void loadRooms();
+      return;
+    }
+    void loadFriends();
+  }, [loadFriends, loadRooms, multiplayerOpen, multiplayerTab]);
 
   useEffect(() => {
     if (!token) return;
@@ -1005,9 +1106,12 @@ export default function GameView(): JSX.Element {
             </div>
             <div className="settings-tabs">
               <button type="button" className={multiplayerTab === 'rooms' ? 'active' : ''} onClick={() => setMultiplayerTab('rooms')}>Rooms</button>
+              <button type="button" className={multiplayerTab === 'friends' ? 'active' : ''} onClick={() => setMultiplayerTab('friends')}>Friends</button>
             </div>
 
             <div className="settings-panel">
+              {multiplayerTab === 'rooms' ? (
+                <>
               <div className="room-create-row">
                 <span>Create room</span>
                 <div className="room-create-actions">
@@ -1070,6 +1174,70 @@ export default function GameView(): JSX.Element {
                   </>
                 )}
               </div>
+                </>
+              ) : (
+                <>
+                  <div className="room-join-row">
+                    <input
+                      type="text"
+                      value={friendTargetDraft}
+                      onChange={(event) => setFriendTargetDraft(event.target.value)}
+                      placeholder="tg_user_id"
+                    />
+                    <button type="button" onClick={() => { void onSendFriendRequest(); }}>Send request</button>
+                  </div>
+
+                  {friendsError ? <div>{friendsError}</div> : null}
+                  {friendsLoading ? <div>Loading friends...</div> : null}
+
+                  <div className="room-section">
+                    <strong>Incoming</strong>
+                    {incomingRequests.length === 0 ? (
+                      <div>No incoming requests.</div>
+                    ) : (
+                      incomingRequests.map((request) => (
+                        <div key={request.fromTgUserId} className="friend-list-item">
+                          <span>{request.displayName}</span>
+                          <strong>{request.fromTgUserId}</strong>
+                          <div className="friend-actions">
+                            <button type="button" onClick={() => { void onRespondFriendRequest(request.fromTgUserId, 'accept'); }}>Accept</button>
+                            <button type="button" onClick={() => { void onRespondFriendRequest(request.fromTgUserId, 'decline'); }}>Decline</button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="room-section">
+                    <strong>Outgoing</strong>
+                    {outgoingRequests.length === 0 ? (
+                      <div>No outgoing requests.</div>
+                    ) : (
+                      outgoingRequests.map((request) => (
+                        <div key={request.toTgUserId} className="settings-kv">
+                          <span>{request.displayName}</span>
+                          <strong>{request.status}</strong>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="room-section">
+                    <strong>Friends</strong>
+                    {friendsList.length === 0 ? (
+                      <div>No friends yet.</div>
+                    ) : (
+                      friendsList.map((friend) => (
+                        <div key={friend.tgUserId} className="friend-list-item">
+                          <span>{friend.displayName}</span>
+                          <strong>{friend.tgUserId}</strong>
+                          <button type="button" onClick={() => { void onInviteFriend(); }}>Invite</button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
