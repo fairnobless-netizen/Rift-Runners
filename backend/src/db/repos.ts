@@ -248,6 +248,7 @@ export type StoreCatalogItemRecord = {
   description: string;
   priceStars: number;
   active: boolean;
+  purchaseEnabled: boolean;
   sortOrder: number;
 };
 
@@ -259,10 +260,11 @@ export async function listStoreCatalog(): Promise<StoreCatalogItemRecord[]> {
     description: string;
     price_stars: number;
     active: boolean;
+    purchase_enabled: boolean;
     sort_order: number;
   }>(
     `
-    SELECT sku, category, title, description, price_stars, active, sort_order
+    SELECT sku, category, title, description, price_stars, active, purchase_enabled, sort_order
     FROM store_items
     WHERE active = TRUE
     ORDER BY category ASC, sort_order ASC, sku ASC
@@ -276,6 +278,7 @@ export async function listStoreCatalog(): Promise<StoreCatalogItemRecord[]> {
     description: String(row.description ?? ''),
     priceStars: Number(row.price_stars ?? 0),
     active: Boolean(row.active),
+    purchaseEnabled: Boolean(row.purchase_enabled),
     sortOrder: Number(row.sort_order ?? 0),
   }));
 }
@@ -302,9 +305,10 @@ export async function buyStoreSkuTx(params: {
     const itemRes = await client.query<{
       sku: string;
       active: boolean;
+      purchase_enabled: boolean;
       price_stars: number;
     }>(
-      `SELECT sku, active, price_stars FROM store_items WHERE sku = $1 LIMIT 1`,
+      `SELECT sku, active, purchase_enabled, price_stars FROM store_items WHERE sku = $1 LIMIT 1`,
       [params.sku],
     );
 
@@ -313,6 +317,13 @@ export async function buyStoreSkuTx(params: {
       await client.query('ROLLBACK');
       const error = new Error('sku_not_found');
       (error as any).code = 'SKU_NOT_FOUND';
+      throw error;
+    }
+
+    if (!item.purchase_enabled) {
+      await client.query('ROLLBACK');
+      const error = new Error('not_purchasable');
+      (error as any).code = 'NOT_PURCHASABLE';
       throw error;
     }
 

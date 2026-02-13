@@ -593,3 +593,10 @@ button:disabled {
   color: #c3cfef;
   font-size: 0.88rem;
 }
+
+.store-soon-badge {
+  margin-left: 0.35rem;
+  font-size: 0.7rem;
+  color: #f6c76a;
+  font-style: normal;
+}

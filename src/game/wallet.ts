@@ -19,6 +19,7 @@ export type ShopCatalogItem = {
   description: string;
   priceStars: number;
   active: boolean;
+  purchaseEnabled: boolean;
   sortOrder: number;
 };
 

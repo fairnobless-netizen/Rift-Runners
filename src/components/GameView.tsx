@@ -773,22 +773,26 @@ export default function GameView(): JSX.Element {
                   .filter((item) => item.category === storeTab)
                   .map((item) => {
                     const isOwned = ownedSkus.includes(item.sku);
+                    const isPurchasable = item.purchaseEnabled !== false;
+                    const buyDisabled = isOwned || purchaseBusySku !== null || !isPurchasable;
                     return (
                       <div key={item.sku} className="store-card">
                         <div className="store-card-head">
                           <strong>{item.title}</strong>
-                          <span>{item.priceStars}⭐</span>
+                          <span>
+                            {item.priceStars}⭐ {!isPurchasable ? <em className="store-soon-badge">Coming soon</em> : null}
+                          </span>
                         </div>
                         <div className="store-card-desc">{item.description || '—'}</div>
                         <button
                           type="button"
                           className="shop-buy-btn"
-                          disabled={isOwned || purchaseBusySku !== null}
+                          disabled={buyDisabled}
                           onClick={() => {
                             void onBuy(item.sku);
                           }}
                         >
-                          {isOwned ? 'Owned' : purchaseBusySku === item.sku ? 'Buying...' : 'Buy'}
+                          {isOwned ? 'Owned' : purchaseBusySku === item.sku ? 'Buying...' : !isPurchasable ? 'Soon' : 'Buy'}
                         </button>
                       </div>
                     );
