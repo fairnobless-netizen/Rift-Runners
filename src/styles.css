@@ -871,3 +871,62 @@ button:disabled {
   display: flex;
   gap: 0.35rem;
 }
+
+.tutorial-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 85;
+  background: rgba(6, 9, 17, 0.74);
+  pointer-events: auto;
+}
+
+.tutorial-spotlight {
+  position: fixed;
+  border-radius: 12px;
+  border: 2px solid #9db2ff;
+  box-shadow: 0 0 0 200vmax rgba(2, 4, 10, 0.65), 0 0 26px rgba(157, 178, 255, 0.75);
+  pointer-events: none;
+}
+
+.tutorial-card {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--safe-bottom) + 1rem);
+  transform: translateX(-50%);
+  width: min(92vw, 420px);
+  border: 1px solid #4f63a8;
+  border-radius: 12px;
+  background: #0c1226f2;
+  padding: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.tutorial-card p {
+  margin: 0;
+  color: #ccd6f8;
+}
+
+.waiting-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 75;
+  display: grid;
+  place-items: center;
+  background: rgba(4, 8, 18, 0.72);
+}
+
+.waiting-overlay__card {
+  width: min(90vw, 420px);
+  border: 1px solid #40548f;
+  border-radius: 12px;
+  background: #0d142af0;
+  padding: 0.9rem;
+  text-align: center;
+}
+
+.waiting-overlay__card p {
+  margin: 0.35rem 0 0;
+  color: #c1cdef;
+}
