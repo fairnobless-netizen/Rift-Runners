@@ -37,6 +37,9 @@ jobs:
       - name: Run Playwright Probe E2E
         run: npx playwright test e2e/probe.spec.ts
 
+      - name: Run Playwright Mobile Landscape UI E2E
+        run: npm run test:e2e:ui
+
       - name: Upload Probe artifacts
         if: always()
         uses: actions/upload-artifact@v4
