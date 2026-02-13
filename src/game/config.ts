@@ -1,7 +1,7 @@
 import type { AssetRegistry } from './types';
 
 export const GAME_CONFIG = {
-  gridWidth: 7,
+  gridWidth: 9,
   gridHeight: 7,
   tileSize: 64,
   moveDurationMs: 120,

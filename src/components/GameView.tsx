@@ -323,8 +323,8 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     if (!mountRef.current) return;
 
-    const width = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
-    const height = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
+    const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
+    const baseHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
 
     const scene = new GameScene(controlsRef.current);
     sceneRef.current = scene;
@@ -332,13 +332,14 @@ export default function GameView(): JSX.Element {
     const game = new Phaser.Game({
       type: Phaser.AUTO,
       parent: mountRef.current,
-      width,
-      height,
+      width: baseWidth,
+      height: baseHeight,
       transparent: true,
       scene: [scene],
       scale: {
-        mode: Phaser.Scale.FIT,
-        autoCenter: Phaser.Scale.CENTER_BOTH,
+        // Key change: canvas resizes to the container (rectangular)
+        mode: Phaser.Scale.RESIZE,
+        autoCenter: Phaser.Scale.NO_CENTER,
       },
     });
 
