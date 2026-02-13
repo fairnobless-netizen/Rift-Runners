@@ -108,6 +108,7 @@ type TelemetryRun = TelemetryExportSnapshot;
 
 const TELEMETRY_DURATION_MS = 10_000;
 const TELEMETRY_CADENCE_MS = 100;
+const WS_OVERLAY_COLLAPSED_STORAGE_KEY = 'ws-debug-overlay-collapsed';
 
 export function WsDebugOverlay({
   connected,
@@ -150,6 +151,11 @@ export function WsDebugOverlay({
   localInputSeq: number;
   getLocalPlayerPosition?: () => { x: number; y: number } | null;
 }) {
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(WS_OVERLAY_COLLAPSED_STORAGE_KEY) === '1';
+  });
+
   const lastSnapshot = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -181,6 +187,11 @@ export function WsDebugOverlay({
   useEffect(() => {
     latestLocalInputSeqRef.current = localInputSeq;
   }, [localInputSeq]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(WS_OVERLAY_COLLAPSED_STORAGE_KEY, isCollapsed ? '1' : '0');
+  }, [isCollapsed]);
 
   const downloadJson = (data: unknown, filename: string) => {
     const json = JSON.stringify(data, null, 2);
@@ -460,24 +471,34 @@ export function WsDebugOverlay({
     return date.toLocaleTimeString('en-GB', { hour12: false });
   };
 
+  if (isCollapsed) {
+    return (
+      <button
+        type="button"
+        className="ws-debug-overlay-tray"
+        onClick={() => setIsCollapsed(false)}
+        aria-label="Expand WS debug overlay"
+      >
+        WS Debug
+      </button>
+    );
+  }
+
   return (
-    <div
-      style={{
-        position: 'fixed',
-        right: 10,
-        bottom: 10,
-        width: 360,
-        background: 'rgba(0,0,0,0.82)',
-        color: '#0f0',
-        fontSize: 12,
-        padding: 10,
-        zIndex: 9999,
-        borderRadius: 10,
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+    <div className="ws-debug-overlay">
+      <div className="ws-debug-overlay-header">
         <div>WS: {connected ? 'CONNECTED' : 'OFFLINE'}</div>
-        <div>{lastSnapshot ? `tick: ${lastSnapshot.tick}` : 'no snapshot'}</div>
+        <div className="ws-debug-overlay-header-right">
+          <div>{lastSnapshot ? `tick: ${lastSnapshot.tick}` : 'no snapshot'}</div>
+          <button
+            type="button"
+            className="ws-debug-overlay-toggle"
+            onClick={() => setIsCollapsed(true)}
+            aria-label="Collapse WS debug overlay"
+          >
+            Collapse
+          </button>
+        </div>
       </div>
 
       <div style={{ marginTop: 8 }}>
