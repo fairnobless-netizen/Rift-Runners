@@ -16,18 +16,26 @@ html.telegram-fullview {
   --tg-top-overlay: 20px;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
+html,
 body {
+  height: 100%;
   margin: 0;
-  min-height: 100vh;
+  overflow: hidden;
+}
+
+body {
   background: radial-gradient(circle at top, #13192c, #070a12 60%);
 }
 
 #root {
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
 }
 
 .page {
@@ -35,9 +43,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--shell-gap);
-  min-height: 100vh;
-  min-height: 100dvh;
-  width: 100vw;
+  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
+  min-height: 0;
+  width: 100%;
   max-width: none;
   margin: 0;
   padding-top: calc(var(--safe-top) + var(--tg-top-overlay));
@@ -134,10 +144,12 @@ body {
 }
 
 .control-column--right {
+  --ui-scale: 1;
   flex-direction: column;
   justify-content: flex-start;
-  gap: 0.55rem;
+  gap: calc(0.55rem * var(--ui-scale));
   align-self: stretch;
+  font-size: calc(1rem * var(--ui-scale));
 }
 
 .right-panel {
@@ -146,27 +158,27 @@ body {
   background: #0f1630cc;
   border: 1px solid #27335c;
   border-radius: 12px;
-  padding: 0.5rem;
+  padding: calc(0.5rem * var(--ui-scale));
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
+  gap: calc(0.5rem * var(--ui-scale));
 }
 
 .right-panel--zoom {
-  padding: 0.45rem;
-  gap: 0.2rem;
+  padding: calc(0.45rem * var(--ui-scale));
+  gap: calc(0.2rem * var(--ui-scale));
 }
 
 .boost-slot {
   width: 100%;
-  min-height: 38px;
+  min-height: calc(38px * var(--ui-scale));
   border-radius: 10px;
   border: 1px dashed #425180;
   color: #a6b2d8;
   display: grid;
   place-items: center;
-  font-size: 0.7rem;
+  font-size: calc(0.7rem * var(--ui-scale));
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -208,6 +220,11 @@ button {
   background: #2f3f72;
   color: #ecf1ff;
   font-weight: 700;
+}
+
+.control-column--right button {
+  font-size: calc(0.82rem * var(--ui-scale));
+  padding: calc(0.45rem * var(--ui-scale)) calc(0.6rem * var(--ui-scale));
 }
 
 button:disabled {
@@ -254,24 +271,24 @@ button:disabled {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: calc(0.35rem * var(--ui-scale));
 }
 
 .shop-buy-btn {
   width: 100%;
-  min-height: 36px;
-  font-size: 0.68rem;
+  min-height: calc(36px * var(--ui-scale));
+  font-size: calc(0.68rem * var(--ui-scale));
   background: #38508a;
   border-radius: 8px;
-  padding: 0.35rem;
+  padding: calc(0.35rem * var(--ui-scale));
 }
 
 .bomb-btn,
 .detonate-btn {
   width: 100%;
-  min-height: 64px;
+  min-height: calc(64px * var(--ui-scale));
   border-radius: 999px;
-  font-size: 0.9rem;
+  font-size: calc(0.9rem * var(--ui-scale));
   touch-action: manipulation;
 }
 
@@ -288,6 +305,10 @@ button:disabled {
     --side-w: clamp(84px, 16vw, 116px);
   }
 
+  .control-column--right {
+    --ui-scale: 0.94;
+  }
+
   .hud-metric--secondary {
     display: none;
   }
@@ -298,18 +319,16 @@ button:disabled {
     --side-w: clamp(72px, 17vw, 96px);
   }
 
+  .control-column--right {
+    --ui-scale: 0.86;
+  }
+
   .control-column {
     padding: 0.35rem;
   }
 
   .boost-slot {
-    min-height: 30px;
-  }
-
-  .bomb-btn,
-  .detonate-btn {
-    min-height: 56px;
-    font-size: 0.82rem;
+    min-height: calc(30px * var(--ui-scale));
   }
 }
 
