@@ -920,7 +920,7 @@ export class GameScene extends Phaser.Scene {
       facing: 'left',
       state: 'idle',
       kind,
-      moveIntervalMs: kind === 'elite' ? Math.max(120, Math.floor(GAME_CONFIG.enemyMoveIntervalMs * 0.7)) : GAME_CONFIG.enemyMoveIntervalMs,
+      moveIntervalMs: kind === 'elite' ? Math.max(GAME_CONFIG.enemyMoveIntervalMinMs, Math.floor(GAME_CONFIG.enemyMoveIntervalMs * 0.7)) : GAME_CONFIG.enemyMoveIntervalMs,
     });
     this.enemyNextMoveAt.set(key, this.time.now);
   }
