@@ -7,7 +7,7 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --tg-top-overlay: 0px;
-  --header-h: clamp(42px, 7vh, 56px);
+  --header-h: clamp(34px, 5.2vh, 46px);
   --shell-gap: clamp(0.35rem, 1.5vw, 0.7rem);
   --side-w: clamp(86px, 14vw, 132px);
   --ui-scale: 1;
@@ -72,9 +72,8 @@ body {
   border-right: 0;
   border-radius: 0;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0.3rem 0.7rem;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
   overflow: hidden;
   flex: 0 0 auto;
 }
@@ -92,7 +91,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  margin-top: 0.2rem;
+  margin-top: 0;
   min-width: 0;
   flex-wrap: nowrap;
   overflow-x: auto;
@@ -147,18 +146,64 @@ body {
 .control-column--left {
   --ui-scale-left: var(--ui-scale);
   flex-direction: column;
-  justify-content: center;
-  gap: calc(0.4rem * var(--ui-scale-left));
+  justify-content: space-between;
+  gap: calc(0.5rem * var(--ui-scale-left));
   align-self: stretch;
 }
 
 .control-column--right {
   --ui-scale-right: var(--ui-scale);
   flex-direction: column;
-  justify-content: flex-start;
+  justify-content: center;
   gap: calc(0.55rem * var(--ui-scale-right));
   align-self: stretch;
   font-size: calc(1rem * var(--ui-scale-right));
+}
+
+.left-nav {
+  width: 100%;
+}
+
+.nav-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(0.32rem * var(--ui-scale-left));
+}
+
+.nav-btn {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  font-size: calc(0.95rem * var(--ui-scale-left));
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: #2a3764;
+}
+
+.left-joystick {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.joystick-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: calc(0.35rem * var(--ui-scale-left));
+}
+
+.right-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: calc(0.55rem * var(--ui-scale-right));
+  flex: 1;
+  width: 100%;
 }
 
 .right-panel {
@@ -181,7 +226,8 @@ body {
 
 .boost-slot {
   width: 100%;
-  min-height: calc(38px * var(--ui-scale-right));
+  aspect-ratio: 1.25 / 1;
+  min-height: calc(30px * var(--ui-scale-right));
   border-radius: 10px;
   border: 1px dashed #425180;
   color: #a6b2d8;
@@ -299,8 +345,11 @@ button:disabled {
 .bomb-btn,
 .detonate-btn {
   width: 100%;
-  min-height: calc(64px * var(--ui-scale-right));
-  border-radius: 999px;
+  aspect-ratio: 1 / 1;
+  border-radius: 9999px;
+  max-width: calc(78px * var(--ui-scale-right));
+  min-height: 0;
+  align-self: center;
   font-size: calc(0.9rem * var(--ui-scale-right));
   touch-action: manipulation;
 }
@@ -350,7 +399,7 @@ button:disabled {
     --ui-scale: clamp(0.75, calc(100vw / 900), 1);
     --ui-scale-left: clamp(0.76, calc(100vw / 920), 1);
     --ui-scale-right: clamp(0.74, calc(100vw / 880), 1);
-    --header-h: clamp(42px, 7vh, 52px);
+    --header-h: clamp(32px, 5vh, 42px);
     --side-w: clamp(72px, 15vw, 108px);
   }
 
@@ -364,16 +413,10 @@ button:disabled {
   }
 
   .hud {
-    padding: 0.24rem 0.55rem;
-  }
-
-  .hud h1 {
-    font-size: clamp(0.78rem, calc(0.9rem * var(--ui-scale)), 0.93rem);
-    line-height: 1.08;
+    padding: 0.16rem 0.48rem;
   }
 
   .stats-row {
-    margin-top: 0.12rem;
     gap: calc(0.22rem * var(--ui-scale));
     font-size: clamp(0.65rem, calc(0.8rem * var(--ui-scale)), 0.78rem);
   }
@@ -392,6 +435,10 @@ button:disabled {
 
   .control-column--left {
     align-items: center;
+  }
+
+  .nav-grid {
+    gap: calc(0.24rem * var(--ui-scale-left));
   }
 }
 
@@ -457,13 +504,13 @@ button:disabled {
   }
 
   .boost-slot {
-    min-height: 32px;
+    min-height: 28px;
     font-size: 0.66rem;
   }
 
   .bomb-btn,
   .detonate-btn {
-    min-height: 54px;
+    max-width: 58px;
     font-size: 0.86rem;
   }
 }
