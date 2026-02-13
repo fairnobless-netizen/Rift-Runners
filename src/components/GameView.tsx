@@ -1182,7 +1182,17 @@ export default function GameView(): JSX.Element {
       {showBootSplash && (
         <div className={`boot-splash ${bootSplashClosing ? 'boot-splash--closing' : ''}`} role="status" aria-live="polite">
           <div className="boot-splash-card">
-            <h2>Rift Runners</h2>
+            {/* Future swap hook: replace inline SVG with <img src="/assets/ui/splash/logo_rift_runners.png" alt="Rift Runners" /> when binary assets are available. */}
+            <svg className="boot-splash-logo" viewBox="0 0 860 180" role="img" aria-label="Rift Runners">
+              <defs>
+                <linearGradient id="bootLogoGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#69d1ff" />
+                  <stop offset="55%" stopColor="#8f92ff" />
+                  <stop offset="100%" stopColor="#d683ff" />
+                </linearGradient>
+              </defs>
+              <text x="50%" y="50%" dominantBaseline="middle" textAnchor="middle">RIFT RUNNERS</text>
+            </svg>
             <div className="boot-splash-progress-row">
               <div className="boot-splash-progress-track" aria-label="Asset loading progress">
                 <div className="boot-splash-progress-fill" style={{ width: `${bootProgressPercent}%` }} />

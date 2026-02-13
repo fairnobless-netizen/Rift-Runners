@@ -649,9 +649,41 @@ button:disabled {
   display: grid;
   place-items: center;
   padding: 1rem;
-  background: radial-gradient(circle at 50% 20%, #1a2140, #070a12 62%);
+  /* Future swap hook: replace gradients with background-image: url('/assets/ui/splash/splash_bg.webp'); once binary assets are available. */
+  background:
+    radial-gradient(circle at 18% 22%, #5f4ee633 0%, #5f4ee600 35%),
+    radial-gradient(circle at 84% 30%, #49a9ff2b 0%, #49a9ff00 38%),
+    radial-gradient(circle at 50% 56%, #8b67ff26 0%, #8b67ff00 48%),
+    radial-gradient(circle at 50% 48%, #18294acc 0%, #0b1325f0 44%, #060a14 76%),
+    linear-gradient(160deg, #040711 0%, #090f1f 45%, #060915 100%);
   opacity: 1;
   transition: opacity 300ms ease;
+  isolation: isolate;
+}
+
+.boot-splash::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.35;
+  background: transparent;
+  box-shadow:
+    6vw 10vh 0 0 #eef3ff,
+    12vw 26vh 0 0 #8cc1ff,
+    19vw 14vh 0 0 #c7d2ff,
+    23vw 62vh 0 0 #9fb8ff,
+    31vw 34vh 0 0 #e4ebff,
+    37vw 79vh 0 0 #9acbff,
+    46vw 19vh 0 0 #d9e2ff,
+    52vw 12vh 0 0 #90b9ff,
+    58vw 65vh 0 0 #f2f6ff,
+    67vw 41vh 0 0 #a3c4ff,
+    73vw 21vh 0 0 #dee6ff,
+    81vw 57vh 0 0 #96c8ff,
+    88vw 31vh 0 0 #e0e9ff,
+    93vw 74vh 0 0 #a6cfff;
 }
 
 .boot-splash--closing {
@@ -664,13 +696,35 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+  padding: clamp(0.75rem, 2.2vw, 1.2rem);
+  border: 1px solid #4a5f9d7d;
+  border-radius: 16px;
+  background: linear-gradient(160deg, #0b1326e8, #0d1731cc);
+  box-shadow: 0 12px 36px #02050fcc, inset 0 1px 0 #8db1ff1f;
+  backdrop-filter: blur(1.5px);
 }
 
-.boot-splash-card h2 {
+.boot-splash-logo {
+  display: block;
+  width: 100%;
+  max-width: 460px;
+  align-self: center;
+  overflow: visible;
+  filter: drop-shadow(0 0 10px #6ec5ff90) drop-shadow(0 0 20px #8d84ff66);
+}
+
+.boot-splash-logo text {
   margin: 0;
-  font-size: clamp(1.4rem, 4vw, 2rem);
+  fill: url(#bootLogoGradient);
+  font-size: 86px;
+  font-weight: 900;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  paint-order: stroke;
+  stroke: #e8f2ff;
+  stroke-opacity: 0.12;
+  stroke-width: 1.2px;
 }
 
 .boot-splash-progress-row {
@@ -698,6 +752,17 @@ button:disabled {
   min-height: 1.2em;
   font-size: 0.8rem;
   color: #b9c5ec;
+}
+
+@media (max-width: 560px) {
+  .boot-splash-logo text {
+    font-size: 64px;
+    letter-spacing: 0.04em;
+  }
+
+  .boot-splash-progress-track {
+    height: 12px;
+  }
 }
 
 .game-flow-overlay {
