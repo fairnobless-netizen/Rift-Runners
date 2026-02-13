@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
@@ -54,6 +54,18 @@ type PredictionStats = {
   drift: number;
   biasX: number;
   biasY: number;
+};
+
+type AudioSettings = {
+  musicEnabled: boolean;
+  sfxEnabled: boolean;
+};
+
+type AccountInfo = {
+  id: string;
+  displayName: string;
+  referralLink: string;
+  nameChangeRemaining: number;
 };
 
 type TickDebugStats = {
@@ -128,6 +140,11 @@ export default function GameView(): JSX.Element {
   const [purchaseBusySku, setPurchaseBusySku] = useState<string | null>(null);
   const [predictionStats, setPredictionStats] = useState<PredictionStats | null>(null);
   const [tickDebugStats, setTickDebugStats] = useState<TickDebugStats | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'audio' | 'account'>('audio');
+  const [audioSettings, setAudioSettings] = useState<AudioSettings>({ musicEnabled: true, sfxEnabled: true });
+  const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
+  const [displayNameDraft, setDisplayNameDraft] = useState('');
   const ws = useWsClient(token || undefined);
 
   const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
@@ -145,6 +162,61 @@ export default function GameView(): JSX.Element {
   const clearMovement = (): void => {
     setMovementFromDirection(null);
   };
+
+  const applyAudioSettings = useCallback((next: AudioSettings): void => {
+    sceneRef.current?.setAudioSettings(next);
+  }, []);
+
+  const loadSettingsAndAccount = useCallback(async (authToken: string): Promise<void> => {
+    const headers = { Authorization: `Bearer ${authToken}` };
+
+    const [settingsRes, accountRes] = await Promise.all([
+      fetch('/api/settings/me', { headers }),
+      fetch('/api/profile/account', { headers }),
+    ]);
+
+    if (settingsRes.ok) {
+      const settingsJson = await settingsRes.json();
+      if (settingsJson?.ok && settingsJson.settings) {
+        const next = {
+          musicEnabled: Boolean(settingsJson.settings.musicEnabled),
+          sfxEnabled: Boolean(settingsJson.settings.sfxEnabled),
+        };
+        setAudioSettings(next);
+        applyAudioSettings(next);
+      }
+    }
+
+    if (accountRes.ok) {
+      const accountJson = await accountRes.json();
+      if (accountJson?.ok && accountJson.account) {
+        const account: AccountInfo = {
+          id: String(accountJson.account.id ?? ''),
+          displayName: String(accountJson.account.displayName ?? ''),
+          referralLink: String(accountJson.account.referralLink ?? ''),
+          nameChangeRemaining: Number(accountJson.account.nameChangeRemaining ?? 3),
+        };
+        setAccountInfo(account);
+        setDisplayNameDraft(account.displayName);
+      }
+    }
+  }, [applyAudioSettings]);
+
+  const persistAudioSettings = useCallback(async (next: AudioSettings): Promise<void> => {
+    setAudioSettings(next);
+    applyAudioSettings(next);
+
+    if (!token) return;
+
+    await fetch('/api/settings/me', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(next),
+    });
+  }, [applyAudioSettings, token]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -213,6 +285,8 @@ export default function GameView(): JSX.Element {
           setProfileName(devIdentity.displayNameOverride ?? backendName);
         }
 
+        await loadSettingsAndAccount(token);
+
         const [w, nextCatalog, nextLedger] = await Promise.all([
           fetchWallet(),
           fetchCatalog(),
@@ -233,7 +307,7 @@ export default function GameView(): JSX.Element {
 
     // TODO backend: in production handle auth errors + refresh/retry strategy
     runAuth();
-  }, [devIdentity.displayNameOverride]);
+  }, [devIdentity.displayNameOverride, loadSettingsAndAccount]);
 
 
   useEffect(() => {
@@ -344,6 +418,7 @@ export default function GameView(): JSX.Element {
     });
 
     gameRef.current = game;
+    scene.setAudioSettings(audioSettings);
 
     return () => {
       zoomApiRef.current = null;
@@ -353,6 +428,10 @@ export default function GameView(): JSX.Element {
     };
   }, []);
 
+
+  useEffect(() => {
+    applyAudioSettings(audioSettings);
+  }, [applyAudioSettings, audioSettings]);
 
   useEffect(() => {
     sceneRef.current?.setLocalTgUserId(localTgUserId);
@@ -479,6 +558,41 @@ export default function GameView(): JSX.Element {
     }
   };
 
+  const onCopyReferral = async (): Promise<void> => {
+    if (!accountInfo?.referralLink) return;
+    try {
+      await navigator.clipboard.writeText(accountInfo.referralLink);
+    } catch {
+      // no-op
+    }
+  };
+
+  const onSubmitDisplayName = async (): Promise<void> => {
+    if (!token) return;
+    const trimmed = displayNameDraft.trim();
+    if (!trimmed) return;
+
+    const response = await fetch('/api/profile/name', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ displayName: trimmed }),
+    });
+
+    const json = await response.json().catch(() => null);
+    if (response.ok && json?.ok) {
+      setProfileName(trimmed);
+      setAccountInfo((prev) => (prev ? { ...prev, displayName: trimmed, nameChangeRemaining: Number(json.remaining ?? prev.nameChangeRemaining) } : prev));
+      return;
+    }
+
+    if (response.status === 429) {
+      setAccountInfo((prev) => (prev ? { ...prev, nameChangeRemaining: 0 } : prev));
+    }
+  };
+
   return (
     <main className="page">
       <section className="hud">
@@ -505,7 +619,7 @@ export default function GameView(): JSX.Element {
               <button type="button" className="nav-btn" aria-label="Map placeholder">🗺️</button>
               <button type="button" className="nav-btn" aria-label="Quest placeholder">📜</button>
               <button type="button" className="nav-btn" aria-label="Inventory placeholder">🎒</button>
-              <button type="button" className="nav-btn" aria-label="Settings placeholder">⚙️</button>
+              <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>⚙️</button>
             </div>
           </div>
 
@@ -627,6 +741,67 @@ export default function GameView(): JSX.Element {
           </div>
         </aside>
       </section>
+
+      {settingsOpen && (
+        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
+          <div className="settings-modal">
+            <div className="settings-header">
+              <strong>Settings</strong>
+              <button type="button" onClick={() => setSettingsOpen(false)}>Close</button>
+            </div>
+            <div className="settings-tabs">
+              <button type="button" className={settingsTab === 'audio' ? 'active' : ''} onClick={() => setSettingsTab('audio')}>Audio</button>
+              <button type="button" className={settingsTab === 'account' ? 'active' : ''} onClick={() => setSettingsTab('account')}>Account</button>
+            </div>
+
+            {settingsTab === 'audio' ? (
+              <div className="settings-panel">
+                <label className="settings-row">
+                  <span>Music</span>
+                  <input
+                    type="checkbox"
+                    checked={audioSettings.musicEnabled}
+                    onChange={(event) => {
+                      void persistAudioSettings({ ...audioSettings, musicEnabled: event.target.checked });
+                    }}
+                  />
+                </label>
+                <label className="settings-row">
+                  <span>SFX</span>
+                  <input
+                    type="checkbox"
+                    checked={audioSettings.sfxEnabled}
+                    onChange={(event) => {
+                      void persistAudioSettings({ ...audioSettings, sfxEnabled: event.target.checked });
+                    }}
+                  />
+                </label>
+              </div>
+            ) : (
+              <div className="settings-panel">
+                <div className="settings-kv"><span>ID</span><strong>{accountInfo?.id ?? '—'}</strong></div>
+                <div className="settings-kv"><span>Remaining</span><strong>{accountInfo?.nameChangeRemaining ?? 3}</strong></div>
+                <div className="settings-ref">
+                  <input type="text" readOnly value={accountInfo?.referralLink ?? ''} />
+                  <button type="button" onClick={() => { void onCopyReferral(); }}>Copy</button>
+                </div>
+                <input
+                  type="text"
+                  maxLength={32}
+                  value={displayNameDraft}
+                  onChange={(event) => setDisplayNameDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      void onSubmitDisplayName();
+                    }
+                  }}
+                  placeholder="Display name"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <WsDebugOverlay
         connected={ws.connected}

@@ -521,3 +521,53 @@ button:disabled {
     font-size: 0.86rem;
   }
 }
+
+.settings-overlay {
+  position: absolute;
+  inset: 0;
+  background: #040812cc;
+  display: grid;
+  place-items: center;
+  z-index: 40;
+  padding: 0.6rem;
+}
+
+.settings-modal {
+  width: min(92vw, 560px);
+  max-height: 88vh;
+  overflow: auto;
+  background: #0f1630;
+  border: 1px solid #2c3b6c;
+  border-radius: 12px;
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.settings-header,
+.settings-tabs,
+.settings-row,
+.settings-kv,
+.settings-ref {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.settings-tabs button.active {
+  background: #4a63b3;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.settings-ref input,
+.settings-panel > input {
+  width: 100%;
+  min-width: 0;
+}

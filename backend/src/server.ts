@@ -9,6 +9,7 @@ import { profileRouter } from './api/profile.routes';
 import { authRouter } from './api/auth.routes';
 import { walletRouter } from './api/wallet.routes';
 import { shopRouter } from './api/shop.routes';
+import { runMigrationsFromSchemaSql } from './db/migrate';
 import { startWsGateway } from './ws/gateway';
 
 const app = express();
@@ -51,16 +52,25 @@ app.get('*', (req, res, next) => {
   res.sendFile(frontendIndexPath);
 });
 
-const server = http.createServer(app);
+async function main(): Promise<void> {
+  await runMigrationsFromSchemaSql();
 
-const wsServer = startWsGateway(server);
+  const server = http.createServer(app);
+  const wsServer = startWsGateway(server);
 
-server.listen(port, () => {
-  // eslint-disable-next-line no-console
-  console.log('Boot summary', {
-    port,
-    distDir: frontendDistPath,
-    nodeEnv: process.env.NODE_ENV ?? 'development',
-    wsEnabled: wsServer ? 'yes' : 'no',
+  server.listen(port, () => {
+    // eslint-disable-next-line no-console
+    console.log('Boot summary', {
+      port,
+      distDir: frontendDistPath,
+      nodeEnv: process.env.NODE_ENV ?? 'development',
+      wsEnabled: wsServer ? 'yes' : 'no',
+    });
   });
+}
+
+void main().catch((error) => {
+  // eslint-disable-next-line no-console
+  console.error('Fatal server startup error', error);
+  process.exit(1);
 });

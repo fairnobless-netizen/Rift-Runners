@@ -272,3 +272,122 @@ export async function getPurchaseIntent(params: { id: string; tgUserId: string }
 export async function deletePurchaseIntent(params: { id: string; tgUserId: string }): Promise<void> {
   await pgQuery(`DELETE FROM purchase_intents WHERE id = $1 AND tg_user_id = $2`, [params.id, params.tgUserId]);
 }
+
+export async function getUserSettings(tgUserId: string): Promise<{ musicEnabled: boolean; sfxEnabled: boolean }> {
+  const { rows } = await pgQuery<{ music_enabled: boolean; sfx_enabled: boolean }>(
+    `SELECT music_enabled, sfx_enabled FROM user_settings WHERE tg_user_id = $1 LIMIT 1`,
+    [tgUserId],
+  );
+
+  const row = rows[0];
+  if (!row) {
+    return { musicEnabled: true, sfxEnabled: true };
+  }
+
+  return {
+    musicEnabled: Boolean(row.music_enabled),
+    sfxEnabled: Boolean(row.sfx_enabled),
+  };
+}
+
+export async function upsertUserSettings(params: {
+  tgUserId: string;
+  musicEnabled: boolean;
+  sfxEnabled: boolean;
+}): Promise<{ musicEnabled: boolean; sfxEnabled: boolean; updatedAt: number }> {
+  const now = Date.now();
+  const { rows } = await pgQuery<{ music_enabled: boolean; sfx_enabled: boolean; updated_at: number }>(
+    `
+    INSERT INTO user_settings (tg_user_id, music_enabled, sfx_enabled, updated_at)
+    VALUES ($1, $2, $3, $4)
+    ON CONFLICT (tg_user_id)
+    DO UPDATE SET
+      music_enabled = EXCLUDED.music_enabled,
+      sfx_enabled = EXCLUDED.sfx_enabled,
+      updated_at = EXCLUDED.updated_at
+    RETURNING music_enabled, sfx_enabled, updated_at
+    `,
+    [params.tgUserId, params.musicEnabled, params.sfxEnabled, now],
+  );
+
+  const row = rows[0];
+  return {
+    musicEnabled: Boolean(row.music_enabled),
+    sfxEnabled: Boolean(row.sfx_enabled),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function getUtcDayKey(now = new Date()): string {
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(now.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export async function computeNameChangeRemaining(tgUserId: string): Promise<number> {
+  const dayKey = getUtcDayKey();
+  const { rows } = await pgQuery<{ change_count: number }>(
+    `SELECT change_count FROM user_name_limits WHERE tg_user_id = $1 AND day_key = $2 LIMIT 1`,
+    [tgUserId, dayKey],
+  );
+
+  const used = Math.max(0, Number(rows[0]?.change_count ?? 0));
+  return Math.max(0, 3 - used);
+}
+
+export async function updateDisplayNameWithLimit(params: {
+  tgUserId: string;
+  displayName: string;
+}): Promise<{ ok: boolean; remaining: number }> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+  const dayKey = getUtcDayKey();
+  const now = Date.now();
+
+  try {
+    await client.query('BEGIN');
+
+    const limitRes = await client.query<{ change_count: number }>(
+      `SELECT change_count FROM user_name_limits WHERE tg_user_id = $1 AND day_key = $2 FOR UPDATE`,
+      [params.tgUserId, dayKey],
+    );
+
+    const used = Number(limitRes.rows[0]?.change_count ?? 0);
+    if (used >= 3) {
+      await client.query('ROLLBACK');
+      return { ok: false, remaining: 0 };
+    }
+
+    await client.query(
+      `UPDATE users SET display_name = $2, updated_at = $3 WHERE tg_user_id = $1`,
+      [params.tgUserId, params.displayName, now],
+    );
+
+    if (limitRes.rows[0]) {
+      await client.query(
+        `UPDATE user_name_limits SET change_count = change_count + 1, updated_at = $3 WHERE tg_user_id = $1 AND day_key = $2`,
+        [params.tgUserId, dayKey, now],
+      );
+    } else {
+      await client.query(
+        `INSERT INTO user_name_limits (tg_user_id, day_key, change_count, updated_at) VALUES ($1, $2, 1, $3)`,
+        [params.tgUserId, dayKey, now],
+      );
+    }
+
+    const nextUsedRes = await client.query<{ change_count: number }>(
+      `SELECT change_count FROM user_name_limits WHERE tg_user_id = $1 AND day_key = $2 LIMIT 1`,
+      [params.tgUserId, dayKey],
+    );
+
+    await client.query('COMMIT');
+    const remaining = Math.max(0, 3 - Number(nextUsedRes.rows[0]?.change_count ?? 0));
+    return { ok: true, remaining };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}

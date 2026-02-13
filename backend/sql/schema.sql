@@ -59,3 +59,23 @@ CREATE TABLE IF NOT EXISTS purchase_intents (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_purchase_provider_txn_id ON purchase_intents(provider_txn_id) WHERE provider_txn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_purchase_user_created ON purchase_intents(tg_user_id, created_at DESC);
+
+-- =========================
+-- Settings + Account meta
+-- =========================
+
+CREATE TABLE IF NOT EXISTS user_settings (
+  tg_user_id TEXT PRIMARY KEY REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  music_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  sfx_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at BIGINT NOT NULL
+);
+
+-- daily rate-limit for display name change (3/day)
+CREATE TABLE IF NOT EXISTS user_name_limits (
+  tg_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  day_key TEXT NOT NULL,
+  change_count INTEGER NOT NULL DEFAULT 0,
+  updated_at BIGINT NOT NULL,
+  PRIMARY KEY (tg_user_id, day_key)
+);

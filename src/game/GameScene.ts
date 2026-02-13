@@ -84,6 +84,11 @@ interface TimedDirection {
 const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
 const LEVELS_PER_ZONE = BOSS_CONFIG.zonesPerStage;
 
+export type SceneAudioSettings = {
+  musicEnabled: boolean;
+  sfxEnabled: boolean;
+};
+
 export class GameScene extends Phaser.Scene {
   private remotePlayers?: RemotePlayersRenderer;
   private prediction = new LocalPredictionController();
@@ -191,6 +196,7 @@ export class GameScene extends Phaser.Scene {
   private nextRepeatAt: Partial<Record<Direction, number>> = {};
   private pendingDirection: Direction | null = null;
   private placeBombUntil = 0;
+  private audioSettings: SceneAudioSettings = { musicEnabled: true, sfxEnabled: true };
 
   constructor(controls: ControlsState) {
     super('GameScene');
@@ -216,6 +222,7 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor('#0f1220');
+    this.setAudioSettings(this.audioSettings);
     this.setupInput();
     this.setupCamera();
     this.remotePlayers = new RemotePlayersRenderer(this);
@@ -1412,6 +1419,14 @@ export class GameScene extends Phaser.Scene {
       setPosition: (x, y) => this.setLocalPlayerPosition(x, y),
       applyMove: (dx, dy) => this.applyLocalMove(dx, dy),
     });
+  }
+
+
+  public setAudioSettings(next: SceneAudioSettings): void {
+    this.audioSettings = { ...next };
+    if (this.sound) {
+      this.sound.mute = !next.musicEnabled || !next.sfxEnabled;
+    }
   }
 
   public getPredictionStats() {
