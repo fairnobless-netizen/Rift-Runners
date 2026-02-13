@@ -12,7 +12,9 @@
     "test:e2e:probe": "playwright test e2e/probe.spec.ts",
     "dev:full": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "npm --prefix backend run dev:4101",
-    "dev:frontend": "npm run dev:5174"
+    "dev:frontend": "npm run dev:5174",
+    "typecheck:shared": "tsc -p shared/tsconfig.json --noEmit",
+    "ci": "npm run typecheck:shared && npm run build && npm --prefix backend run build"
   },
   "dependencies": {
     "phaser": "^3.90.0",
