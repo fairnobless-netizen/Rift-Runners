@@ -9,7 +9,12 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shared/protocol": ["../shared/src/protocol.d.ts"],
+      "@shared/*": ["../shared/src/*"]
+    }
   },
   "include": ["src/**/*.ts"]
 }
