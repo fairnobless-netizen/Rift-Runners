@@ -165,6 +165,9 @@ CREATE TABLE IF NOT EXISTS rooms (
   owner_tg_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
   capacity INTEGER NOT NULL,                  -- 2/3/4
   status TEXT NOT NULL DEFAULT 'OPEN',        -- OPEN | CLOSED
+  phase TEXT NOT NULL DEFAULT 'LOBBY',        -- LOBBY | STARTED | CLOSED
+  started_at TIMESTAMPTZ NULL,
+  started_by_tg_user_id TEXT NULL REFERENCES users(tg_user_id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -174,9 +177,15 @@ CREATE INDEX IF NOT EXISTS idx_rooms_owner_created
 CREATE TABLE IF NOT EXISTS room_members (
   room_code TEXT NOT NULL REFERENCES rooms(room_code) ON DELETE CASCADE,
   tg_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  ready BOOLEAN NOT NULL DEFAULT FALSE,
   joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (room_code, tg_user_id)
 );
+
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'LOBBY';
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NULL;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS started_by_tg_user_id TEXT NULL REFERENCES users(tg_user_id) ON DELETE SET NULL;
+ALTER TABLE room_members ADD COLUMN IF NOT EXISTS ready BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_room_members_room
   ON room_members (room_code);
