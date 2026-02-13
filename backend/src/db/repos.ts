@@ -600,6 +600,205 @@ export async function checkAndTouchLeaderboardSubmitLimit(tgUserId: string, cool
 
 
 
+
+export type FriendRecord = {
+  tgUserId: string;
+  displayName: string;
+  createdAt: string;
+};
+
+export type IncomingFriendRequestRecord = {
+  fromTgUserId: string;
+  displayName: string;
+  createdAt: string;
+};
+
+export type OutgoingFriendRequestRecord = {
+  toTgUserId: string;
+  displayName: string;
+  createdAt: string;
+  status: string;
+};
+
+export async function listFriends(tgUserId: string): Promise<FriendRecord[]> {
+  const { rows } = await pgQuery<{ tg_user_id_b: string; display_name: string; created_at: string }>(
+    `
+    SELECT fe.tg_user_id_b, u.display_name, fe.created_at
+    FROM friend_edges fe
+    JOIN users u ON u.tg_user_id = fe.tg_user_id_b
+    WHERE fe.tg_user_id_a = $1
+    ORDER BY u.display_name ASC, fe.created_at DESC
+    `,
+    [tgUserId],
+  );
+
+  return rows.map((row) => ({
+    tgUserId: String(row.tg_user_id_b),
+    displayName: String(row.display_name ?? 'Unknown'),
+    createdAt: String(row.created_at),
+  }));
+}
+
+export async function listIncomingRequests(tgUserId: string): Promise<IncomingFriendRequestRecord[]> {
+  const { rows } = await pgQuery<{ from_tg_user_id: string; display_name: string; created_at: string }>(
+    `
+    SELECT fr.from_tg_user_id, u.display_name, fr.created_at
+    FROM friend_requests fr
+    JOIN users u ON u.tg_user_id = fr.from_tg_user_id
+    WHERE fr.to_tg_user_id = $1 AND fr.status = 'PENDING'
+    ORDER BY fr.created_at DESC
+    `,
+    [tgUserId],
+  );
+
+  return rows.map((row) => ({
+    fromTgUserId: String(row.from_tg_user_id),
+    displayName: String(row.display_name ?? 'Unknown'),
+    createdAt: String(row.created_at),
+  }));
+}
+
+export async function listOutgoingRequests(tgUserId: string): Promise<OutgoingFriendRequestRecord[]> {
+  const { rows } = await pgQuery<{ to_tg_user_id: string; display_name: string; created_at: string; status: string }>(
+    `
+    SELECT fr.to_tg_user_id, u.display_name, fr.created_at, fr.status
+    FROM friend_requests fr
+    JOIN users u ON u.tg_user_id = fr.to_tg_user_id
+    WHERE fr.from_tg_user_id = $1 AND fr.status = 'PENDING'
+    ORDER BY fr.created_at DESC
+    `,
+    [tgUserId],
+  );
+
+  return rows.map((row) => ({
+    toTgUserId: String(row.to_tg_user_id),
+    displayName: String(row.display_name ?? 'Unknown'),
+    createdAt: String(row.created_at),
+    status: String(row.status),
+  }));
+}
+
+export async function requestFriend(fromId: string, toId: string): Promise<void> {
+  const fromTgUserId = String(fromId ?? '').trim();
+  const toTgUserId = String(toId ?? '').trim();
+  if (!toTgUserId || fromTgUserId === toTgUserId) {
+    const error = new Error('invalid_target');
+    (error as any).code = 'INVALID_TARGET';
+    throw error;
+  }
+
+  const [targetExistsRes, edgeRes, existingPendingRes] = await Promise.all([
+    pgQuery<{ tg_user_id: string }>(`SELECT tg_user_id FROM users WHERE tg_user_id = $1 LIMIT 1`, [toTgUserId]),
+    pgQuery<{ tg_user_id_a: string }>(
+      `SELECT tg_user_id_a FROM friend_edges WHERE tg_user_id_a = $1 AND tg_user_id_b = $2 LIMIT 1`,
+      [fromTgUserId, toTgUserId],
+    ),
+    pgQuery<{ from_tg_user_id: string }>(
+      `SELECT from_tg_user_id FROM friend_requests WHERE from_tg_user_id = $1 AND to_tg_user_id = $2 AND status = 'PENDING' LIMIT 1`,
+      [fromTgUserId, toTgUserId],
+    ),
+  ]);
+
+  if (!targetExistsRes.rows[0]) {
+    const error = new Error('invalid_target');
+    (error as any).code = 'INVALID_TARGET';
+    throw error;
+  }
+
+  if (edgeRes.rows[0]) {
+    const error = new Error('already_friends');
+    (error as any).code = 'ALREADY_FRIENDS';
+    throw error;
+  }
+
+  if (existingPendingRes.rows[0]) {
+    const error = new Error('already_requested');
+    (error as any).code = 'ALREADY_REQUESTED';
+    throw error;
+  }
+
+  await pgQuery(
+    `
+    INSERT INTO friend_requests (from_tg_user_id, to_tg_user_id, status, created_at, updated_at)
+    VALUES ($1, $2, 'PENDING', now(), now())
+    ON CONFLICT (from_tg_user_id, to_tg_user_id)
+    DO UPDATE SET
+      status = 'PENDING',
+      created_at = now(),
+      updated_at = now()
+    `,
+    [fromTgUserId, toTgUserId],
+  );
+}
+
+export async function respondFriendRequest(toId: string, fromId: string, action: 'accept' | 'decline'): Promise<void> {
+  const toTgUserId = String(toId ?? '').trim();
+  const fromTgUserId = String(fromId ?? '').trim();
+  if (!toTgUserId || !fromTgUserId || !['accept', 'decline'].includes(action)) {
+    const error = new Error('request_not_found');
+    (error as any).code = 'REQUEST_NOT_FOUND';
+    throw error;
+  }
+
+  const pool = getPgPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const reqRes = await client.query<{ from_tg_user_id: string }>(
+      `
+      SELECT from_tg_user_id
+      FROM friend_requests
+      WHERE from_tg_user_id = $1 AND to_tg_user_id = $2 AND status = 'PENDING'
+      FOR UPDATE
+      `,
+      [fromTgUserId, toTgUserId],
+    );
+
+    if (!reqRes.rows[0]) {
+      const error = new Error('request_not_found');
+      (error as any).code = 'REQUEST_NOT_FOUND';
+      throw error;
+    }
+
+    if (action === 'accept') {
+      await client.query(
+        `
+        UPDATE friend_requests
+        SET status = 'ACCEPTED', updated_at = now()
+        WHERE from_tg_user_id = $1 AND to_tg_user_id = $2
+        `,
+        [fromTgUserId, toTgUserId],
+      );
+
+      await client.query(
+        `
+        INSERT INTO friend_edges (tg_user_id_a, tg_user_id_b)
+        VALUES ($1, $2), ($2, $1)
+        ON CONFLICT DO NOTHING
+        `,
+        [fromTgUserId, toTgUserId],
+      );
+    } else {
+      await client.query(
+        `
+        UPDATE friend_requests
+        SET status = 'DECLINED', updated_at = now()
+        WHERE from_tg_user_id = $1 AND to_tg_user_id = $2
+        `,
+        [fromTgUserId, toTgUserId],
+      );
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export type RoomRecord = {
   roomCode: string;
   ownerTgUserId: string;
