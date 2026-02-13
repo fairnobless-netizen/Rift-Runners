@@ -1024,18 +1024,23 @@ export default function GameView(): JSX.Element {
     <main className="page">
       <section className="hud">
         <div className="stats-row">
-          <span className="hud-metric hud-metric--primary">Player: {profileName}</span>
-          <span className="hud-metric">Stage: {campaign.stage}</span>
-          <span className="hud-metric">Zone: {campaign.zone}</span>
-          <span className="hud-metric">Bombs: {stats.placed}/{stats.capacity}</span>
-          <span className="hud-metric">Range: {stats.range}</span>
-          <span className="hud-metric">Score: {stats.score}</span>
-          <span className="hud-metric">Stars: {wallet.stars}</span>
-          <span className="hud-metric hud-metric--secondary">Crystals: {wallet.crystals}</span>
-          <span className="hud-metric hud-metric--secondary">Ledger: {ledger.length}</span>
-          <span className="hud-metric hud-metric--secondary" style={{ opacity: 0.7 }}>
-            {syncStatus === 'synced' ? 'Synced' : 'Offline'}
-          </span>
+          <div className="hud-left">
+            <span className="hud-metric hud-metric--primary">Player: {profileName}</span>
+            <span className="hud-lives" aria-label="Lives" title="Lives">❤️❤️❤️</span>
+          </div>
+          <div className="hud-right">
+            <span className="hud-metric">Stage: {campaign.stage}</span>
+            <span className="hud-metric">Zone: {campaign.zone}</span>
+            <span className="hud-metric">Bombs: {stats.placed}/{stats.capacity}</span>
+            <span className="hud-metric">Range: {stats.range}</span>
+            <span className="hud-metric">Score: {stats.score}</span>
+            <span className="hud-metric">Stars: {wallet.stars}</span>
+            <span className="hud-metric hud-metric--secondary">Crystals: {wallet.crystals}</span>
+            <span className="hud-metric hud-metric--secondary">Ledger: {ledger.length}</span>
+            <span className="hud-metric hud-metric--secondary" style={{ opacity: 0.7 }}>
+              {syncStatus === 'synced' ? 'Synced' : 'Offline'}
+            </span>
+          </div>
         </div>
       </section>
 
@@ -1045,10 +1050,10 @@ export default function GameView(): JSX.Element {
             <div className="nav-grid">
               <button type="button" className="nav-btn" aria-label="Map placeholder">🗺️</button>
               <button type="button" className="nav-btn" aria-label="Leaderboard" onClick={() => setLeaderboardOpen(true)}>🏆</button>
-              <button type="button" className="nav-btn" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>👥</button>
-              <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}>🛍️</button>
               <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>⚙️</button>
+              <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}>🛍️</button>
             </div>
+            <button type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>👥</button>
           </div>
 
           <div className="left-joystick">
@@ -1116,10 +1121,6 @@ export default function GameView(): JSX.Element {
                 value={zoom}
                 onChange={(event) => onZoomInput(Number(event.target.value))}
               />
-            </div>
-
-            <div className="right-panel right-panel--actions" aria-label="Action buttons">
-              <div className="boost-slot" aria-hidden="true">Boost</div>
               <button
                 type="button"
                 onClick={() => {
@@ -1132,6 +1133,10 @@ export default function GameView(): JSX.Element {
               >
                 Reset
               </button>
+            </div>
+
+            <div className="right-panel right-panel--actions" aria-label="Action buttons">
+              <div className="boost-slot boost-slot--upper" aria-hidden="true">Boost</div>
               <button
                 type="button"
                 className="bomb-btn"
@@ -1149,7 +1154,7 @@ export default function GameView(): JSX.Element {
               >
                 Detonate
               </button>
-              <div className="boost-slot" aria-hidden="true">Boost</div>
+              <div className="boost-slot boost-slot--lower" aria-hidden="true">Boost</div>
             </div>
           </div>
         </aside>
