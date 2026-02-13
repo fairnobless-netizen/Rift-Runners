@@ -37,6 +37,8 @@ import {
   joinRoom,
   leaveRoom,
   requestFriend,
+  setRoomReady,
+  startRoom,
   respondFriend,
   type FriendEntry,
   type IncomingFriendRequest,
@@ -129,7 +131,11 @@ function mapRoomError(error?: string): string {
   if (error === 'room_full') return 'Комната заполнена';
   if (error === 'room_closed') return 'Комната закрыта';
   if (error === 'room_not_found') return 'Комната не найдена';
-  if (error === 'forbidden') return 'Only owner can close this room';
+  if (error === 'forbidden') return 'Only owner can perform this action';
+  if (error === 'room_started') return 'Комната уже запущена';
+  if (error === 'not_enough_players') return 'Недостаточно игроков';
+  if (error === 'not_all_ready') return 'Не все игроки готовы';
+  if (error === 'ready_invalid') return 'Некорректное значение ready';
   if (error) return error;
   return 'Request failed';
 }
@@ -192,6 +198,8 @@ export default function GameView(): JSX.Element {
   const [myRooms, setMyRooms] = useState<MyRoomEntry[]>([]);
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
+  const [settingReady, setSettingReady] = useState(false);
+  const [startingRoom, setStartingRoom] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const [friendTargetDraft, setFriendTargetDraft] = useState('');
@@ -743,6 +751,54 @@ export default function GameView(): JSX.Element {
     setMyRooms(rooms);
   }, [currentRoom?.roomCode]);
 
+
+
+  const onToggleReady = useCallback(async (): Promise<void> => {
+    if (!currentRoom?.roomCode || !localTgUserId) return;
+    const me = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
+    const nextReady = !(me?.ready ?? false);
+
+    setSettingReady(true);
+    setRoomsError(null);
+    try {
+      const result = await setRoomReady(currentRoom.roomCode, nextReady);
+      if (!result) {
+        setRoomsError('Ready update failed');
+        return;
+      }
+      if (result.error) {
+        setRoomsError(mapRoomError(result.error));
+        return;
+      }
+      setCurrentRoom(result.room);
+      setCurrentRoomMembers(result.members);
+    } finally {
+      setSettingReady(false);
+    }
+  }, [currentRoom?.roomCode, currentRoomMembers, localTgUserId]);
+
+  const onStartRoom = useCallback(async (): Promise<void> => {
+    if (!currentRoom?.roomCode) return;
+
+    setStartingRoom(true);
+    setRoomsError(null);
+    try {
+      const result = await startRoom(currentRoom.roomCode);
+      if (!result) {
+        setRoomsError('Start failed');
+        return;
+      }
+      if (result.error) {
+        setRoomsError(mapRoomError(result.error));
+        return;
+      }
+      setCurrentRoom(result.room);
+      setCurrentRoomMembers(result.members);
+    } finally {
+      setStartingRoom(false);
+    }
+  }, [currentRoom?.roomCode]);
+
   const onCopyInviteLink = useCallback(async (): Promise<void> => {
     if (!currentRoom?.roomCode) return;
 
@@ -876,7 +932,8 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     if (!token) return;
 
-    const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    const telegramStartParam = (window as Window & { Telegram?: { WebApp?: { initDataUnsafe?: { start_param?: string } } } }).Telegram?.WebApp?.initDataUnsafe?.start_param;
+    const startParam = telegramStartParam;
     if (startParam?.startsWith('room_')) {
       const deepLinkRoomCode = startParam.replace('room_', '').trim().toUpperCase();
       if (!deepLinkRoomCode) return;
@@ -1270,6 +1327,7 @@ export default function GameView(): JSX.Element {
                   <>
                     <div className="settings-kv"><span>Code</span><strong>{currentRoom.roomCode}</strong></div>
                     <div className="settings-kv"><span>Status</span><strong>{currentRoom.status}</strong></div>
+                    <div className="settings-kv"><span>Phase</span><strong>{currentRoom.phase ?? 'LOBBY'}</strong></div>
                     <div className="room-create-actions">
                       <button type="button" onClick={() => { void onCopyInviteLink(); }}>Copy invite link</button>
                       {currentRoom.ownerTgUserId && currentRoom.ownerTgUserId === localTgUserId ? (
@@ -1278,11 +1336,25 @@ export default function GameView(): JSX.Element {
                         <button type="button" onClick={() => { void onLeaveRoom(); }}>Leave</button>
                       )}
                     </div>
+                    <div className="room-create-actions">
+                      <button type="button" disabled={settingReady} onClick={() => { void onToggleReady(); }}>
+                        {settingReady ? 'Saving...' : ((currentRoomMembers.find((m) => m.tgUserId === localTgUserId)?.ready ?? false) ? 'Ready ✓' : 'Set Ready')}
+                      </button>
+                      {currentRoom.ownerTgUserId && currentRoom.ownerTgUserId === localTgUserId ? (
+                        <button
+                          type="button"
+                          disabled={startingRoom || currentRoomMembers.length < 2 || currentRoomMembers.some((member) => !(member.ready ?? false)) || (currentRoom.phase ?? 'LOBBY') === 'STARTED'}
+                          onClick={() => { void onStartRoom(); }}
+                        >
+                          {startingRoom ? 'Starting...' : 'Start'}
+                        </button>
+                      ) : null}
+                    </div>
                     <div className="room-members-list">
                       {currentRoomMembers.map((member) => (
                         <div key={member.tgUserId} className="settings-kv">
                           <span>{member.displayName}</span>
-                          <strong>{member.tgUserId}</strong>
+                          <strong>{member.ready ?? false ? 'Ready' : 'Not ready'}</strong>
                         </div>
                       ))}
                     </div>
