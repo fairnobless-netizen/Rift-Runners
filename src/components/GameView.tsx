@@ -482,7 +482,6 @@ export default function GameView(): JSX.Element {
   return (
     <main className="page">
       <section className="hud">
-        <h1>Rift Runners MVP</h1>
         <div className="stats-row">
           <span className="hud-metric hud-metric--primary">Player: {profileName}</span>
           <span className="hud-metric">Stage: {campaign.stage}</span>
@@ -501,43 +500,56 @@ export default function GameView(): JSX.Element {
 
       <section className="playfield-shell">
         <aside className="control-column control-column--left" aria-label="Movement controls">
-          <div
-            ref={joystickPadRef}
-            className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}
-            onPointerDown={onJoystickPointerDown}
-            onPointerMove={onJoystickPointerMove}
-            onPointerUp={onJoystickPointerUp}
-            onPointerCancel={onJoystickPointerUp}
-            onPointerLeave={() => {
-              if (!joystickPressed) return;
-              releaseJoystick();
-            }}
-            role="application"
-            aria-label="Virtual joystick"
-          >
-            <div
-              className="joystick-knob"
-              style={{
-                transform: `translate(calc(-50% + ${joystickOffset.x}px), calc(-50% + ${joystickOffset.y}px))`,
-              }}
-            />
+          <div className="left-nav" aria-label="Navigation quick controls">
+            <div className="nav-grid">
+              <button type="button" className="nav-btn" aria-label="Map placeholder">🗺️</button>
+              <button type="button" className="nav-btn" aria-label="Quest placeholder">📜</button>
+              <button type="button" className="nav-btn" aria-label="Inventory placeholder">🎒</button>
+              <button type="button" className="nav-btn" aria-label="Settings placeholder">⚙️</button>
+            </div>
           </div>
 
-          <div className="landscape-fallback-dpad" aria-hidden="true">
-            {(['up', 'left', 'down', 'right'] as const).map((direction) => (
-              <button
-                key={direction}
-                type="button"
-                className={`dpad-btn dpad-${direction}`}
-                onTouchStart={() => setDirection(direction, true)}
-                onTouchEnd={() => setDirection(direction, false)}
-                onMouseDown={() => setDirection(direction, true)}
-                onMouseUp={() => setDirection(direction, false)}
-                onMouseLeave={() => setDirection(direction, false)}
+          <div className="left-joystick">
+            <div className="joystick-wrap">
+              <div
+                ref={joystickPadRef}
+                className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}
+                onPointerDown={onJoystickPointerDown}
+                onPointerMove={onJoystickPointerMove}
+                onPointerUp={onJoystickPointerUp}
+                onPointerCancel={onJoystickPointerUp}
+                onPointerLeave={() => {
+                  if (!joystickPressed) return;
+                  releaseJoystick();
+                }}
+                role="application"
+                aria-label="Virtual joystick"
               >
-                {direction === 'up' ? '↑' : direction === 'left' ? '←' : direction === 'down' ? '↓' : '→'}
-              </button>
-            ))}
+                <div
+                  className="joystick-knob"
+                  style={{
+                    transform: `translate(calc(-50% + ${joystickOffset.x}px), calc(-50% + ${joystickOffset.y}px))`,
+                  }}
+                />
+              </div>
+
+              <div className="landscape-fallback-dpad" aria-hidden="true">
+                {(['up', 'left', 'down', 'right'] as const).map((direction) => (
+                  <button
+                    key={direction}
+                    type="button"
+                    className={`dpad-btn dpad-${direction}`}
+                    onTouchStart={() => setDirection(direction, true)}
+                    onTouchEnd={() => setDirection(direction, false)}
+                    onMouseDown={() => setDirection(direction, true)}
+                    onMouseUp={() => setDirection(direction, false)}
+                    onMouseLeave={() => setDirection(direction, false)}
+                  >
+                    {direction === 'up' ? '↑' : direction === 'left' ? '←' : direction === 'down' ? '↓' : '→'}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </aside>
 
@@ -550,66 +562,68 @@ export default function GameView(): JSX.Element {
         </section>
 
         <aside className="control-column control-column--right" aria-label="Action controls">
-          <div className="right-panel right-panel--zoom" aria-label="Zoom panel">
-            <input
-              id="zoom"
-              type="range"
-              className="zoom-slider"
-              min={GAME_CONFIG.minZoom}
-              max={GAME_CONFIG.maxZoom}
-              step={0.05}
-              value={zoom}
-              onChange={(event) => onZoomInput(Number(event.target.value))}
-            />
-          </div>
-
-          <div className="right-panel right-panel--actions" aria-label="Action buttons">
-            <div className="boost-slot" aria-hidden="true">Boost</div>
-            <button
-              type="button"
-              onClick={() => {
-                if (confirm('Reset campaign progress?')) {
-                  const state = resetCampaignState();
-                  // TODO: notify GameScene about new campaign state if needed
-                  setCampaign(state);
-                }
-              }}
-            >
-              Reset
-            </button>
-            <div className="shop-panel">
-              {catalog.map((item) => (
-                <button
-                  key={item.sku}
-                  type="button"
-                  className="shop-buy-btn"
-                  disabled={!item.available || purchaseBusySku !== null}
-                  onClick={() => {
-                    void onBuy(item.sku);
-                  }}
-                >
-                  Buy {item.title} ({item.priceStars}⭐)
-                </button>
-              ))}
+          <div className="right-stack">
+            <div className="right-panel right-panel--zoom" aria-label="Zoom panel">
+              <input
+                id="zoom"
+                type="range"
+                className="zoom-slider"
+                min={GAME_CONFIG.minZoom}
+                max={GAME_CONFIG.maxZoom}
+                step={0.05}
+                value={zoom}
+                onChange={(event) => onZoomInput(Number(event.target.value))}
+              />
             </div>
-            <button
-              type="button"
-              className="bomb-btn"
-              onTouchStart={requestBomb}
-              onMouseDown={requestBomb}
-            >
-              Bomb
-            </button>
-            <button
-              type="button"
-              className="detonate-btn"
-              onTouchStart={requestDetonate}
-              onMouseDown={requestDetonate}
-              disabled={!isRemoteDetonateUnlocked}
-            >
-              Detonate
-            </button>
-            <div className="boost-slot" aria-hidden="true">Boost</div>
+
+            <div className="right-panel right-panel--actions" aria-label="Action buttons">
+              <div className="boost-slot" aria-hidden="true">Boost</div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm('Reset campaign progress?')) {
+                    const state = resetCampaignState();
+                    // TODO: notify GameScene about new campaign state if needed
+                    setCampaign(state);
+                  }
+                }}
+              >
+                Reset
+              </button>
+              <div className="shop-panel">
+                {catalog.map((item) => (
+                  <button
+                    key={item.sku}
+                    type="button"
+                    className="shop-buy-btn"
+                    disabled={!item.available || purchaseBusySku !== null}
+                    onClick={() => {
+                      void onBuy(item.sku);
+                    }}
+                  >
+                    Buy {item.title} ({item.priceStars}⭐)
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="bomb-btn"
+                onTouchStart={requestBomb}
+                onMouseDown={requestBomb}
+              >
+                Bomb
+              </button>
+              <button
+                type="button"
+                className="detonate-btn"
+                onTouchStart={requestDetonate}
+                onMouseDown={requestDetonate}
+                disabled={!isRemoteDetonateUnlocked}
+              >
+                Detonate
+              </button>
+              <div className="boost-slot" aria-hidden="true">Boost</div>
+            </div>
           </div>
         </aside>
       </section>
