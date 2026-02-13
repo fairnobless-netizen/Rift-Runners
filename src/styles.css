@@ -235,6 +235,7 @@ body {
 }
 
 .left-nav {
+  --nav-grid-gap: calc(0.32rem * var(--ui-scale-left));
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -244,7 +245,7 @@ body {
 .nav-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: calc(0.32rem * var(--ui-scale-left));
+  gap: var(--nav-grid-gap);
 }
 
 .nav-btn {
@@ -336,22 +337,24 @@ body {
 
 
 .nav-btn--multiplayer {
-  width: 100%;
+  width: calc((100% - var(--nav-grid-gap)) / 2);
   aspect-ratio: 1 / 1;
   font-size: calc(0.95rem * var(--ui-scale-left));
   margin-top: calc(0.65rem * var(--ui-scale-left));
+  align-self: flex-start;
 }
 
 .right-panel--actions {
-  gap: calc(0.95rem * var(--ui-scale-right));
+  --action-stack-gap: calc(0.95rem * var(--ui-scale-right));
+  gap: var(--action-stack-gap);
 }
 
 .boost-slot--upper {
-  margin-bottom: calc(0.8rem * var(--ui-scale-right));
+  margin-bottom: var(--action-stack-gap);
 }
 
 .boost-slot--lower {
-  margin-top: calc(0.8rem * var(--ui-scale-right));
+  margin-top: var(--action-stack-gap);
 }
 .game-shell {
   position: relative;
