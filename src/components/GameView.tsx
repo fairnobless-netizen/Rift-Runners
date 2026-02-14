@@ -513,27 +513,6 @@ export default function GameView(): JSX.Element {
   }, [updateTgMetrics]);
 
   useEffect(() => {
-    const onResize = () => {
-      updateTgMetrics();
-      // ensure overlay + game container reflow after iOS toolbar/rotation settles
-      window.setTimeout(() => {
-        try { stabilizeAfterFullscreen?.(); } catch {}
-      }, 120);
-      window.setTimeout(() => {
-        try { stabilizeAfterFullscreen?.(); } catch {}
-      }, 420);
-    };
-
-    window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', onResize);
-
-    return () => {
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('orientationchange', onResize);
-    };
-  }, [updateTgMetrics]);
-
-  useEffect(() => {
     const shell = pageShellRef.current;
     if (!shell) return;
 
