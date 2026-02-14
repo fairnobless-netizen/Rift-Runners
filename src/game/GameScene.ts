@@ -84,6 +84,7 @@ interface TimedDirection {
 
 const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
 const LEVELS_PER_ZONE = BOSS_CONFIG.zonesPerStage;
+const MOVEMENT_SPEED_SCALE = 0.66;
 
 export type SceneAudioSettings = {
   musicEnabled: boolean;
@@ -638,6 +639,18 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+
+
+  private scaleMovementDuration(durationMs: number): number {
+    return Math.round(durationMs / MOVEMENT_SPEED_SCALE);
+  }
+
+  private getScaledEnemyMoveInterval(kind: EnemyKind): number {
+    const baseInterval = kind === 'elite'
+      ? Math.max(GAME_CONFIG.enemyMoveIntervalMinMs, Math.floor(GAME_CONFIG.enemyMoveIntervalMs * 0.7))
+      : GAME_CONFIG.enemyMoveIntervalMs;
+    return this.scaleMovementDuration(baseInterval);
+  }
   private spawnPlayer(): void {
     this.player.gridX = 1;
     this.player.gridY = 1;
@@ -676,7 +689,7 @@ export class GameScene extends Phaser.Scene {
         facing: 'left',
         state: 'idle',
         kind: 'normal',
-        moveIntervalMs: GAME_CONFIG.enemyMoveIntervalMs,
+        moveIntervalMs: this.getScaledEnemyMoveInterval('normal'),
       });
       this.enemyNextMoveAt.set(key, 0);
     }
@@ -697,7 +710,7 @@ export class GameScene extends Phaser.Scene {
   private tickPlayerMovement(time: number): void {
     if (this.player.targetX === null || this.player.targetY === null || !this.playerSprite) return;
 
-    const progress = Phaser.Math.Clamp((time - this.player.moveStartedAt) / GAME_CONFIG.moveDurationMs, 0, 1);
+    const progress = Phaser.Math.Clamp((time - this.player.moveStartedAt) / this.scaleMovementDuration(GAME_CONFIG.moveDurationMs), 0, 1);
     const px = Phaser.Math.Linear(this.player.moveFromX, this.player.targetX, progress);
     const py = Phaser.Math.Linear(this.player.moveFromY, this.player.targetY, progress);
     this.placeLocalPlayerSpriteAt(px, py);
@@ -748,14 +761,14 @@ export class GameScene extends Phaser.Scene {
       const heldSince = this.heldSince[dir];
       if (heldSince === undefined) {
         this.heldSince[dir] = time;
-        this.nextRepeatAt[dir] = time + GAME_CONFIG.moveRepeatDelayMs;
+        this.nextRepeatAt[dir] = time + this.scaleMovementDuration(GAME_CONFIG.moveRepeatDelayMs);
         intents.push({ dir, justPressed: true });
         continue;
       }
 
       const repeatAt = this.nextRepeatAt[dir] ?? Number.POSITIVE_INFINITY;
       if (time >= repeatAt) {
-        this.nextRepeatAt[dir] = repeatAt + GAME_CONFIG.moveRepeatIntervalMs;
+        this.nextRepeatAt[dir] = repeatAt + this.scaleMovementDuration(GAME_CONFIG.moveRepeatIntervalMs);
         intents.push({ dir, justPressed: false });
       }
     }
@@ -997,7 +1010,7 @@ export class GameScene extends Phaser.Scene {
       facing: 'left',
       state: 'idle',
       kind,
-      moveIntervalMs: kind === 'elite' ? Math.max(GAME_CONFIG.enemyMoveIntervalMinMs, Math.floor(GAME_CONFIG.enemyMoveIntervalMs * 0.7)) : GAME_CONFIG.enemyMoveIntervalMs,
+      moveIntervalMs: this.getScaledEnemyMoveInterval(kind),
     });
     this.enemyNextMoveAt.set(key, this.time.now);
   }
