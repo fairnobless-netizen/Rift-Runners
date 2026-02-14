@@ -1206,9 +1206,11 @@ export default function GameView(): JSX.Element {
       {!showBootSplash && gameFlowPhase !== 'playing' && (
         <div className="game-flow-overlay" role="status" aria-live="polite">
           {gameFlowPhase === 'intro' ? (
-            <div className="game-flow-card">
-              <h2>Rift Runners</h2>
-              <p>Preparing mission briefing...</p>
+            <div className="intro-layer" aria-label="Rift Runners intro animation">
+              <div className="intro-layer__brand-wrap">
+                <strong className="intro-layer__brand">RIFT RUNNERS</strong>
+                <p>Preparing mission briefing...</p>
+              </div>
             </div>
           ) : (
             <div className="game-flow-card">

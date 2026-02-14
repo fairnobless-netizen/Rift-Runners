@@ -775,6 +775,132 @@ button:disabled {
   background: radial-gradient(circle at 50% 25%, #1b2447dd, #060911f5 65%);
 }
 
+.intro-layer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 14% 20%, #7e6cff2b 0%, transparent 40%),
+    radial-gradient(circle at 85% 25%, #5bc9ff26 0%, transparent 42%),
+    radial-gradient(circle at 80% 82%, #8e6dff2b 0%, transparent 38%),
+    linear-gradient(120deg, #04060f, #0a1231 46%, #07112b 100%);
+  background-size: 180% 180%;
+  animation: introGradientShift 8.5s ease-in-out infinite;
+}
+
+.intro-layer::before {
+  content: '';
+  position: absolute;
+  inset: -12% -30%;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at center, #ffffff17 0%, #ffffff07 22%, transparent 66%);
+  mix-blend-mode: screen;
+  filter: blur(12px);
+  animation: introHighlightSweep 6.2s ease-in-out infinite;
+}
+
+.intro-layer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 0 18%, #0000000f 30%, #00000078 100%);
+}
+
+.intro-layer__brand-wrap {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  text-align: center;
+  padding: 1rem;
+  color: #e8f1ff;
+}
+
+.intro-layer__brand {
+  font-size: clamp(2rem, 7vw, 4.1rem);
+  letter-spacing: 0.18em;
+  font-weight: 900;
+  line-height: 0.92;
+  text-transform: uppercase;
+  color: #f2f6ff;
+  text-shadow: 0 0 14px #8fb4ff88, 0 0 40px #7f86ff55;
+  animation: introBrandReveal 1600ms ease-out forwards;
+}
+
+.intro-layer__brand-wrap p {
+  margin: 0;
+  color: #b7c6ef;
+  letter-spacing: 0.04em;
+  opacity: 0;
+  animation: introSubtitleReveal 700ms ease-out 600ms forwards;
+}
+
+@keyframes introGradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 52%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes introHighlightSweep {
+  0% {
+    opacity: 0.2;
+    transform: translateX(-20%) translateY(-3%) rotate(-8deg);
+  }
+
+  50% {
+    opacity: 0.42;
+    transform: translateX(16%) translateY(4%) rotate(8deg);
+  }
+
+  100% {
+    opacity: 0.2;
+    transform: translateX(-20%) translateY(-3%) rotate(-8deg);
+  }
+}
+
+@keyframes introBrandReveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+    filter: blur(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes introSubtitleReveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .game-flow-card {
   width: min(92vw, 520px);
   border: 1px solid #3d4f8a;
