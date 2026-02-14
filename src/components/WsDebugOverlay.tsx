@@ -153,6 +153,18 @@ export function WsDebugOverlay({
   const debugUiFlag = String(import.meta.env.VITE_DEBUG_UI ?? '').trim().toLowerCase();
   const showDebugUi = debugUiFlag === '1' || debugUiFlag === 'true' || import.meta.env.DEV;
 
+  const showProbeControls = useMemo(() => {
+    if (import.meta.env.DEV) return true;
+    if (typeof window === 'undefined') return false;
+
+    const params = new URLSearchParams(window.location.search);
+    const hasProbeParam = params.get('probe') === '1' || params.get('debug') === '1';
+    const debugStorageValue = window.localStorage.getItem('rr_debug');
+    const hasDebugStorage = debugStorageValue === '1' || debugStorageValue === 'true';
+
+    return hasProbeParam || hasDebugStorage;
+  }, []);
+
   const lastSnapshot = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -499,7 +511,8 @@ export function WsDebugOverlay({
         pointerEvents: 'none', // root does not steal input
       }}
     >
-      {/* Bottom-left tray chip (ALWAYS rendered so probe is always available for CI) */}
+      {/* Bottom-left tray chip */}
+      {showProbeControls && (
       <div
         style={{
           position: 'absolute',
@@ -522,7 +535,7 @@ export function WsDebugOverlay({
             pointerEvents: 'auto', // interactive children enabled
           }}
         >
-          {/* Probe must remain stable for Playwright */}
+          {/* Probe appears only with explicit debug flags in production */}
           <button data-testid="probe-btn" onClick={runProbe}>
             Probe 20 moves
           </button>
@@ -559,6 +572,7 @@ export function WsDebugOverlay({
           </div>
         )}
       </div>
+      )}
 
       {/* Top-right expanded panel (ONLY when debug UI enabled + tray expanded) */}
       {showDebugUi && !trayCollapsed && (

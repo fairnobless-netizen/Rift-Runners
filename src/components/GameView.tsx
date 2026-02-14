@@ -764,8 +764,9 @@ export default function GameView(): JSX.Element {
     const dx = clientX - centerX;
     const dy = clientY - centerY;
     const distance = Math.hypot(dx, dy);
+    const effectiveRadius = Math.max(JOYSTICK_RADIUS, rect.width / 2);
 
-    const clampedScale = distance > JOYSTICK_RADIUS ? JOYSTICK_RADIUS / distance : 1;
+    const clampedScale = distance > effectiveRadius ? effectiveRadius / distance : 1;
     const clampedX = dx * clampedScale;
     const clampedY = dy * clampedScale;
     setJoystickOffset({ x: clampedX, y: clampedY });
@@ -824,6 +825,13 @@ export default function GameView(): JSX.Element {
     event.stopPropagation();
 
     releaseJoystick(event.pointerId);
+  };
+
+  const onJoystickLostPointerCapture = (event: React.PointerEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    releaseJoystick();
   };
 
   const requestBomb = (): void => {
@@ -1470,10 +1478,7 @@ export default function GameView(): JSX.Element {
                 onPointerMove={onJoystickPointerMove}
                 onPointerUp={onJoystickPointerUp}
                 onPointerCancel={onJoystickPointerUp}
-                onPointerLeave={() => {
-                  if (!joystickPressed) return;
-                  releaseJoystick();
-                }}
+                onLostPointerCapture={onJoystickLostPointerCapture}
                 role="application"
                 aria-label="Virtual joystick"
               >
