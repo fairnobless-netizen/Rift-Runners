@@ -9,6 +9,8 @@
   --header-h: clamp(34px, calc(46px * var(--ui-scale)), 46px);
   --shell-gap: clamp(0.35rem, 1.5vw, 0.7rem);
   --side-w: clamp(72px, calc(180px * var(--ui-scale)), 132px);
+  --side-w-left: var(--side-w);
+  --side-w-right: var(--side-w);
   --ui-scale: 1;
 }
 
@@ -217,6 +219,8 @@ body {
 }
 
 .control-column--left {
+  flex-basis: var(--side-w-left);
+  width: var(--side-w-left);
   flex-direction: column;
   justify-content: space-between;
   gap: calc(0.5rem * var(--ui-scale));
@@ -224,6 +228,8 @@ body {
 }
 
 .control-column--right {
+  flex-basis: var(--side-w-right);
+  width: var(--side-w-right);
   flex-direction: column;
   justify-content: center;
   gap: calc(0.55rem * var(--ui-scale));
@@ -532,6 +538,13 @@ html[data-orient="landscape"] .right-panel {
   .hud-right .hud-metric:nth-child(4),
   .hud-right .hud-metric:nth-child(6) {
     display: none;
+  }
+}
+
+@media (orientation: landscape) and (pointer: coarse) {
+  :root {
+    --side-w-left: clamp(90px, calc(210px * var(--ui-scale)), 154px);
+    --side-w-right: var(--side-w);
   }
 }
 

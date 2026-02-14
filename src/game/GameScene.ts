@@ -370,18 +370,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setupCamera(): void {
-    const { tileSize, startZoom, minZoom, maxZoom, gridWidth, gridHeight } = GAME_CONFIG;
+    const { tileSize, minZoom, maxZoom, gridWidth, gridHeight } = GAME_CONFIG;
     const worldWidth = gridWidth * tileSize;
     const worldHeight = gridHeight * tileSize;
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
-    this.cameras.main.setZoom(startZoom);
+    this.cameras.main.setZoom(minZoom);
 
     gameEvents.emit(EVENT_READY, {
       setZoom: (zoom: number) => {
         const clamped = Phaser.Math.Clamp(zoom, minZoom, maxZoom);
         this.cameras.main.setZoom(clamped);
       },
-      resetZoom: () => this.cameras.main.setZoom(startZoom),
+      resetZoom: () => this.cameras.main.setZoom(minZoom),
     });
   }
 

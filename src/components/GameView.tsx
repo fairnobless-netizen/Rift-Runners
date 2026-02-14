@@ -193,7 +193,7 @@ export default function GameView(): JSX.Element {
   const zoomApiRef = useRef<ReadyPayload | null>(null);
   const [stats, setStats] = useState<PlayerStats>(defaultStats);
   const [campaign, setCampaign] = useState<CampaignState>(() => loadCampaignState());
-  const [zoom, setZoom] = useState<number>(GAME_CONFIG.startZoom);
+  const [zoom, setZoom] = useState<number>(GAME_CONFIG.minZoom);
   const [isRemoteDetonateUnlocked, setIsRemoteDetonateUnlocked] = useState(false);
   const [joystickPressed, setJoystickPressed] = useState(false);
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
@@ -626,7 +626,13 @@ export default function GameView(): JSX.Element {
     };
     const onReady = (payload: ReadyPayload): void => {
       zoomApiRef.current = payload;
-      payload.setZoom(zoom);
+      const minZoom = GAME_CONFIG.minZoom;
+      setZoom(minZoom);
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          payload.setZoom(minZoom);
+        });
+      });
     };
     const onCampaignState = (nextCampaign: CampaignState): void => {
       setCampaign({ ...nextCampaign });
@@ -1319,7 +1325,14 @@ export default function GameView(): JSX.Element {
   const onStartGame = (): void => {
     requestTelegramFullscreenBestEffort();
     if (shouldShowRotateOverlay) return;
+    const minZoom = GAME_CONFIG.minZoom;
+    setZoom(minZoom);
     setGameFlowPhase('playing');
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        zoomApiRef.current?.setZoom(minZoom);
+      });
+    });
     if (!onboardingDone) {
       setTutorialStepIndex(0);
       setTutorialActive(true);
