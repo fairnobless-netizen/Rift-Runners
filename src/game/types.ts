@@ -34,7 +34,9 @@ export interface PlayerModel {
   targetY: number | null;
   moveFromX: number;
   moveFromY: number;
-  moveStartedAt: number;
+  moveStartedAtMs: number;
+  moveDurationMs: number;
+  isMoving: boolean;
   facing: Facing;
   state: EntityState;
   graceBombKey: string | null;
@@ -66,6 +68,13 @@ export interface EnemyModel {
   key: string;
   gridX: number;
   gridY: number;
+  moveFromX: number;
+  moveFromY: number;
+  targetX: number;
+  targetY: number;
+  moveStartedAtMs: number;
+  moveDurationMs: number;
+  isMoving: boolean;
   facing: Facing;
   state: Extract<EntityState, 'idle' | 'move'>;
   kind: EnemyKind;

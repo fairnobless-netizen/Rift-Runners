@@ -178,7 +178,9 @@ export class GameScene extends Phaser.Scene {
     targetY: null,
     moveFromX: 1,
     moveFromY: 1,
-    moveStartedAt: 0,
+    moveStartedAtMs: 0,
+    moveDurationMs: 0,
+    isMoving: false,
     facing: 'down',
     state: 'idle',
     graceBombKey: null,
@@ -800,7 +802,9 @@ export class GameScene extends Phaser.Scene {
     this.player.targetY = null;
     this.player.moveFromX = 1;
     this.player.moveFromY = 1;
-    this.player.moveStartedAt = 0;
+    this.player.moveStartedAtMs = 0;
+    this.player.moveDurationMs = 0;
+    this.player.isMoving = false;
     this.player.facing = 'down';
     this.player.state = 'idle';
     this.player.graceBombKey = null;
@@ -828,6 +832,13 @@ export class GameScene extends Phaser.Scene {
         key,
         gridX: cell.x,
         gridY: cell.y,
+        moveFromX: cell.x,
+        moveFromY: cell.y,
+        targetX: cell.x,
+        targetY: cell.y,
+        moveStartedAtMs: 0,
+        moveDurationMs: this.getScaledEnemyMoveInterval('normal'),
+        isMoving: false,
         facing: 'left',
         state: 'idle',
         kind: 'normal',
@@ -852,7 +863,8 @@ export class GameScene extends Phaser.Scene {
   private tickPlayerMovement(time: number): void {
     if (this.player.targetX === null || this.player.targetY === null || !this.playerSprite) return;
 
-    const progress = Phaser.Math.Clamp((time - this.player.moveStartedAt) / this.scaleMovementDuration(GAME_CONFIG.moveDurationMs), 0, 1);
+    const duration = Math.max(1, this.player.moveDurationMs);
+    const progress = Phaser.Math.Clamp((time - this.player.moveStartedAtMs) / duration, 0, 1);
     const px = Phaser.Math.Linear(this.player.moveFromX, this.player.targetX, progress);
     const py = Phaser.Math.Linear(this.player.moveFromY, this.player.targetY, progress);
     this.placeLocalPlayerSpriteAt(px, py);
@@ -860,10 +872,11 @@ export class GameScene extends Phaser.Scene {
     if (progress < 1) return;
 
     const oldKey = toKey(this.player.moveFromX, this.player.moveFromY);
-    this.player.gridX = this.player.targetX;
-    this.player.gridY = this.player.targetY;
     this.player.targetX = null;
     this.player.targetY = null;
+    this.player.isMoving = false;
+    this.player.moveDurationMs = 0;
+    this.player.moveStartedAtMs = 0;
     this.player.state = 'idle';
 
     if (this.player.graceBombKey === oldKey) {
@@ -932,7 +945,11 @@ export class GameScene extends Phaser.Scene {
     this.player.moveFromY = this.player.gridY;
     this.player.targetX = nx;
     this.player.targetY = ny;
-    this.player.moveStartedAt = time;
+    this.player.gridX = nx;
+    this.player.gridY = ny;
+    this.player.moveStartedAtMs = time;
+    this.player.moveDurationMs = this.scaleMovementDuration(GAME_CONFIG.moveDurationMs);
+    this.player.isMoving = true;
     this.player.state = 'move';
     this.emitSimulation('player.move.start', time, { from: { x: this.player.moveFromX, y: this.player.moveFromY }, to: { x: nx, y: ny } });
   }
@@ -1101,6 +1118,13 @@ export class GameScene extends Phaser.Scene {
       const nx = enemy.gridX + dx;
       const ny = enemy.gridY + dy;
       if (this.canEnemyOccupy(nx, ny, enemy.key)) {
+        enemy.moveFromX = enemy.gridX;
+        enemy.moveFromY = enemy.gridY;
+        enemy.targetX = nx;
+        enemy.targetY = ny;
+        enemy.moveStartedAtMs = time;
+        enemy.moveDurationMs = enemy.moveIntervalMs;
+        enemy.isMoving = true;
         enemy.gridX = nx;
         enemy.gridY = ny;
         enemy.facing = direction;
@@ -1158,6 +1182,13 @@ export class GameScene extends Phaser.Scene {
       key,
       gridX: x,
       gridY: y,
+      moveFromX: x,
+      moveFromY: y,
+      targetX: x,
+      targetY: y,
+      moveStartedAtMs: 0,
+      moveDurationMs: this.getScaledEnemyMoveInterval(kind),
+      isMoving: false,
       facing: 'left',
       state: 'idle',
       kind,
@@ -1357,8 +1388,19 @@ export class GameScene extends Phaser.Scene {
       if (!sprite) continue;
       const style = this.getAssetStyle('enemy', enemy.state, enemy.facing);
       const anim = this.getEnemyAnimationState(enemy, time);
+      const enemyDuration = Math.max(1, enemy.moveDurationMs);
+      const enemyProgress = enemy.isMoving
+        ? Phaser.Math.Clamp((time - enemy.moveStartedAtMs) / enemyDuration, 0, 1)
+        : 1;
+      const renderGX = enemy.isMoving ? Phaser.Math.Linear(enemy.moveFromX, enemy.targetX, enemyProgress) : enemy.gridX;
+      const renderGY = enemy.isMoving ? Phaser.Math.Linear(enemy.moveFromY, enemy.targetY, enemyProgress) : enemy.gridY;
+      if (enemy.isMoving && enemyProgress >= 1) {
+        enemy.isMoving = false;
+        enemy.moveStartedAtMs = 0;
+      }
+
       sprite
-        .setPosition(enemy.gridX * tileSize + tileSize / 2, enemy.gridY * tileSize + tileSize / 2 + anim.hoverOffset)
+        .setPosition(renderGX * tileSize + tileSize / 2, renderGY * tileSize + tileSize / 2 + anim.hoverOffset)
         .setTexture(enemy.kind === 'elite' ? 'rr_enemy_elite' : 'rr_enemy_basic')
         .setAngle(this.getFacingAngle(enemy.facing) + anim.extraRotation)
         .setDisplaySize(tileSize * (style.scale ?? 0.72) * anim.scale, tileSize * (style.scale ?? 0.72) * anim.scale)
@@ -1655,7 +1697,17 @@ export class GameScene extends Phaser.Scene {
       return false;
     }
 
-    this.setLocalPlayerPosition(nextX, nextY);
+    const now = this.time.now;
+    this.player.moveFromX = this.player.gridX;
+    this.player.moveFromY = this.player.gridY;
+    this.player.targetX = nextX;
+    this.player.targetY = nextY;
+    this.player.gridX = nextX;
+    this.player.gridY = nextY;
+    this.player.moveStartedAtMs = now;
+    this.player.moveDurationMs = this.scaleMovementDuration(GAME_CONFIG.moveDurationMs);
+    this.player.isMoving = true;
+    this.player.state = 'move';
     return true;
   }
 
@@ -1679,6 +1731,9 @@ export class GameScene extends Phaser.Scene {
     this.player.gridY = y;
     this.player.targetX = null;
     this.player.targetY = null;
+    this.player.isMoving = false;
+    this.player.moveDurationMs = 0;
+    this.player.moveStartedAtMs = 0;
 
     this.placeLocalPlayerSpriteAt(x, y);
   }
