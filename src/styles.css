@@ -6,13 +6,10 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
-  --header-h: clamp(34px, 5.2vh, 46px);
+  --header-h: clamp(34px, calc(46px * var(--ui-scale)), 46px);
   --shell-gap: clamp(0.35rem, 1.5vw, 0.7rem);
-  /* M32c: side columns shrink with ui scale (prevents push-out / drift) */
   --side-w: clamp(72px, calc(180px * var(--ui-scale)), 132px);
   --ui-scale: 1;
-  --ui-scale-left: var(--ui-scale);
-  --ui-scale-right: var(--ui-scale);
 }
 
 
@@ -24,7 +21,8 @@
 
 html,
 body {
-  height: 100%;
+  height: var(--tg-viewport-stable-h);
+  min-height: var(--tg-viewport-stable-h);
   margin: 0;
   overflow: hidden;
 }
@@ -34,8 +32,8 @@ body {
 }
 
 #root {
-  height: 100%;
-  min-height: 0;
+  height: var(--tg-viewport-stable-h);
+  min-height: var(--tg-viewport-stable-h);
 }
 
 .page {
@@ -43,18 +41,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--shell-gap);
-  height: var(--tg-viewport-h, 100dvh);
-  height: 100dvh;
-  height: 100svh;
-  height: 100vh;
-  min-height: 0;
+  height: var(--tg-viewport-stable-h);
+  min-height: var(--tg-viewport-stable-h);
   width: 100%;
   max-width: none;
   margin: 0;
   padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top));
-  padding-right: var(--safe-right);
+  padding-right: calc(var(--tg-content-right, 0px) + var(--safe-right));
   padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom));
-  padding-left: var(--safe-left);
+  padding-left: calc(var(--tg-content-left, 0px) + var(--safe-left));
   overflow: hidden;
 }
 
@@ -216,35 +211,33 @@ body {
 }
 
 .control-column--left {
-  --ui-scale-left: var(--ui-scale);
   flex-direction: column;
   justify-content: space-between;
-  gap: calc(0.5rem * var(--ui-scale-left));
+  gap: calc(0.5rem * var(--ui-scale));
   align-self: stretch;
 }
 
 .control-column--right {
-  --ui-scale-right: var(--ui-scale);
   flex-direction: column;
   justify-content: center;
-  gap: calc(0.55rem * var(--ui-scale-right));
+  gap: calc(0.55rem * var(--ui-scale));
   align-self: stretch;
-  font-size: calc(1rem * var(--ui-scale-right));
+  font-size: calc(1rem * var(--ui-scale));
 }
 
 .left-nav {
-  --nav-grid-gap: calc(0.32rem * var(--ui-scale-left));
+  --nav-grid-gap: calc(0.32rem * var(--ui-scale));
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: calc(0.5rem * var(--ui-scale-left));
+  gap: calc(0.5rem * var(--ui-scale));
 }
 
 .nav-secondary {
   width: 100%;
   display: flex;
   justify-content: flex-start;
-  margin-top: calc(0.55rem * var(--ui-scale-left));
+  margin-top: calc(0.55rem * var(--ui-scale));
 }
 
 .nav-grid {
@@ -257,7 +250,7 @@ body {
   width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 12px;
-  font-size: calc(0.95rem * var(--ui-scale-left));
+  font-size: calc(0.95rem * var(--ui-scale));
   padding: 0;
   display: grid;
   place-items: center;
@@ -292,7 +285,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  gap: calc(0.55rem * var(--ui-scale-right));
+  gap: calc(0.55rem * var(--ui-scale));
   flex: 1;
   width: 100%;
 }
@@ -315,28 +308,28 @@ body {
   background: #0f1630cc;
   border: 1px solid #27335c;
   border-radius: 12px;
-  padding: calc(0.5rem * var(--ui-scale-right));
+  padding: calc(0.5rem * var(--ui-scale));
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: calc(0.5rem * var(--ui-scale-right));
+  gap: calc(0.5rem * var(--ui-scale));
 }
 
 .right-panel--zoom {
-  padding: calc(0.45rem * var(--ui-scale-right));
-  gap: calc(0.2rem * var(--ui-scale-right));
+  padding: calc(0.45rem * var(--ui-scale));
+  gap: calc(0.2rem * var(--ui-scale));
 }
 
 .boost-slot {
   width: 100%;
   aspect-ratio: 1.25 / 1;
-  min-height: calc(30px * var(--ui-scale-right));
+  min-height: calc(30px * var(--ui-scale));
   border-radius: 10px;
   border: 1px dashed #425180;
   color: #a6b2d8;
   display: grid;
   place-items: center;
-  font-size: calc(0.7rem * var(--ui-scale-right));
+  font-size: calc(0.7rem * var(--ui-scale));
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -347,8 +340,8 @@ body {
 }
 
 .right-panel--actions {
-  --action-stack-gap: calc(0.95rem * var(--ui-scale-right));
-  --boost-separation-gap: calc(1.35rem * var(--ui-scale-right));
+  --action-stack-gap: calc(0.95rem * var(--ui-scale));
+  --boost-separation-gap: calc(1.35rem * var(--ui-scale));
   gap: var(--action-stack-gap);
 }
 
@@ -388,8 +381,8 @@ body {
 
 .zoom-slider {
   width: 100%;
-  height: calc(22px * var(--ui-scale-right));
-  padding: calc(0.06rem * var(--ui-scale-right)) 0;
+  height: calc(22px * var(--ui-scale));
+  padding: calc(0.06rem * var(--ui-scale)) 0;
 }
 
 button {
@@ -402,8 +395,8 @@ button {
 }
 
 .control-column--right button {
-  font-size: calc(0.82rem * var(--ui-scale-right));
-  padding: calc(0.45rem * var(--ui-scale-right)) calc(0.6rem * var(--ui-scale-right));
+  font-size: calc(0.82rem * var(--ui-scale));
+  padding: calc(0.45rem * var(--ui-scale)) calc(0.6rem * var(--ui-scale));
 }
 
 button:disabled {
@@ -412,7 +405,7 @@ button:disabled {
 
 .joystick-pad {
   position: relative;
-  width: min(100%, calc(150px * var(--ui-scale-left)));
+  width: min(100%, calc(150px * var(--ui-scale)));
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   border: 2px solid #425180;
@@ -439,8 +432,8 @@ button:disabled {
   border-radius: 50%;
   background: radial-gradient(circle at 30% 30%, #d3deff, #8295d2 75%);
   box-shadow: 0 0 0 2px #223157, 0 4px 16px #02040a80;
-  width: calc(44px * var(--ui-scale-left));
-  height: calc(44px * var(--ui-scale-left));
+  width: calc(44px * var(--ui-scale));
+  height: calc(44px * var(--ui-scale));
 }
 
 .landscape-fallback-dpad {
@@ -451,16 +444,16 @@ button:disabled {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: calc(0.35rem * var(--ui-scale-right));
+  gap: calc(0.35rem * var(--ui-scale));
 }
 
 .shop-buy-btn {
   width: 100%;
-  min-height: calc(36px * var(--ui-scale-right));
-  font-size: calc(0.68rem * var(--ui-scale-right));
+  min-height: calc(36px * var(--ui-scale));
+  font-size: calc(0.68rem * var(--ui-scale));
   background: #38508a;
   border-radius: 8px;
-  padding: calc(0.35rem * var(--ui-scale-right));
+  padding: calc(0.35rem * var(--ui-scale));
 }
 
 .bomb-btn,
@@ -468,10 +461,10 @@ button:disabled {
   width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 9999px;
-  max-width: calc(78px * var(--ui-scale-right));
+  max-width: calc(78px * var(--ui-scale));
   min-height: 0;
   align-self: center;
-  font-size: calc(0.9rem * var(--ui-scale-right));
+  font-size: calc(0.9rem * var(--ui-scale));
   touch-action: manipulation;
 }
 
@@ -481,6 +474,35 @@ button:disabled {
 
 .detonate-btn {
   background: #44548f;
+}
+
+html[data-device="phone"] {
+  --side-w: clamp(64px, calc(148px * var(--ui-scale)), 104px);
+}
+
+html[data-device="phone"] .hud-metric--secondary {
+  display: none;
+}
+
+html[data-device="tablet"] {
+  --side-w: clamp(72px, calc(172px * var(--ui-scale)), 122px);
+}
+
+html[data-device="desktop"] {
+  --side-w: clamp(86px, calc(196px * var(--ui-scale)), 138px);
+}
+
+html[data-device="desktop"] .settings-modal {
+  width: min(86vw, 640px);
+}
+
+html[data-orient="landscape"] .page,
+html[data-orient="landscape"] .playfield-shell,
+html[data-orient="landscape"] .game-shell,
+html[data-orient="landscape"] .control-column,
+html[data-orient="landscape"] .right-panel {
+  min-width: 0;
+  min-height: 0;
 }
 
 @media (max-width: 1100px) {
@@ -495,56 +517,7 @@ button:disabled {
   }
 
   .boost-slot {
-    min-height: calc(30px * var(--ui-scale-right));
-  }
-}
-
-@media (orientation: landscape) and (max-width: 980px) {
-  :root {
-    /* M32c: continuous scaling, no left/right divergence */
-    --ui-scale: clamp(0.34, calc(min(100vw, 100vh) / 900), 1);
-    --ui-scale-left: var(--ui-scale);
-    --ui-scale-right: var(--ui-scale);
-    --header-h: clamp(32px, 5vh, 42px);
-    --side-w: clamp(64px, calc(180px * var(--ui-scale)), 108px);
-  }
-
-  .page,
-  .playfield-shell,
-  .game-shell,
-  .control-column,
-  .right-panel {
-    min-width: 0;
-    min-height: 0;
-  }
-
-  .hud {
-    padding: 0.16rem 0.48rem;
-  }
-
-  .stats-row {
-    gap: calc(0.22rem * var(--ui-scale));
-    font-size: clamp(0.65rem, calc(0.8rem * var(--ui-scale)), 0.78rem);
-  }
-
-  .hud-metric {
-    padding: calc(0.08rem * var(--ui-scale)) calc(0.2rem * var(--ui-scale));
-  }
-
-  .hud-metric--secondary {
-    display: none;
-  }
-
-  .control-column {
-    padding: calc(0.44rem * var(--ui-scale));
-  }
-
-  .control-column--left {
-    align-items: center;
-  }
-
-  .nav-grid {
-    gap: calc(0.24rem * var(--ui-scale-left));
+    min-height: calc(30px * var(--ui-scale));
   }
 }
 
@@ -600,8 +573,8 @@ button:disabled {
   }
 
   .game-canvas {
-    width: min(100%, calc(100vw - var(--safe-left) - var(--safe-right) - 1.4rem));
-    max-height: calc(var(--tg-viewport-h, 100dvh) - var(--safe-top) - var(--safe-bottom) - var(--tg-content-top, 0px) - var(--tg-content-bottom, 0px) - var(--header-h) - 168px);
+    width: min(100%, calc(var(--shell-w, 100%) - var(--safe-left) - var(--safe-right) - 1.4rem));
+    max-height: calc(var(--tg-viewport-stable-h) - var(--safe-top) - var(--safe-bottom) - var(--tg-content-top, 0px) - var(--tg-content-bottom, 0px) - var(--header-h) - 168px);
     height: auto;
   }
 
@@ -931,7 +904,7 @@ button:disabled {
 
 .settings-modal {
   width: min(92vw, 560px);
-  max-height: 88vh;
+  max-height: calc(var(--tg-viewport-stable-h) * 0.88);
   overflow: auto;
   background: #0f1630;
   border: 1px solid #2c3b6c;
