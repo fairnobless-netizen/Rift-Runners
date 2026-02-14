@@ -20,13 +20,18 @@
 }
 
 html {
+  width: 100%;
+  height: 100%;
   overscroll-behavior: none;
   touch-action: none;
+  overflow: hidden;
+  background: #000;
 }
 
 body {
-  height: var(--tg-viewport-stable-h);
-  min-height: var(--tg-viewport-stable-h);
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
   margin: 0;
   overflow: hidden;
 
@@ -34,22 +39,26 @@ body {
   overscroll-behavior: none;
   -webkit-overflow-scrolling: auto;
   touch-action: none;
-  background: radial-gradient(circle at top, #13192c, #070a12 60%);
+  background: #000;
 }
 
 #root {
-  height: var(--tg-viewport-stable-h);
-  min-height: var(--tg-viewport-stable-h);
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  background: #000;
 }
 
 .page {
-  position: relative; /* IMPORTANT: anchor for WsDebugOverlay absolute root */
+  position: fixed; /* IMPORTANT: anchor for WsDebugOverlay absolute root */
+  inset: 0;
   display: flex;
   flex-direction: column;
   gap: var(--shell-gap);
-  height: var(--tg-viewport-stable-h);
-  min-height: var(--tg-viewport-stable-h);
-  width: 100%;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
   max-width: none;
   margin: 0;
   padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top));
@@ -483,7 +492,7 @@ button:disabled {
 }
 
 html[data-device="phone"] {
-  --side-w: clamp(64px, calc(148px * var(--ui-scale)), 104px);
+  --side-w: clamp(82px, calc(176px * var(--ui-scale)), 122px);
 }
 
 html[data-device="phone"] .hud-metric--secondary {
@@ -500,6 +509,16 @@ html[data-device="desktop"] {
 
 html[data-device="desktop"] .settings-modal {
   width: min(86vw, 640px);
+}
+
+@media (orientation: landscape) and (pointer: coarse) {
+  html[data-device="phone"] {
+    --side-w: clamp(132px, calc(300px * var(--ui-scale)), 220px);
+  }
+
+  html[data-device="phone"] .joystick-pad {
+    width: min(100%, calc(190px * var(--ui-scale)));
+  }
 }
 
 html[data-orient="landscape"] .page,
