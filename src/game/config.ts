@@ -1,29 +1,16 @@
 import type { AssetRegistry } from './types';
 
-const MOVEMENT_BASELINE = {
-  playerMoveDurationMs: 120,
-  playerMoveRepeatDelayMs: 170,
-  playerMoveRepeatIntervalMs: 95,
-  enemyMoveIntervalMs: 260,
-  enemyMoveIntervalMinMs: 120,
-} as const;
-
-const MOVEMENT_SLOW_FACTOR = 1.5;
-
-const scaleMovementMs = (durationMs: number): number => Math.round(durationMs * MOVEMENT_SLOW_FACTOR);
-
 export const GAME_CONFIG = {
   gridWidth: 9,
   gridHeight: 7,
   tileSize: 64,
-  movementSlowFactor: MOVEMENT_SLOW_FACTOR,
-  moveDurationMs: scaleMovementMs(MOVEMENT_BASELINE.playerMoveDurationMs),
-  moveRepeatDelayMs: scaleMovementMs(MOVEMENT_BASELINE.playerMoveRepeatDelayMs),
-  moveRepeatIntervalMs: scaleMovementMs(MOVEMENT_BASELINE.playerMoveRepeatIntervalMs),
+  moveDurationMs: 120,
+  moveRepeatDelayMs: 170,
+  moveRepeatIntervalMs: 95,
   bombFuseMs: 2200,
   flameLifetimeMs: 400,
-  enemyMoveIntervalMs: scaleMovementMs(MOVEMENT_BASELINE.enemyMoveIntervalMs),
-  enemyMoveIntervalMinMs: scaleMovementMs(MOVEMENT_BASELINE.enemyMoveIntervalMinMs),
+  enemyMoveIntervalMs: 260,
+  enemyMoveIntervalMinMs: 120,
   enemyForwardBias: 0.65,
   baseEnemyCount: 1,
   maxEnemyCount: 6,
