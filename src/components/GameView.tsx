@@ -158,13 +158,14 @@ type TelegramWebApp = {
   ready?: () => void;
   expand?: () => void;
   requestFullscreen?: () => void;
+  disableVerticalSwipes?: () => void;
   isExpanded?: boolean;
   viewportHeight?: number;
   viewportStableHeight?: number;
   contentSafeAreaInset?: { top: number; bottom: number; left: number; right: number };
   safeAreaInset?: { top: number; bottom: number; left: number; right: number };
-  onEvent?: (eventType: 'viewportChanged' | 'safeAreaChanged', handler: () => void) => void;
-  offEvent?: (eventType: 'viewportChanged' | 'safeAreaChanged', handler: () => void) => void;
+  onEvent?: (eventType: 'viewportChanged' | 'safeAreaChanged' | 'contentSafeAreaChanged', handler: () => void) => void;
+  offEvent?: (eventType: 'viewportChanged' | 'safeAreaChanged' | 'contentSafeAreaChanged', handler: () => void) => void;
 };
 
 export default function GameView(): JSX.Element {
@@ -282,7 +283,6 @@ export default function GameView(): JSX.Element {
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
   const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay;
-  const didGestureExpandRef = useRef(false);
   const shellSizeRef = useRef<{ width: number; height: number }>({ width: window.innerWidth, height: window.innerHeight });
 
   const updateTgMetrics = useCallback((): void => {
@@ -302,6 +302,48 @@ export default function GameView(): JSX.Element {
     document.documentElement.style.setProperty('--tg-content-bottom', `${Math.floor(bottom)}px`);
     document.documentElement.style.setProperty('--tg-content-left', `${Math.floor(left)}px`);
   }, []);
+
+  useEffect(() => {
+    const tg = (window as any)?.Telegram?.WebApp;
+
+    // Telegram WebApp init (Eggs&Dragons parity)
+    try {
+      tg?.ready?.();
+      tg?.expand?.();
+
+      // Critical on iOS Telegram: prevent "pull to close" / vertical swipes while playing
+      tg?.disableVerticalSwipes?.();
+    } catch {
+      // no-op
+    }
+
+    // Apply metrics right after init/expand (Telegram may finalize viewport on next tick)
+    updateTgMetrics();
+    requestAnimationFrame(() => updateTgMetrics());
+
+    // Keep metrics in sync
+    const onViewportChanged = (): void => {
+      updateTgMetrics();
+    };
+
+    try {
+      tg?.onEvent?.('viewportChanged', onViewportChanged);
+      tg?.onEvent?.('safeAreaChanged', onViewportChanged);
+      tg?.onEvent?.('contentSafeAreaChanged', onViewportChanged);
+    } catch {
+      // no-op
+    }
+
+    return () => {
+      try {
+        tg?.offEvent?.('viewportChanged', onViewportChanged);
+        tg?.offEvent?.('safeAreaChanged', onViewportChanged);
+        tg?.offEvent?.('contentSafeAreaChanged', onViewportChanged);
+      } catch {
+        // no-op
+      }
+    };
+  }, [updateTgMetrics]);
 
   const updateShellMetrics = useCallback((shellW: number, shellH: number): void => {
     const width = Math.max(1, Math.round(shellW));
@@ -422,66 +464,6 @@ export default function GameView(): JSX.Element {
       body: JSON.stringify(next),
     });
   }, [applyAudioSettings, token]);
-
-  useEffect(() => {
-    const webApp = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
-    const boundedExpand = (): void => {
-      if (!webApp) return;
-
-      try {
-        webApp.requestFullscreen?.();
-      } catch {
-        // noop
-      }
-
-      try {
-        webApp.expand?.();
-      } catch {
-        // noop
-      }
-    };
-
-    const onViewportChanged = (): void => {
-      updateTgMetrics();
-      if (webApp?.isExpanded === false) boundedExpand();
-    };
-    const onFirstGesture = (): void => {
-      if (!didGestureExpandRef.current) {
-        boundedExpand();
-        didGestureExpandRef.current = true;
-      }
-    };
-
-    let rafId = 0;
-    let rafTicks = 0;
-    const MAX_RAF_RETRIES = 8;
-    const runBoundedRetry = (): void => {
-      if (!webApp) return;
-      if (rafTicks >= MAX_RAF_RETRIES) return;
-      boundedExpand();
-      rafTicks += 1;
-      if (webApp.isExpanded !== false) return;
-      rafId = window.requestAnimationFrame(runBoundedRetry);
-    };
-
-    webApp?.ready?.();
-    updateTgMetrics();
-    boundedExpand();
-    runBoundedRetry();
-
-    webApp?.onEvent?.('viewportChanged', onViewportChanged);
-    webApp?.onEvent?.('safeAreaChanged', onViewportChanged);
-    pageRef.current?.addEventListener('pointerdown', onFirstGesture, { once: true });
-    pageRef.current?.addEventListener('touchstart', onFirstGesture, { once: true, passive: true });
-
-    return () => {
-      window.cancelAnimationFrame(rafId);
-      webApp?.offEvent?.('viewportChanged', onViewportChanged);
-      webApp?.offEvent?.('safeAreaChanged', onViewportChanged);
-      pageRef.current?.removeEventListener('pointerdown', onFirstGesture);
-      pageRef.current?.removeEventListener('touchstart', onFirstGesture);
-    };
-  }, [updateTgMetrics]);
 
   useEffect(() => {
     const shell = pageShellRef.current;
@@ -806,6 +788,9 @@ export default function GameView(): JSX.Element {
   const onJoystickPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
     if (isInteractionBlocked) return;
 
+    event.preventDefault();
+    event.stopPropagation();
+
     const pad = joystickPadRef.current;
     if (!pad) return;
 
@@ -817,6 +802,10 @@ export default function GameView(): JSX.Element {
   const onJoystickPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
     if (isInteractionBlocked) return;
     if (!joystickPressed) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
     updateJoystickFromPointer(event.clientX, event.clientY);
   };
 
@@ -831,6 +820,9 @@ export default function GameView(): JSX.Element {
   };
 
   const onJoystickPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    event.stopPropagation();
+
     releaseJoystick(event.pointerId);
   };
 
@@ -1301,7 +1293,31 @@ export default function GameView(): JSX.Element {
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
     : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
 
+  const requestTelegramFullscreenBestEffort = (): void => {
+    const w = window as Window & { Telegram?: { WebApp?: TelegramWebApp } };
+
+    // Native Telegram WebApp API
+    if (w.Telegram?.WebApp) {
+      try {
+        w.Telegram.WebApp.ready?.();
+      } catch { /* no-op */ }
+
+      if (typeof w.Telegram.WebApp.requestFullscreen === 'function') {
+        w.Telegram.WebApp.requestFullscreen();
+      }
+      if (typeof w.Telegram.WebApp.expand === 'function') {
+        w.Telegram.WebApp.expand();
+      }
+
+      // prevent swipe-to-close while interacting (iOS)
+      try {
+        w.Telegram.WebApp.disableVerticalSwipes?.();
+      } catch { /* no-op */ }
+    }
+  };
+
   const onStartGame = (): void => {
+    requestTelegramFullscreenBestEffort();
     if (shouldShowRotateOverlay) return;
     setGameFlowPhase('playing');
     if (!onboardingDone) {
