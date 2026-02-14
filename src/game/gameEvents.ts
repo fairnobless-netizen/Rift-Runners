@@ -11,6 +11,7 @@ export const EVENT_ASSET_PROGRESS = 'asset_progress';
 export const EVENT_LIFE_STATE = 'life_state';
 
 export const EVENT_SIMULATION = 'simulation';
+export const EVENT_ZOOM_CHANGED = 'zoom_changed';
 
 export const LEVEL_STARTED = 'LEVEL_STARTED';
 export const DOOR_REVEALED = 'DOOR_REVEALED';
@@ -25,6 +26,10 @@ export interface ReadyPayload {
   maxZoom: number;
 }
 
+export interface ZoomChangedPayload {
+  zoom: number;
+}
+
 export interface AssetProgressPayload {
   progress: number;
   fileKey?: string;
@@ -36,6 +41,10 @@ export function emitStats(stats: PlayerStats): void {
 
 export function emitSimulationEvent(event: SimulationEvent): void {
   gameEvents.emit(EVENT_SIMULATION, event);
+}
+
+export function emitZoomChanged(payload: ZoomChangedPayload): void {
+  gameEvents.emit(EVENT_ZOOM_CHANGED, payload);
 }
 
 export function emitCampaignState(campaignState: CampaignState): void {
