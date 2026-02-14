@@ -10,10 +10,12 @@ import {
   EVENT_SIMULATION,
   EVENT_STATS,
   EVENT_LIFE_STATE,
+  EVENT_ZOOM_CHANGED,
   gameEvents,
   type AssetProgressPayload,
   type LifeStatePayload,
   type ReadyPayload,
+  type ZoomChangedPayload,
 } from '../game/gameEvents';
 
 import {
@@ -668,6 +670,10 @@ export default function GameView(): JSX.Element {
     const onLifeState = (payload: LifeStatePayload): void => {
       setLifeState({ ...payload });
     };
+    const onZoomChanged = (payload: ZoomChangedPayload): void => {
+      const clamped = Math.max(zoomBounds.min, Math.min(zoomBounds.max, payload.zoom));
+      setZoom(clamped);
+    };
 
     const onSimulation = async (event: SimulationEvent): Promise<void> => {
       if (event.type !== 'BOSS_DEFEATED') return;
@@ -685,6 +691,7 @@ export default function GameView(): JSX.Element {
     gameEvents.on(EVENT_ASSET_PROGRESS, onAssetProgress);
     gameEvents.on(EVENT_SIMULATION, onSimulation);
     gameEvents.on(EVENT_LIFE_STATE, onLifeState);
+    gameEvents.on(EVENT_ZOOM_CHANGED, onZoomChanged);
 
     return () => {
       gameEvents.off(EVENT_STATS, onStats);
@@ -693,8 +700,9 @@ export default function GameView(): JSX.Element {
       gameEvents.off(EVENT_ASSET_PROGRESS, onAssetProgress);
       gameEvents.off(EVENT_SIMULATION, onSimulation);
       gameEvents.off(EVENT_LIFE_STATE, onLifeState);
+      gameEvents.off(EVENT_ZOOM_CHANGED, onZoomChanged);
     };
-  }, [zoom]);
+  }, [zoomBounds.max, zoomBounds.min]);
 
   useEffect(() => {
     if (!mountRef.current) return;

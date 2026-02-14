@@ -53,6 +53,7 @@ import {
   emitStats,
   emitCampaignState,
   emitLifeState,
+  emitZoomChanged,
   gameEvents,
   type GameMode,
 } from './gameEvents';
@@ -226,6 +227,10 @@ export class GameScene extends Phaser.Scene {
   private pendingDirection: Direction | null = null;
   private placeBombUntil = 0;
   private audioSettings: SceneAudioSettings = { musicEnabled: true, sfxEnabled: true };
+  private minZoom: number = GAME_CONFIG.minZoom;
+  private maxZoom: number = GAME_CONFIG.maxZoom;
+  private pinchStartDistance: number | null = null;
+  private pinchStartZoom: number | null = null;
 
   constructor(controls: ControlsState) {
     super('GameScene');
@@ -325,15 +330,95 @@ export class GameScene extends Phaser.Scene {
       g.destroy();
     };
 
-    const createTileTexture = (key: string, baseColor: number, accentColor: number): void => {
+    const createFloorTexture = (): void => {
+      const key = 'tile_floor';
       if (this.textures.exists(key)) return;
       const g = this.add.graphics().setVisible(false);
-      g.fillStyle(baseColor, 1);
-      g.fillRoundedRect(0, 0, textureSize, textureSize, 16);
-      g.fillStyle(accentColor, 0.18);
-      g.fillRoundedRect(8, 8, textureSize - 16, textureSize - 16, 10);
-      g.lineStyle(4, accentColor, 0.45);
-      g.strokeRoundedRect(4, 4, textureSize - 8, textureSize - 8, 14);
+      g.fillStyle(0x6d798e, 1);
+      g.fillRoundedRect(0, 0, textureSize, textureSize, 12);
+      const cobbleSize = textureSize / 3;
+      for (let row = 0; row < 3; row += 1) {
+        for (let col = 0; col < 3; col += 1) {
+          const jitterX = this.randomFloat() * 4 - 2;
+          const jitterY = this.randomFloat() * 4 - 2;
+          const stoneX = col * cobbleSize + 3 + jitterX;
+          const stoneY = row * cobbleSize + 3 + jitterY;
+          const width = cobbleSize - 6 + this.randomFloat() * 2;
+          const height = cobbleSize - 6 + this.randomFloat() * 2;
+          const shade = 0x8090aa + this.randomInt(0x101010);
+          g.fillStyle(shade, 0.8);
+          g.fillRoundedRect(stoneX, stoneY, width, height, 6);
+          g.lineStyle(2, 0x2f3645, 0.35);
+          g.strokeRoundedRect(stoneX, stoneY, width, height, 6);
+        }
+      }
+      for (let i = 0; i < 26; i += 1) {
+        const dotShade = 0x5c6678 + this.randomInt(0x111111);
+        g.fillStyle(dotShade, 0.22);
+        g.fillCircle(this.randomFloat() * textureSize, this.randomFloat() * textureSize, 1 + this.randomFloat() * 1.8);
+      }
+      g.lineStyle(3, 0xaeb9cd, 0.28);
+      g.strokeRoundedRect(2, 2, textureSize - 4, textureSize - 4, 10);
+      g.generateTexture(key, textureSize, textureSize);
+      g.destroy();
+    };
+
+    const createUnbreakableTexture = (key: string, variant: number): void => {
+      if (this.textures.exists(key)) return;
+      const g = this.add.graphics().setVisible(false);
+      g.fillStyle(0x120d12, 1);
+      g.fillRoundedRect(0, 0, textureSize, textureSize, 10);
+      for (let i = 0; i < 14; i += 1) {
+        const alpha = 0.2 + this.randomFloat() * 0.26;
+        const tone = variant % 2 === 0 ? 0x2b1418 : 0x251119;
+        g.fillStyle(tone + this.randomInt(0x080808), alpha);
+        const w = 14 + this.randomFloat() * 24;
+        const h = 10 + this.randomFloat() * 20;
+        const x = this.randomFloat() * (textureSize - w);
+        const y = this.randomFloat() * (textureSize - h);
+        g.fillRoundedRect(x, y, w, h, 5);
+      }
+      g.lineStyle(2, 0x8a2028, 0.35);
+      for (let i = 0; i < 8; i += 1) {
+        const x1 = this.randomFloat() * textureSize;
+        const y1 = this.randomFloat() * textureSize;
+        const x2 = Phaser.Math.Clamp(x1 + (this.randomFloat() * 34 - 17), 0, textureSize);
+        const y2 = Phaser.Math.Clamp(y1 + (this.randomFloat() * 34 - 17), 0, textureSize);
+        g.lineBetween(x1, y1, x2, y2);
+      }
+      g.lineStyle(4, 0xff3a32, 0.14);
+      g.strokeRoundedRect(3, 3, textureSize - 6, textureSize - 6, 10);
+      g.generateTexture(key, textureSize, textureSize);
+      g.destroy();
+    };
+
+    const createBreakableTexture = (): void => {
+      const key = 'tile_breakable';
+      if (this.textures.exists(key)) return;
+      const g = this.add.graphics().setVisible(false);
+      g.fillStyle(0x8a6848, 1);
+      g.fillRoundedRect(0, 0, textureSize, textureSize, 10);
+      for (let i = 0; i < 10; i += 1) {
+        const alpha = 0.24 + this.randomFloat() * 0.2;
+        const w = 16 + this.randomFloat() * 24;
+        const h = 10 + this.randomFloat() * 18;
+        const x = this.randomFloat() * (textureSize - w);
+        const y = this.randomFloat() * (textureSize - h);
+        g.fillStyle(0x9f7a58 + this.randomInt(0x090909), alpha);
+        g.fillRoundedRect(x, y, w, h, 4);
+      }
+      g.lineStyle(2, 0x3d2a1b, 0.32);
+      for (let i = -textureSize; i < textureSize * 2; i += 16) {
+        g.lineBetween(i, 0, i + textureSize, textureSize);
+      }
+      g.lineStyle(2, 0x4e2f1d, 0.42);
+      for (let i = 0; i < 6; i += 1) {
+        const x = this.randomFloat() * textureSize;
+        const y = this.randomFloat() * textureSize;
+        g.lineBetween(x, y, x + this.randomFloat() * 18 - 9, y + this.randomFloat() * 18 - 9);
+      }
+      g.lineStyle(3, 0xc8a987, 0.3);
+      g.strokeRoundedRect(3, 3, textureSize - 6, textureSize - 6, 9);
       g.generateTexture(key, textureSize, textureSize);
       g.destroy();
     };
@@ -422,12 +507,12 @@ export class GameScene extends Phaser.Scene {
       hasOuterHalo: true,
     });
 
-    createTileTexture('tile_floor', 0x253041, 0x8ca0bf);
-    createTileTexture('tile_wall_a', 0x3d4558, 0xa3b2cc);
-    createTileTexture('tile_wall_b', 0x363d4f, 0x919eb8);
-    createTileTexture('tile_breakable', 0x6c4e3b, 0xdfc7a8);
-    createTileTexture('tile_column_a', 0x594060, 0xd9b2ff);
-    createTileTexture('tile_column_b', 0x473153, 0xc89be8);
+    createFloorTexture();
+    createUnbreakableTexture('tile_wall_a', 0);
+    createUnbreakableTexture('tile_wall_b', 1);
+    createBreakableTexture();
+    createUnbreakableTexture('tile_column_a', 2);
+    createUnbreakableTexture('tile_column_b', 3);
 
     createExplosionTexture('fx_explosion_core', 'core');
     createExplosionTexture('fx_explosion_beam_h', 'horizontal');
@@ -490,17 +575,18 @@ export class GameScene extends Phaser.Scene {
     const worldHeight = this.arena.height * tileSize;
     const viewportHeight = Math.max(1, this.scale.height);
     const minZoom = viewportHeight / worldHeight;
+    this.minZoom = minZoom;
+    this.maxZoom = maxZoom;
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
-    this.cameras.main.setZoom(minZoom);
+    this.applyZoom(minZoom, false);
 
     gameEvents.emit(EVENT_READY, {
       minZoom,
       maxZoom,
       setZoom: (zoom: number) => {
-        const clamped = Phaser.Math.Clamp(zoom, minZoom, maxZoom);
-        this.cameras.main.setZoom(clamped);
+        this.applyZoom(zoom, false);
       },
-      resetZoom: () => this.cameras.main.setZoom(minZoom),
+      resetZoom: () => this.applyZoom(minZoom, false),
     });
   }
 
@@ -989,12 +1075,77 @@ export class GameScene extends Phaser.Scene {
     this.cursors = this.input.keyboard?.createCursorKeys();
     this.spaceKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.detonateKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+    this.input.addPointer(2);
+
+    this.input.on('pointerdown', () => {
+      this.tryStartPinch();
+    });
+
+    this.input.on('pointermove', () => {
+      this.handlePinchMove();
+    });
+
+    this.input.on('pointerup', () => {
+      this.resetPinch();
+    });
+
+    this.input.on('pointerupoutside', () => {
+      this.resetPinch();
+    });
   }
 
   private consumeKeyboard(): void {
     if (!this.cursors) return;
     if (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) this.controls.placeBombRequested = true;
     if (this.detonateKey && Phaser.Input.Keyboard.JustDown(this.detonateKey)) this.controls.detonateRequested = true;
+  }
+
+  private applyZoom(zoom: number, emitEvent = true): void {
+    const clamped = Phaser.Math.Clamp(zoom, this.minZoom, this.maxZoom);
+    this.cameras.main.setZoom(clamped);
+    if (emitEvent) emitZoomChanged({ zoom: clamped });
+  }
+
+  private getActivePointers(): Phaser.Input.Pointer[] {
+    const pointers = [this.input.activePointer, ...this.input.manager.pointers];
+    return pointers.filter((pointer, index, all) => pointer.isDown && all.indexOf(pointer) === index);
+  }
+
+  private getPinchDistance(): number | null {
+    const active = this.getActivePointers();
+    if (active.length < 2) return null;
+    const [p1, p2] = active;
+    return Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+  }
+
+  private tryStartPinch(): void {
+    const dist = this.getPinchDistance();
+    if (!dist || dist <= 0) return;
+    if (this.pinchStartDistance !== null) return;
+    this.pinchStartDistance = dist;
+    this.pinchStartZoom = this.cameras.main.zoom;
+  }
+
+  private handlePinchMove(): void {
+    if (this.pinchStartDistance === null || this.pinchStartZoom === null) {
+      this.tryStartPinch();
+      return;
+    }
+
+    const dist = this.getPinchDistance();
+    if (!dist || dist <= 0) {
+      this.resetPinch();
+      return;
+    }
+
+    const scale = dist / this.pinchStartDistance;
+    this.applyZoom(this.pinchStartZoom * scale);
+  }
+
+  private resetPinch(): void {
+    if (this.getActivePointers().length >= 2) return;
+    this.pinchStartDistance = null;
+    this.pinchStartZoom = null;
   }
 
   private tickPlayerMovement(time: number): void {
