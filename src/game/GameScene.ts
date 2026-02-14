@@ -851,6 +851,7 @@ export class GameScene extends Phaser.Scene {
       this.stats.placed = Math.max(0, this.stats.placed - 1);
       const result = getExplosionResult(this.arena, bomb);
       const waveId = this.createWaveId();
+      let doorRevealedThisWave = false;
 
       for (const block of result.destroyedBreakables) {
         const blockKey = toKey(block.x, block.y);
@@ -863,7 +864,10 @@ export class GameScene extends Phaser.Scene {
         if (this.isBossLevel && wasAnomalous && this.bossAnchorKey === blockKey) {
           this.bossController.revealBoss();
         }
-        if (toKey(block.x, block.y) === this.arena.hiddenDoorKey) this.revealDoor(time);
+        if (toKey(block.x, block.y) === this.arena.hiddenDoorKey) {
+          this.revealDoor(time);
+          doorRevealedThisWave = true;
+        }
         this.emitSimulation('breakable.destroyed', time, { x: block.x, y: block.y, item: dropped?.type ?? null, anomalous: wasAnomalous, isBossAnchor: this.bossAnchorKey === blockKey });
       }
 
@@ -874,7 +878,7 @@ export class GameScene extends Phaser.Scene {
         const axis: FlameArmAxis | undefined = segment === 'arm' ? (impact.x === bomb.x ? 'vertical' : 'horizontal') : undefined;
         this.spawnFlame(impact.x, impact.y, time + GAME_CONFIG.flameLifetimeMs, segment, axis);
         this.hitEntitiesAt(impact.x, impact.y);
-        this.tryRegisterDoorWaveHit(impact.x, impact.y, waveId, time);
+        this.tryRegisterDoorWaveHit(impact.x, impact.y, waveId, time, doorRevealedThisWave);
       }
 
       for (const chainKey of result.chainBombKeys) {
@@ -896,10 +900,11 @@ export class GameScene extends Phaser.Scene {
     return `wave-${this.levelIndex}-${this.simulationTick}-${this.waveSequence}`;
   }
 
-  private tryRegisterDoorWaveHit(x: number, y: number, waveId: string, time: number): void {
+  private tryRegisterDoorWaveHit(x: number, y: number, waveId: string, time: number, doorRevealedThisWave: boolean): void {
     if (this.isBossLevel) return;
     if (!this.doorRevealed) return;
     if (toKey(x, y) !== this.arena.hiddenDoorKey) return;
+    if (doorRevealedThisWave) return;
     const accepted = this.doorController.handleExplosionWaveHit(waveId, time);
     if (!accepted) return;
     const doorState = this.doorController.getDoorState();
