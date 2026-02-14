@@ -722,14 +722,26 @@ html[data-orient="landscape"] .right-panel {
   }
 }
 
-.game-flow-overlay {
-  position: absolute;
+.game-flow-overlay{
+  position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: 9999;
+
   display: grid;
   place-items: center;
-  padding: 1rem;
+
+  /* Keep content clear of Telegram/Safari UI + iOS safe areas */
+  padding-top: calc(16px + var(--tg-content-top, 0px) + var(--safe-top, 0px));
+  padding-right: calc(16px + var(--tg-content-right, 0px) + var(--safe-right, 0px));
+  padding-bottom: calc(16px + var(--tg-content-bottom, 0px) + var(--safe-bottom, 0px));
+  padding-left: calc(16px + var(--tg-content-left, 0px) + var(--safe-left, 0px));
+
+  /* Use dynamic viewport height to avoid iOS toolbar jumps */
+  min-height: 100dvh;
+  width: 100vw;
+
   background: radial-gradient(circle at 50% 25%, #1b2447dd, #060911f5 65%);
+  pointer-events: all;
 }
 
 .intro-layer {
@@ -1083,14 +1095,24 @@ html[data-orient="landscape"] .right-panel {
   color: #c1cdef;
 }
 
-.rotate-overlay {
-  position: absolute;
+.rotate-overlay{
+  position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 10000;
+
   display: grid;
   place-items: center;
-  background: rgba(3, 7, 16, 0.92);
-  pointer-events: auto;
+
+  padding-top: calc(16px + var(--tg-content-top, 0px) + var(--safe-top, 0px));
+  padding-right: calc(16px + var(--tg-content-right, 0px) + var(--safe-right, 0px));
+  padding-bottom: calc(16px + var(--tg-content-bottom, 0px) + var(--safe-bottom, 0px));
+  padding-left: calc(16px + var(--tg-content-left, 0px) + var(--safe-left, 0px));
+
+  min-height: 100dvh;
+  width: 100vw;
+
+  background: radial-gradient(circle at 50% 25%, #1b2447dd, #060911f5 65%);
+  pointer-events: all;
 }
 
 .rotate-overlay__card {
