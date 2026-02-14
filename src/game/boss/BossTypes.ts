@@ -21,6 +21,13 @@ export interface BossModel {
   key: string;
   gridX: number;
   gridY: number;
+  moveFromX: number;
+  moveFromY: number;
+  targetX: number;
+  targetY: number;
+  moveStartedAtMs: number;
+  moveDurationMs: number;
+  isMoving: boolean;
   hp: number;
   maxHp: number;
   isAlive: boolean;

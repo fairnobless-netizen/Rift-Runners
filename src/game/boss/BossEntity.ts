@@ -14,6 +14,13 @@ export class BossEntity {
       key: 'boss-m4',
       gridX: x,
       gridY: y,
+      moveFromX: x,
+      moveFromY: y,
+      targetX: x,
+      targetY: y,
+      moveStartedAtMs: 0,
+      moveDurationMs: 0,
+      isMoving: false,
       hp,
       maxHp: hp,
       isAlive: true,
@@ -47,10 +54,17 @@ export class BossEntity {
       .setOrigin(0, 0.5);
   }
 
-  setPosition(x: number, y: number): void {
+  setPosition(x: number, y: number, timeMs: number, moveDurationMs: number): void {
+    this.model.moveFromX = this.model.gridX;
+    this.model.moveFromY = this.model.gridY;
+    this.model.targetX = x;
+    this.model.targetY = y;
     this.model.gridX = x;
     this.model.gridY = y;
-    this.syncSprite();
+    this.model.moveStartedAtMs = timeMs;
+    this.model.moveDurationMs = Math.max(1, moveDurationMs);
+    this.model.isMoving = true;
+    this.syncSprite(timeMs);
   }
 
   setVulnerable(until: number): void {
@@ -80,11 +94,27 @@ export class BossEntity {
     return true;
   }
 
-  syncSprite(): void {
+  syncSprite(timeMs?: number): void {
     if (!this.sprite) return;
     const { tileSize } = GAME_CONFIG;
+    const now = timeMs ?? this.scene.time.now;
+    const progress = this.model.isMoving
+      ? Phaser.Math.Clamp((now - this.model.moveStartedAtMs) / Math.max(1, this.model.moveDurationMs), 0, 1)
+      : 1;
+    const renderGX = this.model.isMoving
+      ? Phaser.Math.Linear(this.model.moveFromX, this.model.targetX, progress)
+      : this.model.gridX;
+    const renderGY = this.model.isMoving
+      ? Phaser.Math.Linear(this.model.moveFromY, this.model.targetY, progress)
+      : this.model.gridY;
+
+    if (this.model.isMoving && progress >= 1) {
+      this.model.isMoving = false;
+      this.model.moveStartedAtMs = 0;
+    }
+
     this.sprite
-      .setPosition(this.model.gridX * tileSize + tileSize / 2, this.model.gridY * tileSize + tileSize / 2)
+      .setPosition(renderGX * tileSize + tileSize / 2, renderGY * tileSize + tileSize / 2)
       .setFillStyle(this.model.isVulnerable ? 0xff76ff : 0x8f2cff, 1);
 
     if (this.hpBarBg) {

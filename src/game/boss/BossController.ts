@@ -71,7 +71,7 @@ export class BossController {
 
     if (!this.boss || this.lifecycleState !== 'active') return;
     this.boss.closeVulnerability(time);
-    this.boss.syncSprite();
+    this.boss.syncSprite(time);
     this.cleanupHazards(time);
     this.checkHazardPlayerCollision();
 
@@ -160,7 +160,7 @@ export class BossController {
     for (const cell of candidates) {
       if (!isInsideArena(cell.x, cell.y)) continue;
       if (!this.deps.canOccupy(cell.x, cell.y)) continue;
-      this.boss.setPosition(cell.x, cell.y);
+      this.boss.setPosition(cell.x, cell.y, this.scene.time.now, Math.floor(900 / this.profile.speedMultiplier));
       return;
     }
   }
