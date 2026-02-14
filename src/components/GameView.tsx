@@ -31,7 +31,6 @@ import {
   closeRoom,
   createRoom,
   fetchFriends,
-  fetchLeaderboard,
   fetchMyRooms,
   fetchRoom,
   fetchShopCatalog,
@@ -46,9 +45,7 @@ import {
   respondFriend,
   type FriendEntry,
   type IncomingFriendRequest,
-  type LeaderboardMeEntry,
   type LeaderboardMode,
-  type LeaderboardTopEntry,
   type MyRoomEntry,
   type OutgoingFriendRequest,
   type RoomMember,
@@ -56,6 +53,18 @@ import {
   type ShopCatalogItem,
   type WalletLedgerEntry,
 } from '../game/wallet';
+import {
+  getPersonalBest,
+  listLeaderboardTop as listLocalLeaderboardTop,
+  modeFromTeamSize,
+  upsertLeaderboardScore,
+  type LeaderboardRecord,
+} from '../game/localLeaderboard';
+import {
+  getStoredPlayerProfile,
+  upsertStoredPlayerProfile,
+  validatePlayerName,
+} from '../game/localProfile';
 import { WsDebugOverlay } from './WsDebugOverlay';
 import { useWsClient } from '../ws/useWsClient';
 import { resolveDevIdentity } from '../utils/devIdentity';
@@ -155,6 +164,7 @@ const JOYSTICK_RADIUS = 56;
 const JOYSTICK_DEADZONE = 10;
 const INTRO_PLACEHOLDER_MS = 5500;
 const ONBOARDING_DONE_KEY = 'rift_onboarding_v1_done';
+const PLAYER_REGISTRATION_DONE_PREFIX = 'rift_player_registration_v1_done';
 const MOBILE_ROTATE_OVERLAY_BREAKPOINT = 700;
 
 type TelegramWebApp = {
@@ -178,6 +188,7 @@ export default function GameView(): JSX.Element {
   const gameRef = useRef<Phaser.Game | null>(null);
   const sceneRef = useRef<GameScene | null>(null);
   const inputSeqRef = useRef(0);
+  const joystickTouchZoneRef = useRef<HTMLDivElement | null>(null);
   const joystickPadRef = useRef<HTMLDivElement | null>(null);
   const joystickPointerIdRef = useRef<number | null>(null);
   const hudLivesRef = useRef<HTMLSpanElement | null>(null);
@@ -210,6 +221,9 @@ export default function GameView(): JSX.Element {
   const [joystickPressed, setJoystickPressed] = useState(false);
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [profileName, setProfileName] = useState<string>('—');
+  const [playerRegistrationOpen, setPlayerRegistrationOpen] = useState(false);
+  const [playerNameDraft, setPlayerNameDraft] = useState('');
+  const [playerNameError, setPlayerNameError] = useState<string | null>(null);
   const [token, setToken] = useState<string>(() => localStorage.getItem('rift_session_token') ?? '');
   const [devIdentity] = useState(() => resolveDevIdentity(window.location.search));
   const [localTgUserId, setLocalTgUserId] = useState<string | undefined>(devIdentity.localFallbackTgUserId);
@@ -229,8 +243,8 @@ export default function GameView(): JSX.Element {
   const [settingsTab, setSettingsTab] = useState<'audio' | 'account'>('audio');
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [leaderboardMode, setLeaderboardMode] = useState<LeaderboardMode>('solo');
-  const [leaderboardTop, setLeaderboardTop] = useState<LeaderboardTopEntry[]>([]);
-  const [leaderboardMe, setLeaderboardMe] = useState<LeaderboardMeEntry | null>(null);
+  const [leaderboardTop, setLeaderboardTop] = useState<LeaderboardRecord[]>([]);
+  const [leaderboardMe, setLeaderboardMe] = useState<{ rank: number; score: number } | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const [multiplayerOpen, setMultiplayerOpen] = useState(false);
@@ -253,6 +267,7 @@ export default function GameView(): JSX.Element {
   const [audioSettings, setAudioSettings] = useState<AudioSettings>({ musicEnabled: true, sfxEnabled: true });
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
+  const [referralDraft, setReferralDraft] = useState('Coming soon');
   const [gameFlowPhase, setGameFlowPhase] = useState<GameFlowPhase>('intro');
   const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
   const [tutorialActive, setTutorialActive] = useState(false);
@@ -290,13 +305,41 @@ export default function GameView(): JSX.Element {
     && (currentRoom.phase ?? 'LOBBY') !== 'STARTED',
   );
 
-  const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive || waitingForOtherPlayer;
+  const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive || waitingForOtherPlayer || playerRegistrationOpen;
   const isMobileViewport = Math.min(viewportSize.width, viewportSize.height) < MOBILE_ROTATE_OVERLAY_BREAKPOINT;
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
   const deathOverlayVisible = lifeState.awaitingContinue || lifeState.gameOver;
   const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay || deathOverlayVisible || lifeState.eliminated;
   const shellSizeRef = useRef<{ width: number; height: number }>({ width: window.innerWidth, height: window.innerHeight });
+  const lastSubmittedSignatureRef = useRef<string>('');
+
+  const getCurrentLeaderboardPayload = useCallback(() => {
+    const teamPlayers = (currentRoomMembers.length >= 2 ? currentRoomMembers : [{
+      tgUserId: localTgUserId ?? '__local__',
+      displayName: profileName,
+      joinedAt: '',
+      ready: true,
+    }]).map((member) => ({ tgUserId: member.tgUserId, displayName: member.displayName }));
+
+    const mode = modeFromTeamSize(teamPlayers.length);
+    return {
+      mode,
+      score: Math.max(0, Math.floor(stats.score ?? 0)),
+      players: teamPlayers,
+    };
+  }, [currentRoomMembers, localTgUserId, profileName, stats.score]);
+
+  const submitScoreIfNeeded = useCallback((reason: string): void => {
+    const payload = getCurrentLeaderboardPayload();
+    if (payload.score <= 0) return;
+
+    const signature = `${reason}:${payload.mode}:${payload.players.map((p) => p.tgUserId).sort().join('|')}:${payload.score}`;
+    if (lastSubmittedSignatureRef.current === signature) return;
+    lastSubmittedSignatureRef.current = signature;
+
+    upsertLeaderboardScore(payload);
+  }, [getCurrentLeaderboardPayload]);
 
   const updateTgMetrics = useCallback((): void => {
     const tg = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
@@ -581,6 +624,43 @@ export default function GameView(): JSX.Element {
 
 
   useEffect(() => {
+    const stored = getStoredPlayerProfile(localTgUserId);
+    if (stored?.playerName) {
+      setProfileName(stored.playerName);
+      setDisplayNameDraft(stored.playerName);
+      setPlayerNameDraft(stored.playerName);
+      setPlayerRegistrationOpen(false);
+      return;
+    }
+
+    const base = profileName && profileName !== '—' ? profileName : '';
+    setPlayerNameDraft(base);
+    setPlayerRegistrationOpen(true);
+  }, [localTgUserId]);
+
+  useEffect(() => {
+    if (!lifeState.gameOver) return;
+    submitScoreIfNeeded('game_over');
+  }, [lifeState.gameOver, submitScoreIfNeeded]);
+
+  useEffect(() => {
+    const onPageHide = (): void => {
+      submitScoreIfNeeded('exit');
+    };
+    window.addEventListener('beforeunload', onPageHide);
+    window.addEventListener('pagehide', onPageHide);
+
+    return () => {
+      window.removeEventListener('beforeunload', onPageHide);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, [submitScoreIfNeeded]);
+
+  useEffect(() => {
+    setReferralDraft(accountInfo?.referralLink || `https://t.me/share/url?text=Join%20Rift%20Runners&user=${localTgUserId ?? 'player'}`);
+  }, [accountInfo?.referralLink, localTgUserId]);
+
+  useEffect(() => {
     const id = window.setInterval(() => {
       setSyncStatus(getCampaignSyncStatus());
     }, 1000);
@@ -786,10 +866,10 @@ export default function GameView(): JSX.Element {
   const updateJoystickFromPointer = (clientX: number, clientY: number): void => {
     if (isInteractionBlocked) return;
 
-    const pad = joystickPadRef.current;
-    if (!pad) return;
+    const visualPad = joystickPadRef.current;
+    if (!visualPad) return;
 
-    const rect = pad.getBoundingClientRect();
+    const rect = visualPad.getBoundingClientRect();
     const centerX = rect.left + (rect.width / 2);
     const centerY = rect.top + (rect.height / 2);
     const dx = clientX - centerX;
@@ -822,11 +902,11 @@ export default function GameView(): JSX.Element {
     event.preventDefault();
     event.stopPropagation();
 
-    const pad = joystickPadRef.current;
-    if (!pad) return;
+    const touchZone = joystickTouchZoneRef.current;
+    if (!touchZone) return;
 
-    if (typeof pad.setPointerCapture === 'function') {
-      pad.setPointerCapture(event.pointerId);
+    if (typeof touchZone.setPointerCapture === 'function') {
+      touchZone.setPointerCapture(event.pointerId);
     }
     joystickPointerIdRef.current = event.pointerId;
     setJoystickPressed(true);
@@ -845,9 +925,9 @@ export default function GameView(): JSX.Element {
   };
 
   const releaseJoystick = (pointerId?: number): void => {
-    const pad = joystickPadRef.current;
-    if (pad && pointerId !== undefined && typeof pad.hasPointerCapture === 'function' && pad.hasPointerCapture(pointerId)) {
-      pad.releasePointerCapture(pointerId);
+    const touchZone = joystickTouchZoneRef.current;
+    if (touchZone && pointerId !== undefined && typeof touchZone.hasPointerCapture === 'function' && touchZone.hasPointerCapture(pointerId)) {
+      touchZone.releasePointerCapture(pointerId);
     }
     joystickPointerIdRef.current = null;
     setJoystickPressed(false);
@@ -870,8 +950,8 @@ export default function GameView(): JSX.Element {
     event.preventDefault();
     event.stopPropagation();
 
-    const pad = joystickPadRef.current;
-    if (pad && typeof pad.hasPointerCapture === 'function' && pad.hasPointerCapture(event.pointerId)) {
+    const touchZone = joystickTouchZoneRef.current;
+    if (touchZone && typeof touchZone.hasPointerCapture === 'function' && touchZone.hasPointerCapture(event.pointerId)) {
       return;
     }
 
@@ -913,15 +993,10 @@ export default function GameView(): JSX.Element {
     setLeaderboardLoading(true);
     setLeaderboardError(null);
     try {
-      const response = await fetchLeaderboard(mode);
-      if (!response) {
-        setLeaderboardError('Failed to load leaderboard');
-        setLeaderboardTop([]);
-        setLeaderboardMe(null);
-        return;
-      }
-      setLeaderboardTop(response.top);
-      setLeaderboardMe(response.me);
+      const top = listLocalLeaderboardTop(mode, 10);
+      const me = getPersonalBest(mode, localTgUserId);
+      setLeaderboardTop(top);
+      setLeaderboardMe(me);
     } catch {
       setLeaderboardError('Failed to load leaderboard');
       setLeaderboardTop([]);
@@ -929,7 +1004,7 @@ export default function GameView(): JSX.Element {
     } finally {
       setLeaderboardLoading(false);
     }
-  }, []);
+  }, [localTgUserId]);
 
   const loadRooms = useCallback(async (): Promise<void> => {
     setRoomsLoading(true);
@@ -959,7 +1034,7 @@ export default function GameView(): JSX.Element {
     } finally {
       setRoomsLoading(false);
     }
-  }, [currentRoom?.roomCode]);
+  }, [currentRoom?.roomCode, submitScoreIfNeeded]);
 
   const joinRoomByCode = useCallback(async (roomCodeRaw: string): Promise<void> => {
     const roomCode = roomCodeRaw.trim().toUpperCase();
@@ -1005,6 +1080,7 @@ export default function GameView(): JSX.Element {
 
   const onLeaveRoom = useCallback(async (): Promise<void> => {
     if (!currentRoom) return;
+    submitScoreIfNeeded('exit_room');
 
     setRoomsError(null);
     const result = await leaveRoom();
@@ -1022,10 +1098,11 @@ export default function GameView(): JSX.Element {
     setCurrentRoomMembers([]);
     const rooms = await fetchMyRooms();
     setMyRooms(rooms);
-  }, [currentRoom]);
+  }, [currentRoom, submitScoreIfNeeded]);
 
   const onCloseRoom = useCallback(async (): Promise<void> => {
     if (!currentRoom?.roomCode) return;
+    submitScoreIfNeeded('close_room');
 
     setRoomsError(null);
     const result = await closeRoom(currentRoom.roomCode);
@@ -1280,18 +1357,26 @@ export default function GameView(): JSX.Element {
   };
 
   const onCopyReferral = async (): Promise<void> => {
-    if (!accountInfo?.referralLink) return;
+    if (!referralDraft) return;
     try {
-      await navigator.clipboard.writeText(accountInfo.referralLink);
+      await navigator.clipboard.writeText(referralDraft);
     } catch {
       // no-op
     }
   };
 
   const onSubmitDisplayName = async (): Promise<void> => {
+    const validation = validatePlayerName(displayNameDraft);
+    if (!validation.ok) return;
+
+    const stored = upsertStoredPlayerProfile(localTgUserId, validation.value);
+    if (stored) {
+      setProfileName(stored.playerName);
+      setDisplayNameDraft(stored.playerName);
+      setAccountInfo((prev) => (prev ? { ...prev, displayName: stored.playerName } : prev));
+    }
+
     if (!token) return;
-    const trimmed = displayNameDraft.trim();
-    if (!trimmed) return;
 
     const response = await fetch('/api/profile/name', {
       method: 'POST',
@@ -1299,19 +1384,38 @@ export default function GameView(): JSX.Element {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ displayName: trimmed }),
+      body: JSON.stringify({ displayName: validation.value }),
     });
 
     const json = await response.json().catch(() => null);
     if (response.ok && json?.ok) {
-      setProfileName(trimmed);
-      setAccountInfo((prev) => (prev ? { ...prev, displayName: trimmed, nameChangeRemaining: Number(json.remaining ?? prev.nameChangeRemaining) } : prev));
+      setAccountInfo((prev) => (prev ? { ...prev, nameChangeRemaining: Number(json.remaining ?? prev.nameChangeRemaining) } : prev));
       return;
     }
 
     if (response.status === 429) {
       setAccountInfo((prev) => (prev ? { ...prev, nameChangeRemaining: 0 } : prev));
     }
+  };
+
+  const onSubmitPlayerRegistration = (): void => {
+    const validation = validatePlayerName(playerNameDraft);
+    if (!validation.ok) {
+      setPlayerNameError(validation.error);
+      return;
+    }
+
+    const stored = upsertStoredPlayerProfile(localTgUserId, validation.value);
+    if (!stored) {
+      setPlayerNameError('Failed to save player name.');
+      return;
+    }
+
+    setPlayerNameError(null);
+    setPlayerRegistrationOpen(false);
+    setProfileName(stored.playerName);
+    setDisplayNameDraft(stored.playerName);
+    localStorage.setItem(`${PLAYER_REGISTRATION_DONE_PREFIX}:${stored.tgUserId}`, '1');
   };
 
   useEffect(() => {
@@ -1379,6 +1483,9 @@ export default function GameView(): JSX.Element {
         zoomApiRef.current?.setZoom(minZoom);
       });
     });
+    if (playerRegistrationOpen) {
+      return;
+    }
     if (!onboardingDone) {
       setTutorialStepIndex(0);
       setTutorialActive(true);
@@ -1438,6 +1545,34 @@ export default function GameView(): JSX.Element {
           )}
         </div>
       )}
+      {gameFlowPhase === 'playing' && playerRegistrationOpen && (
+        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Create your player">
+          <div className="settings-modal">
+            <div className="settings-header">
+              <strong>Create your player</strong>
+            </div>
+            <div className="settings-panel">
+              <input
+                type="text"
+                maxLength={24}
+                value={playerNameDraft}
+                onChange={(event) => {
+                  setPlayerNameDraft(event.target.value);
+                  setPlayerNameError(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    onSubmitPlayerRegistration();
+                  }
+                }}
+                placeholder="Player name"
+              />
+              {playerNameError ? <div>{playerNameError}</div> : null}
+              <button type="button" onClick={onSubmitPlayerRegistration}>Continue</button>
+            </div>
+          </div>
+        </div>
+      )}
       {gameFlowPhase === 'playing' && tutorialActive && currentTutorialStep && (
         <div className="tutorial-overlay" role="dialog" aria-modal="true" aria-label="Tutorial spotlight">
           {tutorialTargetRect ? (
@@ -1480,7 +1615,7 @@ export default function GameView(): JSX.Element {
           <div className="waiting-overlay__card">
             <strong>GAME OVER</strong>
             <p>Жизни закончились.</p>
-            <button type="button" onClick={() => sceneRef.current?.restartSoloRun()}>Restart The Game</button>
+            <button type="button" onClick={() => { submitScoreIfNeeded('restart'); sceneRef.current?.restartSoloRun(); }}>Restart The Game</button>
           </div>
         </div>
       )}
@@ -1540,7 +1675,7 @@ export default function GameView(): JSX.Element {
 
           <div className="left-joystick">
             <div
-              ref={joystickPadRef}
+              ref={joystickTouchZoneRef}
               className={`joystick-touch-zone ${joystickPressed ? 'joystick-touch-zone--active' : ''}`}
               onPointerDown={onJoystickPointerDown}
               onPointerMove={onJoystickPointerMove}
@@ -1551,7 +1686,7 @@ export default function GameView(): JSX.Element {
               aria-label="Virtual joystick"
             >
               <div className="joystick-wrap">
-                <div className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}>
+                <div ref={joystickPadRef} className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}>
                   <div
                     className="joystick-knob"
                     style={{
@@ -1675,12 +1810,17 @@ export default function GameView(): JSX.Element {
               ) : leaderboardTop.length === 0 ? (
                 <div>No scores yet for this mode.</div>
               ) : (
-                leaderboardTop.map((entry) => (
-                  <div key={`${entry.rank}-${entry.tgUserId}`} className="settings-kv">
-                    <span>#{entry.rank} {entry.displayName}</span>
-                    <strong>{entry.score}</strong>
-                  </div>
-                ))
+                leaderboardTop.map((entry, index) => {
+                  const rank = index + 1;
+                  const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '';
+                  const names = entry.players.map((player) => player.displayName).join(', ');
+                  return (
+                    <div key={entry.id} className={`settings-kv leaderboard-row leaderboard-row--${rank <= 3 ? rank : 'other'}`}>
+                      <span>{medal} #{rank} • {entry.mode} • {names}</span>
+                      <strong>{entry.score}</strong>
+                    </div>
+                  );
+                })
               )}
 
               <hr />
@@ -1959,23 +2099,23 @@ export default function GameView(): JSX.Element {
               </div>
             ) : (
               <div className="settings-panel">
-                <div className="settings-kv"><span>ID</span><strong>{accountInfo?.id ?? '—'}</strong></div>
-                <div className="settings-kv"><span>Remaining</span><strong>{accountInfo?.nameChangeRemaining ?? 3}</strong></div>
+                <div className="settings-kv"><span>Player name</span><strong>{profileName}</strong></div>
+                <div className="settings-kv"><span>Telegram ID</span><strong>{localTgUserId ?? accountInfo?.id ?? '—'}</strong></div>
+                <div className="settings-kv"><span>Name changes left</span><strong>{accountInfo?.nameChangeRemaining ?? 3}</strong></div>
                 <div className="settings-ref">
-                  <input type="text" readOnly value={accountInfo?.referralLink ?? ''} />
+                  <input type="text" readOnly value={referralDraft} />
                   <button type="button" onClick={() => { void onCopyReferral(); }}>Copy</button>
                 </div>
                 <input
                   type="text"
-                  maxLength={32}
+                  maxLength={24}
                   value={displayNameDraft}
                   onChange={(event) => setDisplayNameDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
-                      void onSubmitDisplayName();
-                    }
+                                      }
                   }}
-                  placeholder="Display name"
+                  placeholder="Player name"
                 />
               </div>
             )}

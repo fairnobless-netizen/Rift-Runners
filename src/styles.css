@@ -294,7 +294,7 @@ body {
 }
 
 .joystick-touch-zone {
-  width: min(100%, calc(210px * var(--ui-scale)));
+  width: min(100%, calc(420px * var(--ui-scale)));
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   display: flex;
@@ -1139,4 +1139,21 @@ html[data-orient="landscape"] .right-panel {
 .rotate-overlay__card p {
   margin: 0.4rem 0 0;
   color: #c7d4fc;
+}
+
+
+.leaderboard-row--1 {
+  color: #ffd54a;
+}
+
+.leaderboard-row--2 {
+  color: #d7dde8;
+}
+
+.leaderboard-row--3 {
+  color: #d39a63;
+}
+
+.leaderboard-row--other {
+  color: #c5c8d3;
 }
