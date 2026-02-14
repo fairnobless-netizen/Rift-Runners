@@ -153,6 +153,7 @@ export function WsDebugOverlay({
   const debugUiFlag = String(import.meta.env.VITE_DEBUG_UI ?? '').trim().toLowerCase();
   const [isExplicitDebugEnabled, setIsExplicitDebugEnabled] = useState(false);
   const showDebugUi = debugUiFlag === '1' || debugUiFlag === 'true' || import.meta.env.DEV || isExplicitDebugEnabled;
+  const showProbeUi = import.meta.env.DEV || window.localStorage.getItem('rr_debug') === '1';
 
 
   useEffect(() => {
@@ -534,9 +535,11 @@ export function WsDebugOverlay({
               pointerEvents: 'auto', // interactive children enabled
             }}
           >
-            <button data-testid="probe-btn" onClick={runProbe}>
-              Probe 20 moves
-            </button>
+            {showProbeUi ? (
+              <button data-testid="probe-btn" onClick={runProbe}>
+                Probe 20 moves
+              </button>
+            ) : null}
 
             <button
               type="button"
@@ -548,7 +551,7 @@ export function WsDebugOverlay({
             </button>
           </div>
 
-          {probeSummary && (
+          {showProbeUi && probeSummary && (
             <div
               data-testid="probe-summary"
               style={{
