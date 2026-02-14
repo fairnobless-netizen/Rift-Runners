@@ -1125,3 +1125,27 @@ button:disabled {
   margin: 0.35rem 0 0;
   color: #c1cdef;
 }
+
+.rotate-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(3, 7, 16, 0.92);
+  pointer-events: auto;
+}
+
+.rotate-overlay__card {
+  width: min(90vw, 360px);
+  border: 1px solid #4e62a0;
+  border-radius: 14px;
+  padding: 1rem;
+  text-align: center;
+  background: linear-gradient(160deg, #0d1530f2, #0a1228f2);
+}
+
+.rotate-overlay__card p {
+  margin: 0.4rem 0 0;
+  color: #c7d4fc;
+}

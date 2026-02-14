@@ -152,7 +152,7 @@ const JOYSTICK_RADIUS = 56;
 const JOYSTICK_DEADZONE = 10;
 const INTRO_PLACEHOLDER_MS = 5500;
 const ONBOARDING_DONE_KEY = 'rift_onboarding_v1_done';
-const FULL_AUTOONCE_DISABLED_KEY = 'rr_full_autoonce_disabled';
+const MOBILE_ROTATE_OVERLAY_BREAKPOINT = 700;
 
 type TelegramWebApp = {
   ready?: () => void;
@@ -163,6 +163,7 @@ type TelegramWebApp = {
 };
 
 export default function GameView(): JSX.Element {
+  const pageRef = useRef<HTMLElement | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const sceneRef = useRef<GameScene | null>(null);
@@ -243,8 +244,11 @@ export default function GameView(): JSX.Element {
   const [bootSplashProgress, setBootSplashProgress] = useState<number>(() => (bootSplashSeen ? 1 : 0));
   const [bootSplashFileKey, setBootSplashFileKey] = useState<string>('');
   const [bootSplashClosing, setBootSplashClosing] = useState(false);
+  const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
   const ws = useWsClient(token || undefined);
-  const autoFullViewAttemptedRef = useRef(false);
 
   const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
   const baseHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
@@ -268,6 +272,23 @@ export default function GameView(): JSX.Element {
   );
 
   const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive || waitingForOtherPlayer;
+  const isMobileViewport = Math.min(viewportSize.width, viewportSize.height) < MOBILE_ROTATE_OVERLAY_BREAKPOINT;
+  const isPortraitViewport = viewportSize.height >= viewportSize.width;
+  const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
+  const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay;
+
+  const tryTelegramExpand = useCallback((_reason: string): void => {
+    const webApp = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
+    if (!webApp) return;
+
+    document.documentElement.classList.add('telegram-fullview');
+    try {
+      webApp.ready?.();
+      webApp.expand?.();
+    } catch {
+      // Telegram iOS may ignore/throw without a user gesture.
+    }
+  }, []);
 
   useEffect(() => {
     if (!tutorialActive || !currentTutorialStep) {
@@ -374,48 +395,53 @@ export default function GameView(): JSX.Element {
   }, [applyAudioSettings, token]);
 
   useEffect(() => {
-    const root = document.documentElement;
+    const onResize = (): void => {
+      setViewportSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
+
+  useEffect(() => {
     const webApp = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
-    let hasAutoExpanded = false;
 
     const onViewportChanged = (): void => {
-      if (!hasAutoExpanded) return;
-      if (webApp?.isExpanded !== false) return;
-
-      sessionStorage.setItem(FULL_AUTOONCE_DISABLED_KEY, '1');
-      root.classList.remove('telegram-fullview');
+      if (!webApp) return;
+      if (webApp.isExpanded === false) {
+        document.documentElement.classList.remove('telegram-fullview');
+        return;
+      }
+      document.documentElement.classList.add('telegram-fullview');
     };
 
     const onReady = (): void => {
-      if (autoFullViewAttemptedRef.current) return;
-      autoFullViewAttemptedRef.current = true;
-
-      if (sessionStorage.getItem(FULL_AUTOONCE_DISABLED_KEY) === '1') {
-        root.classList.remove('telegram-fullview');
-        return;
-      }
-
-      root.classList.add('telegram-fullview');
-      webApp?.ready?.();
-
-      try {
-        webApp?.expand?.();
-      } catch {
-        // Telegram iOS may ignore/throw without a user gesture; keep app-level full view only.
-      }
-
-      hasAutoExpanded = true;
+      tryTelegramExpand('event-ready');
     };
 
+    const onFirstGesture = (): void => {
+      tryTelegramExpand('first-gesture');
+    };
+
+    tryTelegramExpand('mount');
     gameEvents.on(EVENT_READY, onReady);
     webApp?.onEvent?.('viewportChanged', onViewportChanged);
+    pageRef.current?.addEventListener('pointerdown', onFirstGesture, { once: true });
+    pageRef.current?.addEventListener('touchstart', onFirstGesture, { once: true, passive: true });
 
     return () => {
       gameEvents.off(EVENT_READY, onReady);
       webApp?.offEvent?.('viewportChanged', onViewportChanged);
-      root.classList.remove('telegram-fullview');
+      pageRef.current?.removeEventListener('pointerdown', onFirstGesture);
+      pageRef.current?.removeEventListener('touchstart', onFirstGesture);
+      document.documentElement.classList.remove('telegram-fullview');
     };
-  }, []);
+  }, [tryTelegramExpand]);
 
   useEffect(() => {
     const runAuth = async () => {
@@ -658,14 +684,14 @@ export default function GameView(): JSX.Element {
   }, [gameFlowPhase, showBootSplash]);
 
   useEffect(() => {
-    if (!isInputLocked) return;
+    if (!isInteractionBlocked) return;
     releaseJoystick();
     controlsRef.current.placeBombRequested = false;
     controlsRef.current.detonateRequested = false;
-  }, [isInputLocked]);
+  }, [isInteractionBlocked]);
 
   const setDirection = (direction: Direction, active: boolean): void => {
-    if (isInputLocked) return;
+    if (isInteractionBlocked) return;
 
     if (active) {
       setMovementFromDirection(direction);
@@ -678,7 +704,7 @@ export default function GameView(): JSX.Element {
   };
 
   const updateJoystickFromPointer = (clientX: number, clientY: number): void => {
-    if (isInputLocked) return;
+    if (isInteractionBlocked) return;
 
     const pad = joystickPadRef.current;
     if (!pad) return;
@@ -711,7 +737,7 @@ export default function GameView(): JSX.Element {
   };
 
   const onJoystickPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (isInputLocked) return;
+    if (isInteractionBlocked) return;
 
     const pad = joystickPadRef.current;
     if (!pad) return;
@@ -722,7 +748,7 @@ export default function GameView(): JSX.Element {
   };
 
   const onJoystickPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (isInputLocked) return;
+    if (isInteractionBlocked) return;
     if (!joystickPressed) return;
     updateJoystickFromPointer(event.clientX, event.clientY);
   };
@@ -742,12 +768,12 @@ export default function GameView(): JSX.Element {
   };
 
   const requestBomb = (): void => {
-    if (isInputLocked) return;
+    if (isInteractionBlocked) return;
     controlsRef.current.placeBombRequested = true;
   };
 
   const requestDetonate = (): void => {
-    if (isInputLocked) return;
+    if (isInteractionBlocked) return;
     if (!isRemoteDetonateUnlocked) return;
     controlsRef.current.detonateRequested = true;
   };
@@ -1199,6 +1225,7 @@ export default function GameView(): JSX.Element {
     : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
 
   const onStartGame = (): void => {
+    if (shouldShowRotateOverlay) return;
     setGameFlowPhase('playing');
     if (!onboardingDone) {
       setTutorialStepIndex(0);
@@ -1217,7 +1244,7 @@ export default function GameView(): JSX.Element {
   };
 
   return (
-    <main className="page">
+    <main ref={pageRef} className="page">
       {showBootSplash && (
         <div className={`boot-splash ${bootSplashClosing ? 'boot-splash--closing' : ''}`} role="status" aria-live="polite">
           <div className="boot-splash-card">
@@ -1254,7 +1281,7 @@ export default function GameView(): JSX.Element {
           ) : (
             <div className="game-flow-card">
               <h2>Ready to start?</h2>
-              <button type="button" className="game-flow-start-btn" onClick={onStartGame}>Start</button>
+              <button type="button" className="game-flow-start-btn" disabled={shouldShowRotateOverlay} onClick={onStartGame}>Start</button>
             </div>
           )}
         </div>
@@ -1284,6 +1311,14 @@ export default function GameView(): JSX.Element {
           <div className="waiting-overlay__card">
             <strong>Waiting for other player…</strong>
             <p>Вы готовы. Ждём, пока второй игрок нажмёт Ready.</p>
+          </div>
+        </div>
+      )}
+      {shouldShowRotateOverlay && (
+        <div className="rotate-overlay" role="status" aria-live="polite">
+          <div className="rotate-overlay__card">
+            <strong>Поверните телефон</strong>
+            <p>Для Rift Runners нужен ландшафтный режим.</p>
           </div>
         </div>
       )}
