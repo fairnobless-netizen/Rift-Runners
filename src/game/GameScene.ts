@@ -231,6 +231,8 @@ export class GameScene extends Phaser.Scene {
   private maxZoom: number = GAME_CONFIG.maxZoom;
   private pinchStartDistance: number | null = null;
   private pinchStartZoom: number | null = null;
+  private cameraFollowThresholdZoom: number = GAME_CONFIG.minZoom;
+  private isCameraFollowingPlayer = false;
 
   constructor(controls: ControlsState) {
     super('GameScene');
@@ -577,7 +579,10 @@ export class GameScene extends Phaser.Scene {
     const minZoom = viewportHeight / worldHeight;
     this.minZoom = minZoom;
     this.maxZoom = maxZoom;
-    this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
+    this.cameraFollowThresholdZoom = minZoom * 1.05;
+    this.cameras.main.setBounds(0, 0, worldWidth, worldHeight, true);
+    this.cameras.main.roundPixels = true;
+    this.cameras.main.setDeadzone(this.scale.width * 0.26, this.scale.height * 0.26);
     this.applyZoom(minZoom, false);
 
     gameEvents.emit(EVENT_READY, {
@@ -715,6 +720,7 @@ export class GameScene extends Phaser.Scene {
     this.enemyNextMoveAt.clear();
 
     this.rebuildArenaTiles();
+    this.syncCameraBoundsToArena();
     this.spawnPlayer();
     this.spawnEnemies();
     this.bossController.reset({ arena: this.arena, isBossLevel: this.isBossLevel, playerCount: 1 });
@@ -736,7 +742,7 @@ export class GameScene extends Phaser.Scene {
 
     emitStats(this.stats);
     this.emitLifeState();
-    if (this.playerSprite) this.cameras.main.startFollow(this.playerSprite, true, 0.2, 0.2);
+    this.updateCameraFollowMode();
 
     this.emitSimulation(LEVEL_STARTED, this.time.now, {
       ...this.getLevelProgressModel(),
@@ -1026,6 +1032,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(style.depth ?? DEPTH_PLAYER)
       .setDisplaySize(tileSize * (style.scale ?? 0.74), tileSize * (style.scale ?? 0.74));
     this.placeLocalPlayerSpriteAt(this.player.gridX, this.player.gridY);
+    this.updateCameraFollowMode();
   }
 
   private spawnEnemies(): void {
@@ -1103,7 +1110,36 @@ export class GameScene extends Phaser.Scene {
   private applyZoom(zoom: number, emitEvent = true): void {
     const clamped = Phaser.Math.Clamp(zoom, this.minZoom, this.maxZoom);
     this.cameras.main.setZoom(clamped);
+    this.updateCameraFollowMode();
     if (emitEvent) emitZoomChanged({ zoom: clamped });
+  }
+
+  private syncCameraBoundsToArena(): void {
+    const { tileSize } = GAME_CONFIG;
+    const worldWidth = this.arena.width * tileSize;
+    const worldHeight = this.arena.height * tileSize;
+    this.cameras.main.setBounds(0, 0, worldWidth, worldHeight, true);
+  }
+
+  private updateCameraFollowMode(): void {
+    if (!this.playerSprite) return;
+
+    const camera = this.cameras.main;
+    const shouldFollow = camera.zoom > this.cameraFollowThresholdZoom;
+
+    if (shouldFollow) {
+      if (!this.isCameraFollowingPlayer) {
+        camera.startFollow(this.playerSprite, true, 0.14, 0.14);
+        this.isCameraFollowingPlayer = true;
+      }
+      return;
+    }
+
+    if (this.isCameraFollowingPlayer) {
+      camera.stopFollow();
+      this.isCameraFollowingPlayer = false;
+    }
+    camera.centerOn(this.playerSprite.x, this.playerSprite.y);
   }
 
   private getActivePointers(): Phaser.Input.Pointer[] {
