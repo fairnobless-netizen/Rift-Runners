@@ -27,9 +27,9 @@ import {
   DEPTH_BREAKABLE,
   DEPTH_ENEMY,
   DEPTH_FLAME,
+  DEPTH_FLOOR,
   DEPTH_ITEM,
   DEPTH_PLAYER,
-  FLAME_SEGMENT_SCALE,
   GAME_CONFIG,
   DOOR_CONFIG,
   BOSS_CONFIG,
@@ -82,6 +82,15 @@ import type {
 interface TimedDirection {
   dir: Direction;
   justPressed: boolean;
+}
+
+interface FlameBeamModel {
+  key: string;
+  axis: FlameArmAxis;
+  x: number;
+  y: number;
+  lengthTiles: number;
+  expiresAt: number;
 }
 
 const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
@@ -203,7 +212,9 @@ export class GameScene extends Phaser.Scene {
   private bombSprites = new Map<string, Phaser.GameObjects.Image>();
   private itemSprites = new Map<string, Phaser.GameObjects.Image>();
   private flameSprites = new Map<string, Phaser.GameObjects.Image>();
+  private flameBeamSprites = new Map<string, Phaser.GameObjects.Image>();
   private activeFlames = new Map<string, FlameModel>();
+  private activeFlameBeams = new Map<string, FlameBeamModel>();
 
   private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
   private spaceKey?: Phaser.Input.Keyboard.Key;
@@ -312,6 +323,78 @@ export class GameScene extends Phaser.Scene {
       g.destroy();
     };
 
+    const createTileTexture = (key: string, baseColor: number, accentColor: number): void => {
+      if (this.textures.exists(key)) return;
+      const g = this.add.graphics().setVisible(false);
+      g.fillStyle(baseColor, 1);
+      g.fillRoundedRect(0, 0, textureSize, textureSize, 16);
+      g.fillStyle(accentColor, 0.18);
+      g.fillRoundedRect(8, 8, textureSize - 16, textureSize - 16, 10);
+      g.lineStyle(4, accentColor, 0.45);
+      g.strokeRoundedRect(4, 4, textureSize - 8, textureSize - 8, 14);
+      g.generateTexture(key, textureSize, textureSize);
+      g.destroy();
+    };
+
+    const createExplosionTexture = (key: string, axis: 'core' | 'horizontal' | 'vertical'): void => {
+      if (this.textures.exists(key)) return;
+      const g = this.add.graphics().setVisible(false);
+      const center = textureSize / 2;
+      g.fillStyle(0xff9f4f, 0.26);
+      if (axis === 'core') {
+        g.fillCircle(center, center, 38);
+      } else if (axis === 'horizontal') {
+        g.fillRoundedRect(4, center - 24, textureSize - 8, 48, 22);
+      } else {
+        g.fillRoundedRect(center - 24, 4, 48, textureSize - 8, 22);
+      }
+
+      g.fillStyle(0xffcf73, 0.92);
+      if (axis === 'core') {
+        g.fillCircle(center, center, 20);
+        g.lineStyle(4, 0xfff5c4, 0.95);
+        g.strokeCircle(center, center, 20);
+      } else if (axis === 'horizontal') {
+        g.fillRoundedRect(6, center - 12, textureSize - 12, 24, 12);
+      } else {
+        g.fillRoundedRect(center - 12, 6, 24, textureSize - 12, 12);
+      }
+
+      g.generateTexture(key, textureSize, textureSize);
+      g.destroy();
+    };
+
+    const createPickupTexture = (key: string, color: number, icon: 'bomb' | 'flame' | 'speed' | 'life'): void => {
+      if (this.textures.exists(key)) return;
+      const g = this.add.graphics().setVisible(false);
+      const center = textureSize / 2;
+
+      g.fillStyle(color, 0.22);
+      g.fillCircle(center, center, 34);
+      g.fillStyle(0x20152e, 0.95);
+      g.fillCircle(center, center, 27);
+      g.lineStyle(5, color, 0.95);
+      g.strokeCircle(center, center, 27);
+
+      g.fillStyle(color, 0.96);
+      if (icon === 'bomb') {
+        g.fillCircle(center, center + 4, 10);
+        g.fillRoundedRect(center + 8, center - 10, 9, 4, 2);
+      } else if (icon === 'flame') {
+        g.fillTriangle(center, center - 16, center - 11, center + 10, center + 11, center + 10);
+        g.fillTriangle(center, center - 8, center - 6, center + 9, center + 6, center + 9);
+      } else if (icon === 'speed') {
+        g.fillTriangle(center - 12, center - 7, center + 5, center - 7, center - 2, center + 3);
+        g.fillTriangle(center - 2, center - 2, center + 13, center - 2, center + 2, center + 12);
+      } else {
+        g.fillCircle(center, center - 4, 7);
+        g.fillRoundedRect(center - 5, center + 1, 10, 14, 4);
+      }
+
+      g.generateTexture(key, textureSize, textureSize);
+      g.destroy();
+    };
+
     createUnitTexture('rr_player', {
       fillColor: 0x4ab3ff,
       strokeColor: 0xd8f1ff,
@@ -336,6 +419,22 @@ export class GameScene extends Phaser.Scene {
       eyeColor: 0x2c114b,
       hasOuterHalo: true,
     });
+
+    createTileTexture('tile_floor', 0x253041, 0x8ca0bf);
+    createTileTexture('tile_wall_a', 0x3d4558, 0xa3b2cc);
+    createTileTexture('tile_wall_b', 0x363d4f, 0x919eb8);
+    createTileTexture('tile_breakable', 0x6c4e3b, 0xdfc7a8);
+    createTileTexture('tile_column_a', 0x594060, 0xd9b2ff);
+    createTileTexture('tile_column_b', 0x473153, 0xc89be8);
+
+    createExplosionTexture('fx_explosion_core', 'core');
+    createExplosionTexture('fx_explosion_beam_h', 'horizontal');
+    createExplosionTexture('fx_explosion_beam_v', 'vertical');
+
+    createPickupTexture('pickup_bomb', 0xf0cf65, 'bomb');
+    createPickupTexture('pickup_flame', 0xff8f57, 'flame');
+    createPickupTexture('pickup_speed', 0x6ed3ff, 'speed');
+    createPickupTexture('pickup_life', 0xff88ad, 'life');
   }
 
   update(time: number, delta: number): void {
@@ -710,12 +809,21 @@ export class GameScene extends Phaser.Scene {
     for (let y = 0; y < this.arena.tiles.length; y += 1) {
       for (let x = 0; x < this.arena.tiles[y].length; x += 1) {
         const tile = this.arena.tiles[y][x];
-        const spec = this.getTileAssetStyle(tile);
-        const block = this.add
-          .image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, this.getTextureKey(spec))
-          .setOrigin(spec.origin?.x ?? 0.5, spec.origin?.y ?? 0.5)
+        this.add
+          .image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, 'tile_floor')
+          .setOrigin(0.5, 0.5)
           .setDisplaySize(tileSize - 2, tileSize - 2)
-          .setDepth(spec.depth ?? (tile === 'Floor' ? 0 : DEPTH_BREAKABLE))
+          .setDepth(DEPTH_FLOOR)
+          .setData('arenaTile', true);
+
+        if (tile === 'Floor') continue;
+
+        const tileTexture = this.getPolishedTileTexture(tile, x, y);
+        const block = this.add
+          .image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, tileTexture)
+          .setOrigin(0.5, 0.5)
+          .setDisplaySize(tileSize - 2, tileSize - 2)
+          .setDepth(DEPTH_BREAKABLE)
           .setData('arenaTile', true);
 
         if (tile === 'BreakableBlock' || tile === 'ANOMALOUS_STONE') {
@@ -1031,6 +1139,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       this.bossController.applyExplosionDamage(result.impacts);
+      this.spawnFlameBeams(bomb.key, bomb.x, bomb.y, result.impacts, time + GAME_CONFIG.flameLifetimeMs);
 
       for (const impact of result.impacts) {
         const segment: FlameSegmentKind = impact.key === bomb.key ? 'center' : 'arm';
@@ -1096,9 +1205,48 @@ export class GameScene extends Phaser.Scene {
     this.activeFlames.set(key, { key, x, y, expiresAt, segment, axis });
   }
 
+  private spawnFlameBeams(centerKey: string, centerX: number, centerY: number, impacts: Array<{ x: number; y: number }>, expiresAt: number): void {
+    let minX = centerX;
+    let maxX = centerX;
+    let minY = centerY;
+    let maxY = centerY;
+
+    for (const impact of impacts) {
+      if (impact.y === centerY) {
+        minX = Math.min(minX, impact.x);
+        maxX = Math.max(maxX, impact.x);
+      }
+      if (impact.x === centerX) {
+        minY = Math.min(minY, impact.y);
+        maxY = Math.max(maxY, impact.y);
+      }
+    }
+
+    this.activeFlameBeams.set(`${centerKey}:h`, {
+      key: `${centerKey}:h`,
+      axis: 'horizontal',
+      x: (minX + maxX) / 2,
+      y: centerY,
+      lengthTiles: maxX - minX + 1,
+      expiresAt,
+    });
+
+    this.activeFlameBeams.set(`${centerKey}:v`, {
+      key: `${centerKey}:v`,
+      axis: 'vertical',
+      x: centerX,
+      y: (minY + maxY) / 2,
+      lengthTiles: maxY - minY + 1,
+      expiresAt,
+    });
+  }
+
   private cleanupExpiredFlames(time: number): void {
     for (const [key, flame] of this.activeFlames.entries()) {
       if (time >= flame.expiresAt) this.activeFlames.delete(key);
+    }
+    for (const [key, beam] of this.activeFlameBeams.entries()) {
+      if (time >= beam.expiresAt) this.activeFlameBeams.delete(key);
     }
   }
 
@@ -1261,11 +1409,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private clearDynamicSprites(): void {
-    const groups = [this.bombSprites, this.itemSprites, this.flameSprites, this.enemySprites] as const;
+    const groups = [this.bombSprites, this.itemSprites, this.flameSprites, this.flameBeamSprites, this.enemySprites] as const;
     for (const group of groups) {
       for (const sprite of group.values()) sprite.destroy();
       group.clear();
     }
+    this.activeFlameBeams.clear();
     this.bossController.clear();
     this.doorSprite?.destroy();
     this.doorSprite = undefined;
@@ -1345,41 +1494,62 @@ export class GameScene extends Phaser.Scene {
       const sprite = this.itemSprites.get(item.key) ?? this.createItemSprite(item.key);
       if (!sprite) continue;
 
-      const style = this.getAssetStyle('item', item.type === 'BombUp' ? 'pickup' : 'active', 'none');
+      const bob = Math.sin(time * 0.005 + item.x * 0.9 + item.y * 0.4) * 3;
       sprite
-        .setPosition(item.x * tileSize + tileSize / 2, item.y * tileSize + tileSize / 2)
-        .setTexture(this.getTextureKey(style))
-        .setDisplaySize(tileSize * (style.scale ?? 0.48), tileSize * (style.scale ?? 0.48))
-        .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
-        .setAlpha(style.alpha ?? 1);
+        .setPosition(item.x * tileSize + tileSize / 2, item.y * tileSize + tileSize / 2 + bob)
+        .setTexture(this.getPickupTextureKey(item.type))
+        .setDisplaySize(tileSize * 0.52, tileSize * 0.52)
+        .setOrigin(0.5, 0.5)
+        .setAlpha(1);
     }
 
     for (const [key, sprite] of this.itemSprites.entries()) {
       if (itemKeys.has(key)) continue;
-      sprite.destroy();
+      this.playPickupCollectBurst(sprite);
       this.itemSprites.delete(key);
     }
 
-    const flameKeys = new Set(this.activeFlames.keys());
+    const centerFlameKeys = new Set([...this.activeFlames.values()].filter((flame) => flame.segment === 'center').map((flame) => flame.key));
     for (const flame of this.activeFlames.values()) {
+      if (flame.segment !== 'center') continue;
       const sprite = this.flameSprites.get(flame.key) ?? this.createFlameSprite(flame.key);
       if (!sprite) continue;
 
-      const state = flame.segment === 'center' ? 'active' : flame.axis === 'vertical' ? 'move' : 'idle';
-      const style = this.getAssetStyle('flame', state, 'none');
-      const size = this.getFlameSegmentSize(flame.segment, flame.axis);
+      const pulse = 0.5 + 0.5 * Math.sin(time * 0.03 + flame.x + flame.y * 0.5);
+      const coreSize = tileSize * Phaser.Math.Linear(0.52, 0.64, pulse);
       sprite
         .setPosition(flame.x * tileSize + tileSize / 2, flame.y * tileSize + tileSize / 2)
-        .setTexture(this.getTextureKey(style))
-        .setDisplaySize(tileSize * size.width, tileSize * size.height)
-        .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
-        .setAlpha(style.alpha ?? 1);
+        .setTexture('fx_explosion_core')
+        .setDisplaySize(coreSize, coreSize)
+        .setOrigin(0.5, 0.5)
+        .setAlpha(Phaser.Math.Linear(0.82, 0.98, pulse));
     }
 
     for (const [key, sprite] of this.flameSprites.entries()) {
-      if (flameKeys.has(key)) continue;
+      if (centerFlameKeys.has(key)) continue;
       sprite.destroy();
       this.flameSprites.delete(key);
+    }
+
+    const beamKeys = new Set(this.activeFlameBeams.keys());
+    for (const beam of this.activeFlameBeams.values()) {
+      const sprite = this.flameBeamSprites.get(beam.key) ?? this.createFlameBeamSprite(beam.key);
+      if (!sprite) continue;
+      const pulse = 0.5 + 0.5 * Math.sin(time * 0.028 + beam.lengthTiles * 0.7);
+      const beamWidthTiles = beam.axis === 'horizontal' ? beam.lengthTiles : 0.64 + pulse * 0.08;
+      const beamHeightTiles = beam.axis === 'vertical' ? beam.lengthTiles : 0.64 + pulse * 0.08;
+      sprite
+        .setPosition(beam.x * tileSize + tileSize / 2, beam.y * tileSize + tileSize / 2)
+        .setTexture(beam.axis === 'horizontal' ? 'fx_explosion_beam_h' : 'fx_explosion_beam_v')
+        .setDisplaySize(tileSize * beamWidthTiles, tileSize * beamHeightTiles)
+        .setOrigin(0.5, 0.5)
+        .setAlpha(Phaser.Math.Linear(0.62, 0.88, pulse));
+    }
+
+    for (const [key, sprite] of this.flameBeamSprites.entries()) {
+      if (beamKeys.has(key)) continue;
+      sprite.destroy();
+      this.flameBeamSprites.delete(key);
     }
 
     const enemyKeys = new Set(this.enemies.keys());
@@ -1473,13 +1643,12 @@ export class GameScene extends Phaser.Scene {
     const item = this.arena.items.get(key);
     if (!item) return null;
 
-    const style = this.getAssetStyle('item', item.type === 'BombUp' ? 'pickup' : 'active', 'none');
     const { tileSize } = GAME_CONFIG;
     const sprite = this.add
-      .image(item.x * tileSize + tileSize / 2, item.y * tileSize + tileSize / 2, this.getTextureKey(style))
-      .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
-      .setDepth(style.depth ?? DEPTH_ITEM)
-      .setDisplaySize(tileSize * (style.scale ?? 0.48), tileSize * (style.scale ?? 0.48));
+      .image(item.x * tileSize + tileSize / 2, item.y * tileSize + tileSize / 2, this.getPickupTextureKey(item.type))
+      .setOrigin(0.5, 0.5)
+      .setDepth(DEPTH_ITEM)
+      .setDisplaySize(tileSize * 0.52, tileSize * 0.52);
 
     this.itemSprites.set(key, sprite);
     return sprite;
@@ -1487,19 +1656,32 @@ export class GameScene extends Phaser.Scene {
 
   private createFlameSprite(key: string): Phaser.GameObjects.Image | null {
     const flame = this.activeFlames.get(key);
-    if (!flame) return null;
+    if (!flame || flame.segment !== 'center') return null;
 
-    const style = this.getAssetStyle('flame', flame.segment === 'center' ? 'active' : flame.axis === 'vertical' ? 'move' : 'idle', 'none');
     const { tileSize } = GAME_CONFIG;
-    const size = this.getFlameSegmentSize(flame.segment, flame.axis);
     const sprite = this.add
-      .image(flame.x * tileSize + tileSize / 2, flame.y * tileSize + tileSize / 2, this.getTextureKey(style))
-      .setDisplaySize(tileSize * size.width, tileSize * size.height)
-      .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
-      .setDepth(style.depth ?? DEPTH_FLAME)
-      .setAlpha(style.alpha ?? 1);
+      .image(flame.x * tileSize + tileSize / 2, flame.y * tileSize + tileSize / 2, 'fx_explosion_core')
+      .setDisplaySize(tileSize * 0.6, tileSize * 0.6)
+      .setOrigin(0.5, 0.5)
+      .setDepth(DEPTH_FLAME + 1)
+      .setAlpha(0.92);
 
     this.flameSprites.set(key, sprite);
+    return sprite;
+  }
+
+  private createFlameBeamSprite(key: string): Phaser.GameObjects.Image | null {
+    const beam = this.activeFlameBeams.get(key);
+    if (!beam) return null;
+
+    const { tileSize } = GAME_CONFIG;
+    const sprite = this.add
+      .image(beam.x * tileSize + tileSize / 2, beam.y * tileSize + tileSize / 2, beam.axis === 'horizontal' ? 'fx_explosion_beam_h' : 'fx_explosion_beam_v')
+      .setOrigin(0.5, 0.5)
+      .setDepth(DEPTH_FLAME)
+      .setDisplaySize(tileSize, tileSize);
+
+    this.flameBeamSprites.set(key, sprite);
     return sprite;
   }
 
@@ -1518,15 +1700,6 @@ export class GameScene extends Phaser.Scene {
     this.enemySprites.set(key, sprite);
     return sprite;
   }
-
-  private getFlameSegmentSize(segment: FlameSegmentKind, axis: FlameArmAxis | undefined): { width: number; height: number } {
-    if (segment === 'center') {
-      return { width: FLAME_SEGMENT_SCALE.center, height: FLAME_SEGMENT_SCALE.center };
-    }
-
-    return axis === 'horizontal' ? FLAME_SEGMENT_SCALE.armHorizontal : FLAME_SEGMENT_SCALE.armVertical;
-  }
-
 
 
   private updateDoorVisual(time: number): void {
@@ -1629,6 +1802,28 @@ export class GameScene extends Phaser.Scene {
     return this.textures.exists(asset.textureKey) ? asset.textureKey : 'fallback-missing';
   }
 
+  private getPolishedTileTexture(tile: TileType, x: number, y: number): string {
+    if (tile === 'HardWall') return (x + y) % 2 === 0 ? 'tile_wall_a' : 'tile_wall_b';
+    if (tile === 'ANOMALOUS_STONE') return (x + y) % 2 === 0 ? 'tile_column_a' : 'tile_column_b';
+    return 'tile_breakable';
+  }
+
+  private getPickupTextureKey(type: 'BombUp' | 'FireUp'): string {
+    return type === 'BombUp' ? 'pickup_bomb' : 'pickup_flame';
+  }
+
+  private playPickupCollectBurst(sprite: Phaser.GameObjects.Image): void {
+    this.tweens.add({
+      targets: sprite,
+      scaleX: sprite.scaleX * 1.4,
+      scaleY: sprite.scaleY * 1.4,
+      alpha: 0,
+      duration: 140,
+      ease: 'Cubic.Out',
+      onComplete: () => sprite.destroy(),
+    });
+  }
+
   private getAssetStyle(kind: Exclude<EntityKind, 'tile'>, state: EntityState, facing: Facing | 'none'): import('./types').AssetStyle {
     return (
       ASSET_REGISTRY[kind]?.[state]?.[facing] ??
@@ -1638,9 +1833,6 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
-  private getTileAssetStyle(tileType: TileType): import('./types').AssetStyle {
-    return ASSET_REGISTRY.tile?.[tileType]?.none ?? { textureKey: 'fallback-missing', path: '', origin: { x: 0.5, y: 0.5 }, scale: 1, depth: DEPTH_BREAKABLE, alpha: 1 };
-  }
 
   private toDelta(direction: Direction): { dx: number; dy: number } {
     switch (direction) {
