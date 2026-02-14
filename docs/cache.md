@@ -1,73 +1,73 @@
-# PWA cache strategy
+# PWA cache (vNext, release-safe)
 
-This project uses `vite-plugin-pwa` in **production builds only**.
+This project enables `vite-plugin-pwa` **only for production builds**.
+In dev (`pnpm dev`), Service Worker is not registered and does not interfere with local development.
 
-## What is cached
+## Runtime cache strategy
 
-### Precache (build-time)
-Workbox precache includes generated frontend artifacts and static files matched by:
+Configured in `vite.config.ts`:
 
-- `**/*.{js,css,html,ico,png,svg,webp,woff,woff2,ttf,eot,json,mp3,ogg,wav,glb,gltf}`
-- `includeAssets: ['assets/sprites/*.svg']`
-
-This covers UI bundles and game assets in `public/assets/...`.
-
-### Runtime caching
-
-1. `^/api/` → `NetworkFirst`
-   - `cacheName: api-cache`
-   - `networkTimeoutSeconds: 10`
-   - `cacheableResponse.statuses: [0, 200]`
-   - `expiration.maxEntries: 100`
-   - `expiration.maxAgeSeconds: 300`
-
-2. `^/assets/` → `CacheFirst`
+1. `^/assets/.*` → `CacheFirst`
    - `cacheName: assets-cache`
-   - `cacheableResponse.statuses: [0, 200]`
-   - `expiration.maxEntries: 500`
    - `expiration.maxAgeSeconds: 2592000` (30 days)
+   - `expiration.maxEntries: 200`
 
-> Dynamic API data is intentionally **not** cached with `CacheFirst`.
+2. `^/api/.*` → `NetworkFirst`
+   - `cacheName: api-cache`
+   - `networkTimeoutSeconds: 5`
+   - `expiration.maxAgeSeconds: 86400` (1 day)
+   - `expiration.maxEntries: 50`
 
-## Registration behavior
+Workbox precache is generated automatically for build artifacts (including JS/CSS/HTML chunks).
 
-Service Worker registration is enabled only when `import.meta.env.PROD` is true.
-No SW registration happens in development.
+## Minimal web app manifest
 
-## How to verify (production preview)
+Manifest values used by PWA plugin:
 
-1. Build and preview:
+- `name: Rift Runners`
+- `short_name: RiftRunners`
+- `start_url: .`
+- `display: standalone`
+- `background_color: #111827`
+- `theme_color: #111827`
+- `icons: []` (placeholder to avoid blocking release on binary icon assets)
+
+## How to verify Service Worker is active
+
+1. Build production:
    - `pnpm build`
+2. Preview production build:
    - `pnpm preview`
-2. Open the app in browser DevTools:
-   - Application → Service Workers: confirm active SW.
-   - Application → Cache Storage: after navigation/API calls, check `assets-cache` and `api-cache`.
-3. Trigger `/api/*` requests and verify they remain network-driven (NetworkFirst) and expire quickly.
+3. Open app in Chrome and go to DevTools:
+   - **Application → Service Workers**
+   - Confirm SW is installed and activated.
 
-## How to clear caches locally
+## How to inspect caches
+
+In DevTools:
+
+- **Application → Cache Storage**
+- Verify these entries appear after usage:
+  - `assets-cache`
+  - `api-cache`
+  - `workbox-precache-*`
+
+## Hard reset (clear SW + caches)
 
 In DevTools (Application tab):
 
-- Service Workers → **Unregister**
-- Storage → **Clear site data**
-- Cache Storage → delete `assets-cache` and `api-cache`
+1. **Service Workers → Unregister**
+2. **Storage → Clear site data**
+3. Optionally remove remaining entries under **Cache Storage**
 
-## How SW updates are delivered
+Then hard refresh page.
 
-`registerType: 'autoUpdate'` is enabled.
-On a new deployment, the updated SW is fetched and activated automatically; old cache entries are rotated according to Workbox expiration rules.
+## Offline check scenario
 
-## npm/pnpm 403 fallback (no vendoring in main)
-
-If registry access fails with HTTP 403 in local/corporate environments:
-
-1. Set/verify registry:
-   - `pnpm config set registry https://registry.npmjs.org/`
-   - (or your allowed corporate mirror)
-2. Retry from a network/VPN that has registry access at least once to warm local store.
-3. Optionally prefetch on a machine with access and transfer the pnpm store:
-   - `pnpm fetch`
-   - copy the pnpm store to the restricted machine, then run install offline if supported by your setup.
-
-Do **not** commit vendored `vite-plugin-pwa` (or `vendor/`) into main for this fallback.
-Use a separate temporary branch/PR only if absolutely required and explicitly approved.
+1. Open app once while online (let UI/assets/API warm caches).
+2. In DevTools → Network, enable **Offline**.
+3. Reload page.
+4. Confirm:
+   - UI shell still loads.
+   - `/assets/*` files are served from cache (no crash).
+   - `/api/*` uses `NetworkFirst`: returns cached response when available, otherwise shows offline state gracefully (without app crash).
