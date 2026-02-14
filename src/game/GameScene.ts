@@ -237,6 +237,7 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor('#0f1220');
+    this.ensurePolishedTextures();
     this.setAudioSettings(this.audioSettings);
     this.setupInput();
     this.setupCamera();
@@ -244,6 +245,82 @@ export class GameScene extends Phaser.Scene {
     this.remotePlayers.setTransform({ tileSize: GAME_CONFIG.tileSize, offsetX: 0, offsetY: 0 });
     const initialLevelIndex = this.loadProgress();
     this.startLevel(initialLevelIndex, true);
+  }
+
+  private ensurePolishedTextures(): void {
+    const textureSize = 96;
+
+    const createUnitTexture = (
+      key: string,
+      options: {
+        fillColor: number;
+        strokeColor: number;
+        glowColor: number;
+        markerColor: number;
+        eyeColor: number;
+        hasOuterHalo?: boolean;
+      },
+    ): void => {
+      if (this.textures.exists(key)) return;
+
+      const center = textureSize / 2;
+      const g = this.add.graphics().setVisible(false);
+
+      if (options.hasOuterHalo) {
+        g.lineStyle(4, options.glowColor, 0.65);
+        g.strokeCircle(center, center, 34);
+      }
+
+      const glowLayers = [
+        { radius: 33, alpha: 0.16 },
+        { radius: 30, alpha: 0.2 },
+        { radius: 27, alpha: 0.24 },
+      ];
+      for (const layer of glowLayers) {
+        g.fillStyle(options.glowColor, layer.alpha);
+        g.fillCircle(center, center, layer.radius);
+      }
+
+      g.fillStyle(options.fillColor, 1);
+      g.fillCircle(center, center, 24);
+      g.lineStyle(4, options.strokeColor, 1);
+      g.strokeCircle(center, center, 24);
+
+      g.fillStyle(options.markerColor, 0.95);
+      g.fillTriangle(center - 7, center - 16, center + 7, center - 16, center, center - 28);
+
+      g.fillStyle(options.eyeColor, 0.95);
+      g.fillCircle(center - 8, center - 4, 4);
+      g.fillCircle(center + 8, center - 4, 4);
+
+      g.generateTexture(key, textureSize, textureSize);
+      g.destroy();
+    };
+
+    createUnitTexture('rr_player', {
+      fillColor: 0x4ab3ff,
+      strokeColor: 0xd8f1ff,
+      glowColor: 0x2b6fbf,
+      markerColor: 0xe9fbff,
+      eyeColor: 0x0f2442,
+    });
+
+    createUnitTexture('rr_enemy_basic', {
+      fillColor: 0xff6b6b,
+      strokeColor: 0xfff1f1,
+      glowColor: 0xbf3f57,
+      markerColor: 0xffe3a6,
+      eyeColor: 0x351423,
+    });
+
+    createUnitTexture('rr_enemy_elite', {
+      fillColor: 0xb37cff,
+      strokeColor: 0xf4e9ff,
+      glowColor: 0x8a4ce3,
+      markerColor: 0xfff6bc,
+      eyeColor: 0x2c114b,
+      hasOuterHalo: true,
+    });
   }
 
   update(time: number, delta: number): void {
@@ -1028,8 +1105,12 @@ export class GameScene extends Phaser.Scene {
       this.placeLocalPlayerSpriteAt(this.player.gridX, this.player.gridY);
     }
     this.playerSprite
-      .setTexture(this.getTextureKey(playerStyle))
-      .setDisplaySize(tileSize * (playerStyle.scale ?? 0.74), tileSize * (playerStyle.scale ?? 0.74))
+      .setTexture('rr_player')
+      .setAngle(this.getFacingAngle(this.player.facing))
+      .setDisplaySize(
+        tileSize * (playerStyle.scale ?? 0.74) * this.getPlayerBreathScale(time),
+        tileSize * (playerStyle.scale ?? 0.74) * this.getPlayerBreathScale(time),
+      )
       .setOrigin(playerStyle.origin?.x ?? 0.5, playerStyle.origin?.y ?? 0.5)
       .setDepth(playerStyle.depth ?? DEPTH_PLAYER);
 
@@ -1108,10 +1189,12 @@ export class GameScene extends Phaser.Scene {
       const sprite = this.enemySprites.get(enemy.key) ?? this.createEnemySprite(enemy.key);
       if (!sprite) continue;
       const style = this.getAssetStyle('enemy', enemy.state, enemy.facing);
+      const anim = this.getEnemyAnimationState(enemy, time);
       sprite
-        .setPosition(enemy.gridX * tileSize + tileSize / 2, enemy.gridY * tileSize + tileSize / 2)
-        .setTexture(this.getTextureKey(style))
-        .setDisplaySize(tileSize * (style.scale ?? 0.72), tileSize * (style.scale ?? 0.72))
+        .setPosition(enemy.gridX * tileSize + tileSize / 2, enemy.gridY * tileSize + tileSize / 2 + anim.hoverOffset)
+        .setTexture(enemy.kind === 'elite' ? 'rr_enemy_elite' : 'rr_enemy_basic')
+        .setAngle(this.getFacingAngle(enemy.facing) + anim.extraRotation)
+        .setDisplaySize(tileSize * (style.scale ?? 0.72) * anim.scale, tileSize * (style.scale ?? 0.72) * anim.scale)
         .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5);
     }
 
@@ -1120,6 +1203,45 @@ export class GameScene extends Phaser.Scene {
       sprite.destroy();
       this.enemySprites.delete(key);
     }
+  }
+
+  private getFacingAngle(facing: Facing): number {
+    switch (facing) {
+      case 'up':
+        return 0;
+      case 'right':
+        return 90;
+      case 'down':
+        return 180;
+      case 'left':
+      default:
+        return -90;
+    }
+  }
+
+  private getPlayerBreathScale(time: number): number {
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
+    return Phaser.Math.Linear(1, 1.05, pulse);
+  }
+
+  private getEnemyAnimationState(enemy: EnemyModel, time: number): { scale: number; hoverOffset: number; extraRotation: number } {
+    const waveSeed = enemy.key.length * 0.3;
+    const wave = Math.sin(time * 0.005 + waveSeed);
+
+    if (enemy.kind === 'elite') {
+      const pulse = 0.5 + 0.5 * Math.sin(time * 0.008 + waveSeed);
+      return {
+        scale: Phaser.Math.Linear(0.98, 1.08, pulse),
+        hoverOffset: wave * 1.4,
+        extraRotation: Math.sin(time * 0.0035 + waveSeed) * 6,
+      };
+    }
+
+    return {
+      scale: 1,
+      hoverOffset: wave * 1.6,
+      extraRotation: 0,
+    };
   }
 
   private createBombSprite(key: string): Phaser.GameObjects.Image | null {
@@ -1528,4 +1650,3 @@ export class GameScene extends Phaser.Scene {
     };
   }
 }
-
