@@ -25,5 +25,7 @@ export function createBossArena(): ArenaModel {
     items: new Map(),
     hiddenDoorKey: toKey(doorX, doorY),
     isSpawnCell: (x: number, y: number) => x === 1 && y === 1,
+    width: gridWidth,
+    height: gridHeight,
   };
 }
