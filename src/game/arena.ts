@@ -100,6 +100,8 @@ export function createArena(levelIndex = 0, rng?: DeterministicRng): ArenaModel 
   }
 
   const hiddenDoorCell = breakableCells[rng?.nextInt(breakableCells.length) ?? 0] ?? { x: 1, y: 1 };
+  // Keep the hidden door under a real breakable block so blast resolution treats it like any other brick.
+  tiles[hiddenDoorCell.y][hiddenDoorCell.x] = 'BreakableBlock';
 
   return {
     tiles,

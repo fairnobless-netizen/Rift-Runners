@@ -8,7 +8,7 @@ export const GAME_CONFIG = {
   moveRepeatDelayMs: 170,
   moveRepeatIntervalMs: 95,
   // M28 rebalance post-M27: tighten bomb threat window after global movement slowdown.
-  bombFuseMs: 1650, // M29: micro-tune post-M27/M28
+  bombFuseMs: 3300, // M31: slower auto-detonation fuse (x2)
   flameLifetimeMs: 300, // M29: micro-tune post-M27/M28
   enemyMoveIntervalMs: 260,
   enemyMoveIntervalMinMs: 120,
