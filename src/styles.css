@@ -293,6 +293,21 @@ body {
   justify-content: center;
 }
 
+.joystick-touch-zone {
+  width: min(100%, calc(210px * var(--ui-scale)));
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+.joystick-touch-zone--active {
+  background: radial-gradient(circle at center, #5568aa22, transparent 70%);
+}
+
+
 .right-stack {
   display: flex;
   flex-direction: column;

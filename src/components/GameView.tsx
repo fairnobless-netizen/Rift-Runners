@@ -9,8 +9,10 @@ import {
   EVENT_READY,
   EVENT_SIMULATION,
   EVENT_STATS,
+  EVENT_LIFE_STATE,
   gameEvents,
   type AssetProgressPayload,
+  type LifeStatePayload,
   type ReadyPayload,
 } from '../game/gameEvents';
 
@@ -64,6 +66,7 @@ const defaultStats: PlayerStats = {
   placed: 0,
   range: GAME_CONFIG.defaultRange,
   score: 0,
+  lives: 3,
   remoteDetonateUnlocked: false,
 };
 
@@ -193,6 +196,14 @@ export default function GameView(): JSX.Element {
 
   const zoomApiRef = useRef<ReadyPayload | null>(null);
   const [stats, setStats] = useState<PlayerStats>(defaultStats);
+  const [lifeState, setLifeState] = useState<LifeStatePayload>({
+    lives: 3,
+    maxLives: 6,
+    mode: 'solo',
+    awaitingContinue: false,
+    gameOver: false,
+    eliminated: false,
+  });
   const [campaign, setCampaign] = useState<CampaignState>(() => loadCampaignState());
   const [zoom, setZoom] = useState<number>(GAME_CONFIG.minZoom);
   const [isRemoteDetonateUnlocked, setIsRemoteDetonateUnlocked] = useState(false);
@@ -283,7 +294,8 @@ export default function GameView(): JSX.Element {
   const isMobileViewport = Math.min(viewportSize.width, viewportSize.height) < MOBILE_ROTATE_OVERLAY_BREAKPOINT;
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
-  const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay;
+  const deathOverlayVisible = lifeState.awaitingContinue || lifeState.gameOver;
+  const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay || deathOverlayVisible || lifeState.eliminated;
   const shellSizeRef = useRef<{ width: number; height: number }>({ width: window.innerWidth, height: window.innerHeight });
 
   const updateTgMetrics = useCallback((): void => {
@@ -644,6 +656,10 @@ export default function GameView(): JSX.Element {
         setBootSplashFileKey(payload.fileKey);
       }
     };
+    const onLifeState = (payload: LifeStatePayload): void => {
+      setLifeState({ ...payload });
+    };
+
     const onSimulation = async (event: SimulationEvent): Promise<void> => {
       if (event.type !== 'BOSS_DEFEATED') return;
 
@@ -659,6 +675,7 @@ export default function GameView(): JSX.Element {
     gameEvents.on(EVENT_CAMPAIGN_STATE, onCampaignState);
     gameEvents.on(EVENT_ASSET_PROGRESS, onAssetProgress);
     gameEvents.on(EVENT_SIMULATION, onSimulation);
+    gameEvents.on(EVENT_LIFE_STATE, onLifeState);
 
     return () => {
       gameEvents.off(EVENT_STATS, onStats);
@@ -666,6 +683,7 @@ export default function GameView(): JSX.Element {
       gameEvents.off(EVENT_CAMPAIGN_STATE, onCampaignState);
       gameEvents.off(EVENT_ASSET_PROGRESS, onAssetProgress);
       gameEvents.off(EVENT_SIMULATION, onSimulation);
+      gameEvents.off(EVENT_LIFE_STATE, onLifeState);
     };
   }, [zoom]);
 
@@ -708,6 +726,12 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     sceneRef.current?.setLocalTgUserId(localTgUserId);
   }, [localTgUserId]);
+
+  const isMultiplayerMode = Boolean(currentRoom && currentRoomMembers.length >= 2);
+
+  useEffect(() => {
+    sceneRef.current?.setGameMode(isMultiplayerMode ? 'multiplayer' : 'solo');
+  }, [isMultiplayerMode]);
 
   useEffect(() => {
     const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
@@ -1442,6 +1466,24 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
+      {gameFlowPhase === 'playing' && lifeState.awaitingContinue && (
+        <div className="waiting-overlay" role="dialog" aria-modal="true" aria-label="Continue overlay">
+          <div className="waiting-overlay__card">
+            <strong>Continue?</strong>
+            <p>Вы потеряли жизнь. Нажмите Continue для респауна.</p>
+            <button type="button" onClick={() => sceneRef.current?.continueSoloRun()}>Continue</button>
+          </div>
+        </div>
+      )}
+      {gameFlowPhase === 'playing' && lifeState.gameOver && (
+        <div className="waiting-overlay" role="dialog" aria-modal="true" aria-label="Game over overlay">
+          <div className="waiting-overlay__card">
+            <strong>GAME OVER</strong>
+            <p>Жизни закончились.</p>
+            <button type="button" onClick={() => sceneRef.current?.restartSoloRun()}>Restart The Game</button>
+          </div>
+        </div>
+      )}
       {shouldShowRotateOverlay && (
         <div className="rotate-overlay" role="status" aria-live="polite">
           <div className="rotate-overlay__card">
@@ -1459,7 +1501,7 @@ export default function GameView(): JSX.Element {
                   {member ? (
                     <>
                       <span className="hud-slot-name" title={member.displayName}>{member.displayName}</span>
-                      <span ref={index === 0 ? hudLivesRef : undefined} className="hud-lives" aria-label="Lives" title="Lives">❤️❤️❤️</span>
+                      <span ref={index === 0 ? hudLivesRef : undefined} className="hud-lives" aria-label="Lives" title="Lives">{index === 0 ? ('❤️'.repeat(Math.max(0, lifeState.lives)) || '💀') : '❤️❤️❤️'}</span>
                     </>
                   ) : null}
                 </div>
@@ -1497,24 +1539,26 @@ export default function GameView(): JSX.Element {
           </div>
 
           <div className="left-joystick">
-            <div className="joystick-wrap">
-              <div
-                ref={joystickPadRef}
-                className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}
-                onPointerDown={onJoystickPointerDown}
-                onPointerMove={onJoystickPointerMove}
-                onPointerUp={onJoystickPointerUp}
-                onPointerCancel={onJoystickPointerUp}
-                onPointerLeave={onJoystickPointerLeave}
-                role="application"
-                aria-label="Virtual joystick"
-              >
-                <div
-                  className="joystick-knob"
-                  style={{
-                    transform: `translate(calc(-50% + ${joystickOffset.x}px), calc(-50% + ${joystickOffset.y}px))`,
-                  }}
-                />
+            <div
+              ref={joystickPadRef}
+              className={`joystick-touch-zone ${joystickPressed ? 'joystick-touch-zone--active' : ''}`}
+              onPointerDown={onJoystickPointerDown}
+              onPointerMove={onJoystickPointerMove}
+              onPointerUp={onJoystickPointerUp}
+              onPointerCancel={onJoystickPointerUp}
+              onPointerLeave={onJoystickPointerLeave}
+              role="application"
+              aria-label="Virtual joystick"
+            >
+              <div className="joystick-wrap">
+                <div className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}>
+                  <div
+                    className="joystick-knob"
+                    style={{
+                      transform: `translate(calc(-50% + ${joystickOffset.x}px), calc(-50% + ${joystickOffset.y}px))`,
+                    }}
+                  />
+                </div>
               </div>
 
               <div className="landscape-fallback-dpad" aria-hidden="true">
