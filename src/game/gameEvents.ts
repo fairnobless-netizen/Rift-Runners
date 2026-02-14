@@ -8,6 +8,7 @@ export const EVENT_STATS = 'stats';
 export const EVENT_READY = 'ready';
 export const EVENT_CAMPAIGN_STATE = 'campaign_state';
 export const EVENT_ASSET_PROGRESS = 'asset_progress';
+export const EVENT_LIFE_STATE = 'life_state';
 
 export const EVENT_SIMULATION = 'simulation';
 
@@ -37,4 +38,19 @@ export function emitSimulationEvent(event: SimulationEvent): void {
 
 export function emitCampaignState(campaignState: CampaignState): void {
   gameEvents.emit(EVENT_CAMPAIGN_STATE, campaignState);
+}
+
+export type GameMode = 'solo' | 'multiplayer';
+
+export interface LifeStatePayload {
+  lives: number;
+  maxLives: number;
+  mode: GameMode;
+  awaitingContinue: boolean;
+  gameOver: boolean;
+  eliminated: boolean;
+}
+
+export function emitLifeState(payload: LifeStatePayload): void {
+  gameEvents.emit(EVENT_LIFE_STATE, payload);
 }

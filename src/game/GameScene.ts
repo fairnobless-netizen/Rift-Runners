@@ -52,7 +52,9 @@ import {
   emitSimulationEvent,
   emitStats,
   emitCampaignState,
+  emitLifeState,
   gameEvents,
+  type GameMode,
 } from './gameEvents';
 import { DoorController } from './DoorController';
 import { createDeterministicRng, type DeterministicRng } from './rng';
@@ -85,6 +87,9 @@ interface TimedDirection {
 const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
 const LEVELS_PER_ZONE = BOSS_CONFIG.zonesPerStage;
 const MOVEMENT_SPEED_SCALE = 0.66;
+const INITIAL_LIVES = 3;
+const MAX_LIVES = 6;
+const EXTRA_LIFE_STEP_SCORE = 1000;
 
 export type SceneAudioSettings = {
   musicEnabled: boolean;
@@ -102,6 +107,12 @@ export class GameScene extends Phaser.Scene {
   private matchGridW: number = GAME_CONFIG.gridWidth;
   private matchGridH: number = GAME_CONFIG.gridHeight;
   private controls: ControlsState;
+  private gameMode: GameMode = 'solo';
+  private lives = INITIAL_LIVES;
+  private nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
+  private awaitingSoloContinue = false;
+  private soloGameOver = false;
+  private multiplayerEliminated = false;
   private readonly baseSeed = 0x52494654;
   private readonly runId = 1;
   private rng: DeterministicRng = createDeterministicRng(this.baseSeed);
@@ -138,7 +149,7 @@ export class GameScene extends Phaser.Scene {
       canOccupy: (x: number, y: number) => this.canBossOccupy(x, y),
       canSpawnMinion: (x: number, y: number) => this.canEnemyOccupy(x, y, '__boss-summon__'),
       spawnMinion: (x: number, y: number) => this.spawnEnemy(x, y, 'normal'),
-      onPlayerHit: () => this.restartLevelAfterDeath(),
+      onPlayerHit: () => this.handlePlayerDeath('enemy'),
       onBossDefeated: () => this.handleBossDefeated(),
       onBossDamaged: (hp: number, maxHp: number) => this.emitSimulation('boss.damaged', this.time.now, { hp, maxHp }),
       onBossReveal: () => this.emitSimulation('boss.reveal', this.time.now, { ...this.getLevelProgressModel() }),
@@ -178,6 +189,7 @@ export class GameScene extends Phaser.Scene {
     placed: 0,
     range: GAME_CONFIG.defaultRange,
     score: 0,
+    lives: INITIAL_LIVES,
     remoteDetonateUnlocked: false,
   };
 
@@ -325,7 +337,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
-    if (this.isLevelCleared) return;
+    if (this.isLevelCleared || this.awaitingSoloContinue || this.soloGameOver || this.multiplayerEliminated) return;
 
     this.accumulator += delta;
     while (this.accumulator >= this.FIXED_DT) {
@@ -439,8 +451,10 @@ export class GameScene extends Phaser.Scene {
       // TODO backend: merge initData campaign progress instead of localStorage
       this.campaignState = campaign;
       this.stats.score = campaign.score;
+      this.nextExtraLifeScore = Math.floor(this.stats.score / EXTRA_LIFE_STEP_SCORE) * EXTRA_LIFE_STEP_SCORE + EXTRA_LIFE_STEP_SCORE;
       this.progressionUnlockedStages = new Set<number>([...this.progressionUnlockedStages, campaign.stage - 1]);
       this.emitCampaignState();
+      this.emitLifeState();
       return campaignStateToLevelIndex(campaign);
     } catch {
       return fallbackLevelIndex;
@@ -514,13 +528,17 @@ export class GameScene extends Phaser.Scene {
         placed: 0,
         range: GAME_CONFIG.defaultRange,
         score: 0,
+        lives: this.lives,
         remoteDetonateUnlocked: false,
       };
+      this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
     } else {
       this.stats.placed = 0;
+      this.stats.lives = this.lives;
     }
 
     emitStats(this.stats);
+    this.emitLifeState();
     if (this.playerSprite) this.cameras.main.startFollow(this.playerSprite, true, 0.2, 0.2);
 
     this.emitSimulation(LEVEL_STARTED, this.time.now, {
@@ -529,14 +547,138 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private restartLevelAfterDeath(): void {
+  private handlePlayerDeath(reason: 'bomb' | 'enemy' = 'enemy'): void {
+    if (this.awaitingSoloContinue || this.soloGameOver || this.multiplayerEliminated) return;
+
     this.stats.score = Math.max(0, this.stats.score - GAME_CONFIG.playerDeathPenalty);
+    this.lives = Math.max(0, this.lives - 1);
+    this.stats.lives = this.lives;
     this.emitSimulation(LEVEL_FAILED, this.time.now, {
       ...this.getLevelProgressModel(),
       reason: 'player_death',
+      deathSource: reason,
+      mode: this.gameMode,
+      lives: this.lives,
     });
-    this.startLevel(this.levelIndex, true);
+
+    if (this.gameMode === 'multiplayer') {
+      if (this.lives <= 0) {
+        this.multiplayerEliminated = true;
+        this.clearMovementInputs();
+        this.playerSprite?.setVisible(false);
+        this.emitLifeState();
+        emitStats(this.stats);
+        this.syncCampaignAndPersist();
+        return;
+      }
+
+      this.spawnPlayer();
+      this.emitLifeState();
+      emitStats(this.stats);
+      this.syncCampaignAndPersist();
+      return;
+    }
+
+    if (this.lives <= 0) {
+      this.soloGameOver = true;
+      this.awaitingSoloContinue = false;
+      this.clearMovementInputs();
+      this.emitLifeState();
+      emitStats(this.stats);
+      this.syncCampaignAndPersist();
+      return;
+    }
+
+    this.awaitingSoloContinue = true;
+    this.clearMovementInputs();
+    this.emitLifeState();
+    emitStats(this.stats);
     this.syncCampaignAndPersist();
+  }
+
+
+  private clearMovementInputs(): void {
+    this.controls.up = false;
+    this.controls.down = false;
+    this.controls.left = false;
+    this.controls.right = false;
+    this.controls.placeBombRequested = false;
+    this.controls.detonateRequested = false;
+  }
+
+  private emitLifeState(): void {
+    emitLifeState({
+      lives: this.lives,
+      maxLives: MAX_LIVES,
+      mode: this.gameMode,
+      awaitingContinue: this.awaitingSoloContinue,
+      gameOver: this.soloGameOver,
+      eliminated: this.multiplayerEliminated,
+    });
+  }
+
+  private grantExtraLivesFromScore(): boolean {
+    let changed = false;
+    while (this.stats.score >= this.nextExtraLifeScore) {
+      const prevLives = this.lives;
+      this.lives = Math.min(MAX_LIVES, this.lives + 1);
+      this.nextExtraLifeScore += EXTRA_LIFE_STEP_SCORE;
+      if (this.lives !== prevLives) changed = true;
+    }
+
+    if (changed) {
+      this.stats.lives = this.lives;
+      this.emitLifeState();
+      emitStats(this.stats);
+    }
+
+    return changed;
+  }
+
+  public setGameMode(mode: GameMode): void {
+    this.gameMode = mode;
+    this.awaitingSoloContinue = false;
+    this.soloGameOver = false;
+    this.multiplayerEliminated = false;
+    this.playerSprite?.setVisible(true);
+    this.emitLifeState();
+  }
+
+  public continueSoloRun(): void {
+    if (this.gameMode !== 'solo' || !this.awaitingSoloContinue || this.soloGameOver) return;
+    this.awaitingSoloContinue = false;
+    this.spawnPlayer();
+    this.playerSprite?.setVisible(true);
+    this.emitLifeState();
+  }
+
+  public restartSoloRun(): void {
+    this.gameMode = 'solo';
+    this.awaitingSoloContinue = false;
+    this.soloGameOver = false;
+    this.multiplayerEliminated = false;
+    this.playerSprite?.setVisible(true);
+    this.lives = INITIAL_LIVES;
+    this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
+    this.stats = {
+      capacity: GAME_CONFIG.defaultBombCapacity,
+      placed: 0,
+      range: GAME_CONFIG.defaultRange,
+      score: 0,
+      lives: this.lives,
+      remoteDetonateUnlocked: false,
+    };
+    this.campaignState = {
+      stage: 1,
+      zone: 1,
+      score: 0,
+      trophies: [...this.campaignState.trophies],
+    };
+    saveCampaignState(this.campaignState);
+    this.emitCampaignState();
+    emitStats(this.stats);
+    this.emitLifeState();
+    this.startLevel(0, false);
   }
 
   private advanceToNextLevel(time: number): void {
@@ -891,7 +1033,10 @@ export class GameScene extends Phaser.Scene {
     }
 
     emitStats(this.stats);
-    if (scoreChanged) this.syncCampaignAndPersist();
+    if (scoreChanged) {
+      this.grantExtraLivesFromScore();
+      this.syncCampaignAndPersist();
+    }
     this.emitSimulation('bomb.detonated', time, { key: startKey });
   }
 
@@ -923,6 +1068,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.stats.score += 25;
+    this.grantExtraLivesFromScore();
     emitStats(this.stats);
     this.syncCampaignAndPersist();
     this.emitSimulation('item.picked', this.time.now, { key: item.key, type: item.type, x, y });
@@ -1057,8 +1203,11 @@ export class GameScene extends Phaser.Scene {
       this.emitSimulation('enemy.defeated', this.time.now, { key: enemy.key, x, y });
       scoreChanged = true;
     }
-    if (scoreChanged) emitStats(this.stats);
-    if (scoreChanged) this.syncCampaignAndPersist();
+    if (scoreChanged) {
+      this.grantExtraLivesFromScore();
+      emitStats(this.stats);
+      this.syncCampaignAndPersist();
+    }
   }
 
   private hitPlayerAt(x: number, y: number): void {
@@ -1067,14 +1216,14 @@ export class GameScene extends Phaser.Scene {
         ? this.player.gridX === x && this.player.gridY === y
         : this.player.targetX === x && this.player.targetY === y;
     if (!playerOnCell) return;
-    this.restartLevelAfterDeath();
+    this.handlePlayerDeath('bomb');
   }
 
   private checkPlayerEnemyCollision(): void {
     if (this.player.targetX !== null || this.player.targetY !== null) return;
     for (const enemy of this.enemies.values()) {
       if (enemy.gridX === this.player.gridX && enemy.gridY === this.player.gridY) {
-        this.restartLevelAfterDeath();
+        this.handlePlayerDeath('enemy');
         return;
       }
     }
@@ -1399,6 +1548,7 @@ export class GameScene extends Phaser.Scene {
 
   private handleBossDefeated(): void {
     this.stats.score += BOSS_CONFIG.defeatScoreReward;
+    this.grantExtraLivesFromScore();
     const earnedTrophies = Array.from(
       { length: BOSS_CONFIG.rewardTrophyAmount },
       (_, index) => `stage-${this.campaignState.stage}-boss-${Date.now()}-${index}`,

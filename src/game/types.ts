@@ -77,6 +77,7 @@ export interface PlayerStats {
   placed: number;
   range: number;
   score: number;
+  lives: number;
   remoteDetonateUnlocked: boolean;
 }
 
