@@ -157,7 +157,11 @@ const MOBILE_ROTATE_OVERLAY_BREAKPOINT = 700;
 type TelegramWebApp = {
   ready?: () => void;
   expand?: () => void;
+  requestFullscreen?: () => void;
   isExpanded?: boolean;
+  viewportHeight?: number;
+  contentSafeAreaInset?: { top: number; bottom: number; left: number; right: number };
+  safeAreaInset?: { top: number; bottom: number; left: number; right: number };
   onEvent?: (eventType: 'viewportChanged', handler: () => void) => void;
   offEvent?: (eventType: 'viewportChanged', handler: () => void) => void;
 };
@@ -277,6 +281,21 @@ export default function GameView(): JSX.Element {
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
   const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay;
 
+  const didGestureExpandRef = useRef(false);
+  const needGestureRetryRef = useRef(false);
+
+  const updateTgMetrics = useCallback((): void => {
+    const tg = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
+    const top = tg?.contentSafeAreaInset?.top ?? tg?.safeAreaInset?.top ?? 0;
+    const bottom = tg?.contentSafeAreaInset?.bottom ?? tg?.safeAreaInset?.bottom ?? 0;
+    const vh = tg?.viewportHeight ?? window.innerHeight;
+
+    const rootStyle = document.documentElement.style;
+    rootStyle.setProperty('--tg-viewport-h', `${Math.floor(vh)}px`);
+    rootStyle.setProperty('--tg-content-top', `${Math.floor(top)}px`);
+    rootStyle.setProperty('--tg-content-bottom', `${Math.floor(bottom)}px`);
+  }, []);
+
   const tryTelegramExpand = useCallback((_reason: string): void => {
     const webApp = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
     if (!webApp) return;
@@ -285,6 +304,7 @@ export default function GameView(): JSX.Element {
     try {
       webApp.ready?.();
       webApp.expand?.();
+      webApp.requestFullscreen?.();
     } catch {
       // Telegram iOS may ignore/throw without a user gesture.
     }
@@ -412,8 +432,9 @@ export default function GameView(): JSX.Element {
     const webApp = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
 
     const onViewportChanged = (): void => {
-      if (!webApp) return;
-      if (webApp.isExpanded === false) {
+      updateTgMetrics();
+      if (webApp?.isExpanded === false) {
+        needGestureRetryRef.current = true;
         document.documentElement.classList.remove('telegram-fullview');
         return;
       }
@@ -425,23 +446,30 @@ export default function GameView(): JSX.Element {
     };
 
     const onFirstGesture = (): void => {
-      tryTelegramExpand('first-gesture');
+      if (!didGestureExpandRef.current || needGestureRetryRef.current) {
+        tryTelegramExpand('first-gesture');
+        didGestureExpandRef.current = true;
+        needGestureRetryRef.current = false;
+      }
     };
 
+    updateTgMetrics();
     tryTelegramExpand('mount');
     gameEvents.on(EVENT_READY, onReady);
     webApp?.onEvent?.('viewportChanged', onViewportChanged);
+    window.addEventListener('resize', updateTgMetrics);
     pageRef.current?.addEventListener('pointerdown', onFirstGesture, { once: true });
     pageRef.current?.addEventListener('touchstart', onFirstGesture, { once: true, passive: true });
 
     return () => {
       gameEvents.off(EVENT_READY, onReady);
       webApp?.offEvent?.('viewportChanged', onViewportChanged);
+      window.removeEventListener('resize', updateTgMetrics);
       pageRef.current?.removeEventListener('pointerdown', onFirstGesture);
       pageRef.current?.removeEventListener('touchstart', onFirstGesture);
       document.documentElement.classList.remove('telegram-fullview');
     };
-  }, [tryTelegramExpand]);
+  }, [tryTelegramExpand, updateTgMetrics]);
 
   useEffect(() => {
     const runAuth = async () => {

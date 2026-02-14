@@ -6,7 +6,9 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
-  --tg-top-overlay: 0px;
+  --tg-viewport-h: 100dvh;
+  --tg-content-top: 0px;
+  --tg-content-bottom: 0px;
   --header-h: clamp(34px, 5.2vh, 46px);
   --shell-gap: clamp(0.35rem, 1.5vw, 0.7rem);
   --side-w: clamp(86px, 14vw, 132px);
@@ -15,9 +17,6 @@
   --ui-scale-right: var(--ui-scale);
 }
 
-html.telegram-fullview {
-  --tg-top-overlay: 20px;
-}
 
 *,
 *::before,
@@ -46,16 +45,17 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--shell-gap);
-  height: 100vh;
-  height: 100svh;
+  height: var(--tg-viewport-h, 100dvh);
   height: 100dvh;
+  height: 100svh;
+  height: 100vh;
   min-height: 0;
   width: 100%;
   max-width: none;
   margin: 0;
-  padding-top: calc(var(--safe-top) + var(--tg-top-overlay));
+  padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top));
   padding-right: var(--safe-right);
-  padding-bottom: var(--safe-bottom);
+  padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom));
   padding-left: var(--safe-left);
   overflow: hidden;
 }
@@ -518,9 +518,9 @@ button:disabled {
 
 @media (orientation: landscape) and (max-width: 980px) {
   :root {
-    --ui-scale: clamp(0.75, calc(100vw / 900), 1);
-    --ui-scale-left: clamp(0.76, calc(100vw / 920), 1);
-    --ui-scale-right: clamp(0.74, calc(100vw / 880), 1);
+    --ui-scale: clamp(0.4, calc(min(100vw, 100vh) / 900), 1);
+    --ui-scale-left: clamp(0.42, calc(min(100vw, 100vh) / 920), 1);
+    --ui-scale-right: clamp(0.4, calc(min(100vw, 100vh) / 880), 1);
     --header-h: clamp(32px, 5vh, 42px);
     --side-w: clamp(72px, 15vw, 108px);
   }
@@ -617,7 +617,7 @@ button:disabled {
 
   .game-canvas {
     width: min(100%, calc(100vw - var(--safe-left) - var(--safe-right) - 1.4rem));
-    max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - var(--tg-top-overlay) - var(--header-h) - 168px);
+    max-height: calc(var(--tg-viewport-h, 100dvh) - var(--safe-top) - var(--safe-bottom) - var(--tg-content-top, 0px) - var(--tg-content-bottom, 0px) - var(--header-h) - 168px);
     height: auto;
   }
 
