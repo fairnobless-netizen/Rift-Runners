@@ -1958,7 +1958,13 @@ export default function GameView(): JSX.Element {
                 </label>
               </div>
             ) : (
-              <div className="settings-panel">
+              <form
+                className="settings-panel"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void onSubmitDisplayName();
+                }}
+              >
                 <div className="settings-kv"><span>ID</span><strong>{accountInfo?.id ?? '—'}</strong></div>
                 <div className="settings-kv"><span>Remaining</span><strong>{accountInfo?.nameChangeRemaining ?? 3}</strong></div>
                 <div className="settings-ref">
@@ -1970,14 +1976,10 @@ export default function GameView(): JSX.Element {
                   maxLength={32}
                   value={displayNameDraft}
                   onChange={(event) => setDisplayNameDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      void onSubmitDisplayName();
-                    }
-                  }}
                   placeholder="Display name"
                 />
-              </div>
+                <button type="submit">Save</button>
+              </form>
             )}
           </div>
         </div>
