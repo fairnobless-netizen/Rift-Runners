@@ -282,6 +282,7 @@ export default function GameView(): JSX.Element {
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
   const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay;
+  const didGestureExpandRef = useRef(false);
   const shellSizeRef = useRef<{ width: number; height: number }>({ width: window.innerWidth, height: window.innerHeight });
 
   const updateTgMetrics = useCallback((): void => {
@@ -317,76 +318,6 @@ export default function GameView(): JSX.Element {
     document.documentElement.dataset.device = device;
     document.documentElement.dataset.orient = orient;
   }, []);
-
-  const requestTelegramFullscreenBestEffort = (): void => {
-    try {
-      const w: any = window as any;
-
-      // Native Telegram WebApp API
-      if (w.Telegram?.WebApp) {
-        if (typeof w.Telegram.WebApp.requestFullscreen === 'function') {
-          w.Telegram.WebApp.requestFullscreen();
-        }
-        if (typeof w.Telegram.WebApp.expand === 'function') {
-          w.Telegram.WebApp.expand();
-        }
-      }
-
-      // Webview proxy fallback (critical on some clients)
-      if (w.TelegramWebviewProxy?.postEvent) {
-        try { w.TelegramWebviewProxy.postEvent('web_app_request_fullscreen', '{}'); } catch { /* no-op */ }
-        try { w.TelegramWebviewProxy.postEvent('web_app_expand', '{}'); } catch { /* no-op */ }
-      }
-    } catch {
-      // no-op
-    }
-  };
-
-  const stabilizeAfterFullscreen = (): void => {
-    const refreshOnce = (): void => {
-      const target = mountRef.current ?? pageShellRef.current ?? pageRef.current;
-      // layout flush
-      try { target?.getBoundingClientRect(); } catch { /* no-op */ }
-
-      // resize to container rect (safer than only refresh)
-      const rect = mountRef.current?.getBoundingClientRect();
-      if (rect && gameRef.current) {
-        gameRef.current.scale.resize(
-          Math.max(1, Math.round(rect.width)),
-          Math.max(1, Math.round(rect.height)),
-        );
-        gameRef.current.scale.refresh();
-      } else {
-        gameRef.current?.scale.refresh();
-      }
-
-      // mimic rotation-fix behavior (Telegram often finalizes viewport on resize tick)
-      window.dispatchEvent(new Event('resize'));
-
-      // If you already rely on this event elsewhere, keep it consistent:
-      window.dispatchEvent(new CustomEvent('PHASER_REFRESHED', { detail: { source: 'start_fullscreen' } }));
-    };
-
-    let raf1 = 0;
-    let raf2 = 0;
-    let t1: number | undefined;
-    let t2: number | undefined;
-
-    raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => {
-        refreshOnce();
-      });
-    });
-
-    t1 = window.setTimeout(refreshOnce, 80);
-    t2 = window.setTimeout(refreshOnce, 220);
-
-    // no cleanup required here (called on Start once)
-    void raf1;
-    void raf2;
-    void t1;
-    void t2;
-  };
 
   useEffect(() => {
     if (!tutorialActive || !currentTutorialStep) {
@@ -494,21 +425,61 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     const webApp = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
+    const boundedExpand = (): void => {
+      if (!webApp) return;
+
+      try {
+        webApp.requestFullscreen?.();
+      } catch {
+        // noop
+      }
+
+      try {
+        webApp.expand?.();
+      } catch {
+        // noop
+      }
+    };
 
     const onViewportChanged = (): void => {
       updateTgMetrics();
+      if (webApp?.isExpanded === false) boundedExpand();
+    };
+    const onFirstGesture = (): void => {
+      if (!didGestureExpandRef.current) {
+        boundedExpand();
+        didGestureExpandRef.current = true;
+      }
+    };
+
+    let rafId = 0;
+    let rafTicks = 0;
+    const MAX_RAF_RETRIES = 8;
+    const runBoundedRetry = (): void => {
+      if (!webApp) return;
+      if (rafTicks >= MAX_RAF_RETRIES) return;
+      boundedExpand();
+      rafTicks += 1;
+      if (webApp.isExpanded !== false) return;
+      rafId = window.requestAnimationFrame(runBoundedRetry);
     };
 
     webApp?.ready?.();
     updateTgMetrics();
-    // no auto expand here; fullscreen happens on Start click
+    boundedExpand();
+    runBoundedRetry();
 
     webApp?.onEvent?.('viewportChanged', onViewportChanged);
     webApp?.onEvent?.('safeAreaChanged', onViewportChanged);
+    pageRef.current?.addEventListener('pointerdown', onFirstGesture, { once: true });
+    pageRef.current?.addEventListener('touchstart', onFirstGesture, { once: true, passive: true });
 
     return () => {
+      window.cancelAnimationFrame(rafId);
       webApp?.offEvent?.('viewportChanged', onViewportChanged);
       webApp?.offEvent?.('safeAreaChanged', onViewportChanged);
+      pageRef.current?.removeEventListener('pointerdown', onFirstGesture);
+      pageRef.current?.removeEventListener('touchstart', onFirstGesture);
     };
   }, [updateTgMetrics]);
 
@@ -1332,16 +1303,7 @@ export default function GameView(): JSX.Element {
 
   const onStartGame = (): void => {
     if (shouldShowRotateOverlay) return;
-
-    // IMPORTANT: user gesture path (Eggs&Dragons parity)
-    requestTelegramFullscreenBestEffort();
-
-    // Stabilize layout after expand/fullscreen
-    stabilizeAfterFullscreen();
-
-    // Now start game flow
     setGameFlowPhase('playing');
-
     if (!onboardingDone) {
       setTutorialStepIndex(0);
       setTutorialActive(true);
