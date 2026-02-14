@@ -158,7 +158,7 @@ export class BossController {
         ];
 
     for (const cell of candidates) {
-      if (!isInsideArena(cell.x, cell.y)) continue;
+      if (!this.context || !isInsideArena(this.context.arena, cell.x, cell.y)) continue;
       if (!this.deps.canOccupy(cell.x, cell.y)) continue;
       this.boss.setPosition(cell.x, cell.y, this.scene.time.now, Math.floor(900 / this.profile.speedMultiplier));
       return;
@@ -177,7 +177,7 @@ export class BossController {
     for (let i = 1; i <= GAME_CONFIG.gridWidth; i += 1) {
       const x = boss.gridX + step.dx * i;
       const y = boss.gridY + step.dy * i;
-      if (!isInsideArena(x, y)) break;
+      if (!this.context || !isInsideArena(this.context.arena, x, y)) break;
       const tile = this.context.arena.tiles[y]?.[x];
       if (tile === 'HardWall') break;
       this.spawnHazardTile(x, y, time + 700);
@@ -193,7 +193,7 @@ export class BossController {
       if (spawned >= this.profile.summonCount) break;
       const x = boss.gridX + dir.dx;
       const y = boss.gridY + dir.dy;
-      if (!isInsideArena(x, y)) continue;
+      if (!this.context || !isInsideArena(this.context.arena, x, y)) continue;
       if (!this.deps.canSpawnMinion(x, y)) continue;
       this.deps.spawnMinion(x, y);
       spawned += 1;

@@ -117,6 +117,8 @@ export class GameScene extends Phaser.Scene {
   private matchGridH: number = GAME_CONFIG.gridHeight;
   private controls: ControlsState;
   private gameMode: GameMode = 'solo';
+  private partySize = 1;
+  private pickupsSpawnedThisLevel = 0;
   private lives = INITIAL_LIVES;
   private nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
   private awaitingSoloContinue = false;
@@ -483,13 +485,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setupCamera(): void {
-    const { tileSize, minZoom, maxZoom, gridWidth, gridHeight } = GAME_CONFIG;
-    const worldWidth = gridWidth * tileSize;
-    const worldHeight = gridHeight * tileSize;
+    const { tileSize, maxZoom } = GAME_CONFIG;
+    const worldWidth = this.arena.width * tileSize;
+    const worldHeight = this.arena.height * tileSize;
+    const viewportHeight = Math.max(1, this.scale.height);
+    const minZoom = viewportHeight / worldHeight;
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
     this.cameras.main.setZoom(minZoom);
 
     gameEvents.emit(EVENT_READY, {
+      minZoom,
+      maxZoom,
       setZoom: (zoom: number) => {
         const clamped = Phaser.Math.Clamp(zoom, minZoom, maxZoom);
         this.cameras.main.setZoom(clamped);
@@ -571,8 +577,11 @@ export class GameScene extends Phaser.Scene {
     this.emitCampaignState();
   }
 
-  private getShuffledEnemySpawnCells() {
-    const cells = [...getEnemySpawnCells(this.arena)];
+  private getShuffledEnemySpawnCells(levelIndex: number = this.levelIndex): Array<{ x: number; y: number }> {
+    const minDistance = Math.min(8, 4 + Math.floor(levelIndex / 2));
+    const allCells = [...getEnemySpawnCells(this.arena)];
+    const farCells = allCells.filter((cell) => Math.abs(cell.x - this.player.gridX) + Math.abs(cell.y - this.player.gridY) >= minDistance);
+    const cells = farCells.length > 0 ? farCells : allCells;
     for (let i = cells.length - 1; i > 0; i -= 1) {
       const j = this.randomInt(i + 1);
       const temp = cells[i];
@@ -605,6 +614,7 @@ export class GameScene extends Phaser.Scene {
     this.doorEnterStartedAt = null;
     this.waveSequence = 0;
     this.enemySequence = 0;
+    this.pickupsSpawnedThisLevel = 0;
     this.bossAnchorKey = null;
     this.doorController.reset();
     this.clearDynamicSprites();
@@ -743,6 +753,10 @@ export class GameScene extends Phaser.Scene {
     this.multiplayerEliminated = false;
     this.playerSprite?.setVisible(true);
     this.emitLifeState();
+  }
+
+  public setPartySize(count: number): void {
+    this.partySize = Phaser.Math.Clamp(Math.floor(count), 1, 4);
   }
 
   public continueSoloRun(): void {
@@ -930,7 +944,7 @@ export class GameScene extends Phaser.Scene {
 
   private spawnEnemies(): void {
     if (this.isBossLevel) return;
-    const spawnCells = this.getShuffledEnemySpawnCells();
+    const spawnCells = this.getShuffledEnemySpawnCells(this.levelIndex);
     const targetCount = Math.min(spawnCells.length, getEnemyCountForLevel(this.levelIndex));
 
     for (let i = 0; i < targetCount; i += 1) {
@@ -954,6 +968,21 @@ export class GameScene extends Phaser.Scene {
       });
       this.enemyNextMoveAt.set(key, 0);
     }
+  }
+
+
+  private getMaxPickupsPerLevel(): number {
+    return this.partySize * 2;
+  }
+
+  private trySpawnPickup(x: number, y: number): ReturnType<typeof maybeDropItem> {
+    if (this.pickupsSpawnedThisLevel >= this.getMaxPickupsPerLevel()) return null;
+    const remaining = this.getMaxPickupsPerLevel() - this.pickupsSpawnedThisLevel;
+    const dropChance = remaining <= 2 ? 0.2 : 0.26;
+    const dropped = maybeDropItem(this.arena, x, y, this.randomFloat(), this.randomFloat(), dropChance);
+    if (!dropped) return null;
+    this.pickupsSpawnedThisLevel += 1;
+    return dropped;
   }
 
   private setupInput(): void {
@@ -1047,7 +1076,7 @@ export class GameScene extends Phaser.Scene {
     const ny = this.player.gridY + dy;
     this.player.facing = direction;
 
-    if (!isInsideArena(nx, ny) || !canOccupyCell(this.arena, nx, ny)) return;
+    if (!isInsideArena(this.arena, nx, ny) || !canOccupyCell(this.arena, nx, ny)) return;
 
     this.player.moveFromX = this.player.gridX;
     this.player.moveFromY = this.player.gridY;
@@ -1127,7 +1156,7 @@ export class GameScene extends Phaser.Scene {
         this.destroyBreakableSprite(block.x, block.y);
         this.stats.score += 10;
         scoreChanged = true;
-        const dropped = wasAnomalous ? null : maybeDropItem(this.arena, block.x, block.y, this.randomFloat(), this.randomFloat());
+        const dropped = wasAnomalous ? null : this.trySpawnPickup(block.x, block.y);
         if (this.isBossLevel && wasAnomalous && this.bossAnchorKey === blockKey) {
           this.bossController.revealBoss();
         }
@@ -1303,7 +1332,7 @@ export class GameScene extends Phaser.Scene {
         const key = toKey(nx, ny);
         if (visited.has(key)) continue;
         visited.add(key);
-        if (!isInsideArena(nx, ny)) continue;
+        if (!isInsideArena(this.arena, nx, ny)) continue;
         queue.push({ x: nx, y: ny });
         if (!this.canEnemyOccupy(nx, ny, '__spawn__')) continue;
         result.push({ x: nx, y: ny });
@@ -1361,7 +1390,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private canEnemyOccupy(x: number, y: number, selfKey: string): boolean {
-    if (!isInsideArena(x, y) || !canOccupyCell(this.arena, x, y)) return false;
+    if (!isInsideArena(this.arena, x, y) || !canOccupyCell(this.arena, x, y)) return false;
     for (const enemy of this.enemies.values()) {
       if (enemy.key === selfKey) continue;
       if (enemy.gridX === x && enemy.gridY === y) return false;
@@ -1753,7 +1782,7 @@ export class GameScene extends Phaser.Scene {
 
 
   private canBossOccupy(x: number, y: number): boolean {
-    if (!isInsideArena(x, y) || !canOccupyCell(this.arena, x, y)) return false;
+    if (!isInsideArena(this.arena, x, y) || !canOccupyCell(this.arena, x, y)) return false;
     if (this.player.gridX === x && this.player.gridY === y) return false;
     for (const enemy of this.enemies.values()) {
       if (enemy.gridX === x && enemy.gridY === y) return false;
@@ -1885,7 +1914,7 @@ export class GameScene extends Phaser.Scene {
     const nextX = this.player.gridX + dx;
     const nextY = this.player.gridY + dy;
 
-    if (!isInsideArena(nextX, nextY) || !canOccupyCell(this.arena, nextX, nextY)) {
+    if (!isInsideArena(this.arena, nextX, nextY) || !canOccupyCell(this.arena, nextX, nextY)) {
       return false;
     }
 

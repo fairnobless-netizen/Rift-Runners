@@ -206,6 +206,7 @@ export default function GameView(): JSX.Element {
     eliminated: false,
   });
   const [campaign, setCampaign] = useState<CampaignState>(() => loadCampaignState());
+  const [zoomBounds, setZoomBounds] = useState<{ min: number; max: number }>({ min: GAME_CONFIG.minZoom, max: GAME_CONFIG.maxZoom });
   const [zoom, setZoom] = useState<number>(GAME_CONFIG.minZoom);
   const [isRemoteDetonateUnlocked, setIsRemoteDetonateUnlocked] = useState(false);
   const [joystickPressed, setJoystickPressed] = useState(false);
@@ -646,7 +647,8 @@ export default function GameView(): JSX.Element {
     };
     const onReady = (payload: ReadyPayload): void => {
       zoomApiRef.current = payload;
-      const minZoom = GAME_CONFIG.minZoom;
+      setZoomBounds({ min: payload.minZoom, max: payload.maxZoom });
+      const minZoom = payload.minZoom;
       setZoom(minZoom);
       window.requestAnimationFrame(() => {
         window.requestAnimationFrame(() => {
@@ -753,6 +755,11 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     sceneRef.current?.setGameMode(isMultiplayerMode ? 'multiplayer' : 'solo');
   }, [isMultiplayerMode]);
+
+  useEffect(() => {
+    const partySize = Math.max(1, Math.min(4, currentRoomMembers.length || 1));
+    sceneRef.current?.setPartySize(partySize);
+  }, [currentRoomMembers.length]);
 
   useEffect(() => {
     const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
@@ -911,7 +918,7 @@ export default function GameView(): JSX.Element {
   };
 
   const onZoomInput = (value: number): void => {
-    const clamped = Math.max(GAME_CONFIG.minZoom, Math.min(GAME_CONFIG.maxZoom, value));
+    const clamped = Math.max(zoomBounds.min, Math.min(zoomBounds.max, value));
     setZoom(clamped);
     zoomApiRef.current?.setZoom(clamped);
   };
@@ -1418,7 +1425,7 @@ export default function GameView(): JSX.Element {
   const onStartGame = (): void => {
     requestTelegramFullscreenBestEffort();
     if (shouldShowRotateOverlay) return;
-    const minZoom = GAME_CONFIG.minZoom;
+    const minZoom = zoomBounds.min;
     setZoom(minZoom);
     setGameFlowPhase('playing');
     window.requestAnimationFrame(() => {
@@ -1666,8 +1673,8 @@ export default function GameView(): JSX.Element {
                   id="zoom"
                   type="range"
                   className="zoom-slider"
-                  min={GAME_CONFIG.minZoom}
-                  max={GAME_CONFIG.maxZoom}
+                  min={zoomBounds.min}
+                  max={zoomBounds.max}
                   step={0.05}
                   value={zoom}
                   onChange={(event) => onZoomInput(Number(event.target.value))}

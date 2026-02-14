@@ -8,6 +8,8 @@ export interface ArenaModel {
   items: Map<string, ItemModel>;
   hiddenDoorKey: string;
   isSpawnCell: (x: number, y: number) => boolean;
+  width: number;
+  height: number;
 }
 
 export interface ExplosionImpact {
@@ -45,9 +47,23 @@ export function getEnemyCountForLevel(levelIndex: number): number {
   return Math.max(1, Math.min(GAME_CONFIG.maxEnemyCount, GAME_CONFIG.baseEnemyCount + levelIndex));
 }
 
-function getEnemyReserveSafeCells(enemyCount: number): Set<string> {
-  const reserveCandidates = ['5,5', '5,4', '4,5', '3,5', '5,3', '1,5', '5,1', '3,1', '1,3'];
-  return new Set(reserveCandidates.slice(0, Math.max(enemyCount + 2, 3)));
+function getEnemyReserveSafeCells(enemyCount: number, gridWidth: number, gridHeight: number): Set<string> {
+  const reserve = new Set<string>();
+  const maxDistance = Math.max(gridWidth, gridHeight);
+
+  for (let distance = maxDistance; distance >= 0 && reserve.size < enemyCount + 4; distance -= 1) {
+    for (let y = gridHeight - 2; y >= 1; y -= 1) {
+      for (let x = gridWidth - 2; x >= 1; x -= 1) {
+        if (Math.abs(x - 1) + Math.abs(y - 1) !== distance) continue;
+        if (x % 2 === 0 && y % 2 === 0) continue;
+        reserve.add(toKey(x, y));
+        if (reserve.size >= enemyCount + 4) break;
+      }
+      if (reserve.size >= enemyCount + 4) break;
+    }
+  }
+
+  return reserve;
 }
 
 export function createArena(levelIndex = 0, rng?: DeterministicRng): ArenaModel {
@@ -55,7 +71,7 @@ export function createArena(levelIndex = 0, rng?: DeterministicRng): ArenaModel 
   const tiles: TileType[][] = [];
   const spawnSafe = getSpawnSafeSet();
   const enemyCount = getEnemyCountForLevel(levelIndex);
-  const enemyReserve = getEnemyReserveSafeCells(enemyCount);
+  const enemyReserve = getEnemyReserveSafeCells(enemyCount, gridWidth, gridHeight);
   const breakableDensity = getBreakableDensity(levelIndex);
   const breakableCells: GridPosition[] = [];
 
@@ -109,6 +125,8 @@ export function createArena(levelIndex = 0, rng?: DeterministicRng): ArenaModel 
     items: new Map<string, ItemModel>(),
     hiddenDoorKey: toKey(hiddenDoorCell.x, hiddenDoorCell.y),
     isSpawnCell: (x: number, y: number) => spawnSafe.has(toKey(x, y)),
+    width: gridWidth,
+    height: gridHeight,
   };
 }
 
@@ -116,8 +134,8 @@ export function getEnemySpawnCells(arena: ArenaModel): GridPosition[] {
   const spawnSafe = getSpawnSafeSet();
   const cells: GridPosition[] = [];
 
-  for (let y = 1; y < GAME_CONFIG.gridHeight - 1; y += 1) {
-    for (let x = 1; x < GAME_CONFIG.gridWidth - 1; x += 1) {
+  for (let y = 1; y < arena.height - 1; y += 1) {
+    for (let x = 1; x < arena.width - 1; x += 1) {
       if (spawnSafe.has(toKey(x, y))) continue;
       if (tileAt(arena, x, y) !== 'Floor') continue;
       cells.push({ x, y });
@@ -127,8 +145,8 @@ export function getEnemySpawnCells(arena: ArenaModel): GridPosition[] {
   return cells;
 }
 
-export function isInsideArena(x: number, y: number): boolean {
-  return x >= 0 && y >= 0 && x < GAME_CONFIG.gridWidth && y < GAME_CONFIG.gridHeight;
+export function isInsideArena(arena: ArenaModel, x: number, y: number): boolean {
+  return x >= 0 && y >= 0 && x < arena.width && y < arena.height;
 }
 
 export function tileAt(arena: ArenaModel, x: number, y: number): TileType {
@@ -136,7 +154,7 @@ export function tileAt(arena: ArenaModel, x: number, y: number): TileType {
 }
 
 export function canOccupyCell(arena: ArenaModel, x: number, y: number): boolean {
-  if (!isInsideArena(x, y)) return false;
+  if (!isInsideArena(arena, x, y)) return false;
   const tile = tileAt(arena, x, y);
   if (tile === 'HardWall' || tile === 'BreakableBlock' || tile === 'ANOMALOUS_STONE') return false;
   return !arena.bombs.has(toKey(x, y));
@@ -181,7 +199,7 @@ export function getExplosionResult(arena: ArenaModel, bomb: BombModel): Explosio
     for (let step = 1; step <= bomb.range; step += 1) {
       const tx = bomb.x + dx * step;
       const ty = bomb.y + dy * step;
-      if (!isInsideArena(tx, ty)) break;
+      if (!isInsideArena(arena, tx, ty)) break;
 
       const key = toKey(tx, ty);
       const tile = tileAt(arena, tx, ty);
@@ -215,8 +233,8 @@ export function destroyBreakable(arena: ArenaModel, x: number, y: number): void 
   arena.tiles[y][x] = 'Floor';
 }
 
-export function maybeDropItem(arena: ArenaModel, x: number, y: number, dropRoll: number, typeRoll: number): ItemModel | null {
-  if (dropRoll > GAME_CONFIG.itemDropChance) return null;
+export function maybeDropItem(arena: ArenaModel, x: number, y: number, dropRoll: number, typeRoll: number, dropChance: number = GAME_CONFIG.itemDropChance): ItemModel | null {
+  if (dropRoll > dropChance) return null;
   const key = toKey(x, y);
   const type: ItemType = typeRoll < 0.5 ? 'BombUp' : 'FireUp';
   const item: ItemModel = { key, x, y, type };

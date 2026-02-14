@@ -1,8 +1,8 @@
 import type { AssetRegistry } from './types';
 
 export const GAME_CONFIG = {
-  gridWidth: 9,
-  gridHeight: 7,
+  gridWidth: 27,
+  gridHeight: 14,
   tileSize: 64,
   moveDurationMs: 120,
   moveRepeatDelayMs: 170,
@@ -13,8 +13,8 @@ export const GAME_CONFIG = {
   enemyMoveIntervalMs: 260,
   enemyMoveIntervalMinMs: 120,
   enemyForwardBias: 0.65,
-  baseEnemyCount: 1,
-  maxEnemyCount: 6,
+  baseEnemyCount: 4,
+  maxEnemyCount: 24,
   enemyScore: 75,
   playerDeathPenalty: 50,
   defaultBombCapacity: 1,

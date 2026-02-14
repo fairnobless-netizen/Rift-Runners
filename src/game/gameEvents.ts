@@ -21,6 +21,8 @@ export const LEVEL_FAILED = 'LEVEL_FAILED';
 export interface ReadyPayload {
   setZoom: (zoom: number) => void;
   resetZoom: () => void;
+  minZoom: number;
+  maxZoom: number;
 }
 
 export interface AssetProgressPayload {
