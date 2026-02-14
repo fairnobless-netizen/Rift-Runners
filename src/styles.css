@@ -19,15 +19,21 @@
   box-sizing: border-box;
 }
 
-html,
+html {
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
 body {
   height: var(--tg-viewport-stable-h);
   min-height: var(--tg-viewport-stable-h);
   margin: 0;
   overflow: hidden;
-}
 
-body {
+  /* Prevent "rubber band" + swipe gestures moving the webview */
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+  touch-action: none;
   background: radial-gradient(circle at top, #13192c, #070a12 60%);
 }
 
