@@ -152,6 +152,15 @@ const JOYSTICK_RADIUS = 56;
 const JOYSTICK_DEADZONE = 10;
 const INTRO_PLACEHOLDER_MS = 5500;
 const ONBOARDING_DONE_KEY = 'rift_onboarding_v1_done';
+const FULL_AUTOONCE_DISABLED_KEY = 'rr_full_autoonce_disabled';
+
+type TelegramWebApp = {
+  ready?: () => void;
+  expand?: () => void;
+  isExpanded?: boolean;
+  onEvent?: (eventType: 'viewportChanged', handler: () => void) => void;
+  offEvent?: (eventType: 'viewportChanged', handler: () => void) => void;
+};
 
 export default function GameView(): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -235,6 +244,7 @@ export default function GameView(): JSX.Element {
   const [bootSplashFileKey, setBootSplashFileKey] = useState<string>('');
   const [bootSplashClosing, setBootSplashClosing] = useState(false);
   const ws = useWsClient(token || undefined);
+  const autoFullViewAttemptedRef = useRef(false);
 
   const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
   const baseHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
@@ -365,15 +375,44 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.add('telegram-fullview');
+    const webApp = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
+    let hasAutoExpanded = false;
 
-    const webApp = (window as Window & { Telegram?: { WebApp?: { ready?: () => void; expand?: () => void } } }).Telegram?.WebApp;
-    if (!webApp) return () => root.classList.remove('telegram-fullview');
+    const onViewportChanged = (): void => {
+      if (!hasAutoExpanded) return;
+      if (webApp?.isExpanded !== false) return;
 
-    webApp.ready?.();
-    webApp.expand?.();
+      sessionStorage.setItem(FULL_AUTOONCE_DISABLED_KEY, '1');
+      root.classList.remove('telegram-fullview');
+    };
+
+    const onReady = (): void => {
+      if (autoFullViewAttemptedRef.current) return;
+      autoFullViewAttemptedRef.current = true;
+
+      if (sessionStorage.getItem(FULL_AUTOONCE_DISABLED_KEY) === '1') {
+        root.classList.remove('telegram-fullview');
+        return;
+      }
+
+      root.classList.add('telegram-fullview');
+      webApp?.ready?.();
+
+      try {
+        webApp?.expand?.();
+      } catch {
+        // Telegram iOS may ignore/throw without a user gesture; keep app-level full view only.
+      }
+
+      hasAutoExpanded = true;
+    };
+
+    gameEvents.on(EVENT_READY, onReady);
+    webApp?.onEvent?.('viewportChanged', onViewportChanged);
 
     return () => {
+      gameEvents.off(EVENT_READY, onReady);
+      webApp?.offEvent?.('viewportChanged', onViewportChanged);
       root.classList.remove('telegram-fullview');
     };
   }, []);
