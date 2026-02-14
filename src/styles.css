@@ -259,14 +259,36 @@ body {
 }
 
 .nav-btn {
-  width: 100%;
+  width: 71.5%;
+  min-width: 44px;
+  min-height: 44px;
   aspect-ratio: 1 / 1;
-  border-radius: 12px;
+  border-radius: 10px;
   font-size: calc(0.95rem * var(--ui-scale));
   padding: 0;
   display: grid;
   place-items: center;
+  justify-self: start;
+  position: relative;
   background: #2a3764;
+}
+
+.nav-btn::before {
+  content: '';
+  position: absolute;
+  inset: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.nav-btn__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 78%;
+  height: 78%;
+  font-size: calc(1.45rem * var(--ui-scale));
+  line-height: 1;
 }
 
 .left-joystick {
@@ -363,7 +385,7 @@ body {
 
 
 .nav-btn--multiplayer {
-  width: calc((100% - var(--nav-grid-gap)) / 2);
+  width: calc((((100% - var(--nav-grid-gap)) / 2)) * 0.715);
 }
 
 .right-panel--actions {
