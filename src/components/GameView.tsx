@@ -176,6 +176,7 @@ export default function GameView(): JSX.Element {
   const sceneRef = useRef<GameScene | null>(null);
   const inputSeqRef = useRef(0);
   const joystickPadRef = useRef<HTMLDivElement | null>(null);
+  const joystickPointerIdRef = useRef<number | null>(null);
   const hudLivesRef = useRef<HTMLSpanElement | null>(null);
   const bombBtnRef = useRef<HTMLButtonElement | null>(null);
   const detonateBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -800,13 +801,17 @@ export default function GameView(): JSX.Element {
     const pad = joystickPadRef.current;
     if (!pad) return;
 
-    pad.setPointerCapture(event.pointerId);
+    if (typeof pad.setPointerCapture === 'function') {
+      pad.setPointerCapture(event.pointerId);
+    }
+    joystickPointerIdRef.current = event.pointerId;
     setJoystickPressed(true);
     updateJoystickFromPointer(event.clientX, event.clientY);
   };
 
   const onJoystickPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
     if (isInteractionBlocked) return;
+    if (joystickPointerIdRef.current !== event.pointerId) return;
     if (!joystickPressed) return;
 
     event.preventDefault();
@@ -817,17 +822,34 @@ export default function GameView(): JSX.Element {
 
   const releaseJoystick = (pointerId?: number): void => {
     const pad = joystickPadRef.current;
-    if (pad && pointerId !== undefined && pad.hasPointerCapture(pointerId)) {
+    if (pad && pointerId !== undefined && typeof pad.hasPointerCapture === 'function' && pad.hasPointerCapture(pointerId)) {
       pad.releasePointerCapture(pointerId);
     }
+    joystickPointerIdRef.current = null;
     setJoystickPressed(false);
     setJoystickOffset({ x: 0, y: 0 });
     clearMovement();
   };
 
   const onJoystickPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (joystickPointerIdRef.current !== event.pointerId) return;
+
     event.preventDefault();
     event.stopPropagation();
+
+    releaseJoystick(event.pointerId);
+  };
+
+  const onJoystickPointerLeave = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (joystickPointerIdRef.current !== event.pointerId) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const pad = joystickPadRef.current;
+    if (pad && typeof pad.hasPointerCapture === 'function' && pad.hasPointerCapture(event.pointerId)) {
+      return;
+    }
 
     releaseJoystick(event.pointerId);
   };
@@ -1483,10 +1505,7 @@ export default function GameView(): JSX.Element {
                 onPointerMove={onJoystickPointerMove}
                 onPointerUp={onJoystickPointerUp}
                 onPointerCancel={onJoystickPointerUp}
-                onPointerLeave={() => {
-                  if (!joystickPressed) return;
-                  releaseJoystick();
-                }}
+                onPointerLeave={onJoystickPointerLeave}
                 role="application"
                 aria-label="Virtual joystick"
               >
