@@ -151,7 +151,18 @@ export function WsDebugOverlay({
   getLocalPlayerPosition?: () => { x: number; y: number } | null;
 }) {
   const debugUiFlag = String(import.meta.env.VITE_DEBUG_UI ?? '').trim().toLowerCase();
-  const showDebugUi = debugUiFlag === '1' || debugUiFlag === 'true' || import.meta.env.DEV;
+  const [isExplicitDebugEnabled, setIsExplicitDebugEnabled] = useState(false);
+  const showDebugUi = debugUiFlag === '1' || debugUiFlag === 'true' || import.meta.env.DEV || isExplicitDebugEnabled;
+
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      setIsExplicitDebugEnabled(window.localStorage.getItem('rr_debug') === '1');
+    } catch {
+      setIsExplicitDebugEnabled(false);
+    }
+  }, []);
 
   const lastSnapshot = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -499,36 +510,34 @@ export function WsDebugOverlay({
         pointerEvents: 'none', // root does not steal input
       }}
     >
-      {/* Bottom-left tray chip (ALWAYS rendered so probe is always available for CI) */}
-      <div
-        style={{
-          position: 'absolute',
-          left: 10,
-          bottom: 10,
-          zIndex: 10000,
-          pointerEvents: 'none',
-        }}
-      >
+      {/* Bottom-left tray chip (debug-only controls) */}
+      {showDebugUi && (
         <div
           style={{
-            display: 'flex',
-            gap: 8,
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            padding: '8px 10px',
-            borderRadius: 999,
-            background: 'rgba(0,0,0,0.78)',
-            border: '1px solid rgba(255,255,255,0.12)',
-            pointerEvents: 'auto', // interactive children enabled
+            position: 'absolute',
+            left: 10,
+            bottom: 10,
+            zIndex: 10000,
+            pointerEvents: 'none',
           }}
         >
-          {/* Probe must remain stable for Playwright */}
-          <button data-testid="probe-btn" onClick={runProbe}>
-            Probe 20 moves
-          </button>
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              padding: '8px 10px',
+              borderRadius: 999,
+              background: 'rgba(0,0,0,0.78)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              pointerEvents: 'auto', // interactive children enabled
+            }}
+          >
+            <button data-testid="probe-btn" onClick={runProbe}>
+              Probe 20 moves
+            </button>
 
-          {/* Tray toggle is shown only when debug UI is enabled */}
-          {showDebugUi && (
             <button
               type="button"
               onClick={() => setTrayCollapsed((v) => !v)}
@@ -537,28 +546,28 @@ export function WsDebugOverlay({
             >
               {trayCollapsed ? 'WS ▸' : 'WS ▾'}
             </button>
+          </div>
+
+          {probeSummary && (
+            <div
+              data-testid="probe-summary"
+              style={{
+                marginTop: 8,
+                padding: 6,
+                fontSize: 12,
+                borderRadius: 8,
+                background: probeSummary.pass ? '#0b3d1a' : '#3d0b0b',
+                color: probeSummary.pass ? '#5cff8d' : '#ff6b6b',
+                pointerEvents: 'auto',
+                maxWidth: 420,
+              }}
+            >
+              Probe result: moved={probeSummary.moved}, blocked={probeSummary.blocked} —{' '}
+              {probeSummary.pass ? 'PASS' : 'FAIL'}
+            </div>
           )}
         </div>
-
-        {probeSummary && (
-          <div
-            data-testid="probe-summary"
-            style={{
-              marginTop: 8,
-              padding: 6,
-              fontSize: 12,
-              borderRadius: 8,
-              background: probeSummary.pass ? '#0b3d1a' : '#3d0b0b',
-              color: probeSummary.pass ? '#5cff8d' : '#ff6b6b',
-              pointerEvents: 'auto',
-              maxWidth: 420,
-            }}
-          >
-            Probe result: moved={probeSummary.moved}, blocked={probeSummary.blocked} —{' '}
-            {probeSummary.pass ? 'PASS' : 'FAIL'}
-          </div>
-        )}
-      </div>
+      )}
 
       {/* Top-right expanded panel (ONLY when debug UI enabled + tray expanded) */}
       {showDebugUi && !trayCollapsed && (
