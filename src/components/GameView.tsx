@@ -1458,7 +1458,7 @@ export default function GameView(): JSX.Element {
   };
 
   return (
-    <main ref={pageRef} className="page">
+    <main ref={pageRef} className="page" onContextMenu={(event) => event.preventDefault()}>
       {showBootSplash && (
         <div className={`boot-splash ${bootSplashClosing ? 'boot-splash--closing' : ''}`} role="status" aria-live="polite">
           <div className="boot-splash-card">
@@ -1612,13 +1612,33 @@ export default function GameView(): JSX.Element {
         <aside className="control-column control-column--left" aria-label="Movement controls">
           <div className="left-nav" aria-label="Navigation quick controls">
             <div className="nav-grid">
-              <button type="button" className="nav-btn" aria-label="Map placeholder"><span className="nav-btn__icon" aria-hidden="true">🗺️</span></button>
-              <button type="button" className="nav-btn" aria-label="Leaderboard" onClick={() => setLeaderboardOpen(true)}><span className="nav-btn__icon" aria-hidden="true">🏆</span></button>
-              <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}><span className="nav-btn__icon" aria-hidden="true">⚙️</span></button>
-              <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}><span className="nav-btn__icon" aria-hidden="true">🛍️</span></button>
+              <button type="button" className="nav-btn" aria-label="Map placeholder">
+                <span className="nav-btn__plate" aria-hidden="true">
+                  <span className="nav-btn__icon" aria-hidden="true">🗺️</span>
+                </span>
+              </button>
+              <button type="button" className="nav-btn" aria-label="Leaderboard" onClick={() => setLeaderboardOpen(true)}>
+                <span className="nav-btn__plate" aria-hidden="true">
+                  <span className="nav-btn__icon" aria-hidden="true">🏆</span>
+                </span>
+              </button>
+              <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
+                <span className="nav-btn__plate" aria-hidden="true">
+                  <span className="nav-btn__icon" aria-hidden="true">⚙️</span>
+                </span>
+              </button>
+              <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}>
+                <span className="nav-btn__plate" aria-hidden="true">
+                  <span className="nav-btn__icon" aria-hidden="true">🛍️</span>
+                </span>
+              </button>
             </div>
             <div className="nav-secondary">
-              <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}><span className="nav-btn__icon" aria-hidden="true">👥</span></button>
+              <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>
+                <span className="nav-btn__plate" aria-hidden="true">
+                  <span className="nav-btn__icon" aria-hidden="true">👥</span>
+                </span>
+              </button>
             </div>
           </div>
 
