@@ -199,7 +199,7 @@ const DISPLAY_NAME_KEY = 'rr_display_name_v1';
 type TelegramWebApp = {
   ready?: () => void;
   expand?: () => void;
-  requestFullscreen?: () => void;
+  requestFullscreen?: () => void | Promise<void>;
   disableVerticalSwipes?: () => void;
   isExpanded?: boolean;
   viewportHeight?: number;
@@ -1739,31 +1739,48 @@ export default function GameView(): JSX.Element {
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
     : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
 
-  const requestTelegramFullscreenBestEffort = (): void => {
+  const requestTelegramFullscreenBestEffort = async (): Promise<void> => {
     const w = window as Window & { Telegram?: { WebApp?: TelegramWebApp } };
+    const webApp = w.Telegram?.WebApp;
+
+    if (!webApp) return;
+
+    const tryExpand = async (): Promise<void> => {
+      if (typeof webApp.expand !== 'function') return;
+      try {
+        await Promise.resolve(webApp.expand());
+      } catch {
+        // best effort only
+      }
+    };
 
     // Native Telegram WebApp API
-    if (w.Telegram?.WebApp) {
-      try {
-        w.Telegram.WebApp.ready?.();
-      } catch { /* no-op */ }
+    try {
+      webApp.ready?.();
+    } catch {
+      // best effort only
+    }
 
-      if (typeof w.Telegram.WebApp.requestFullscreen === 'function') {
-        w.Telegram.WebApp.requestFullscreen();
-      }
-      if (typeof w.Telegram.WebApp.expand === 'function') {
-        w.Telegram.WebApp.expand();
-      }
-
-      // prevent swipe-to-close while interacting (iOS)
+    if (typeof webApp.requestFullscreen === 'function') {
       try {
-        w.Telegram.WebApp.disableVerticalSwipes?.();
-      } catch { /* no-op */ }
+        await Promise.resolve(webApp.requestFullscreen());
+      } catch {
+        await tryExpand();
+      }
+    } else {
+      await tryExpand();
+    }
+
+    // prevent swipe-to-close while interacting (iOS)
+    try {
+      webApp.disableVerticalSwipes?.();
+    } catch {
+      // best effort only
     }
   };
 
   const onStartGame = (): void => {
-    requestTelegramFullscreenBestEffort();
+    void requestTelegramFullscreenBestEffort();
     if (shouldShowRotateOverlay) return;
     const minZoom = zoomBounds.min;
     setZoom(minZoom);
