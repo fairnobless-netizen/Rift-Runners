@@ -101,6 +101,7 @@ type AccountInfo = {
 
 type MultiplayerTab = 'rooms' | 'friends';
 type GameFlowPhase = 'intro' | 'start' | 'playing';
+type NicknameCheckState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'server_error';
 type TutorialStep = {
   id: string;
   title: string;
@@ -263,6 +264,10 @@ export default function GameView(): JSX.Element {
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
   const [nicknameDraft, setNicknameDraft] = useState('');
+  const [nicknameCheckState, setNicknameCheckState] = useState<NicknameCheckState>('idle');
+  const [nicknameSubmitError, setNicknameSubmitError] = useState<string | null>(null);
+  const [nicknameSubmitting, setNicknameSubmitting] = useState(false);
+  const [gameUserIdCopied, setGameUserIdCopied] = useState(false);
   const [registrationOpen, setRegistrationOpen] = useState<boolean>(() => !(localStorage.getItem(DISPLAY_NAME_KEY) ?? '').trim());
   const leaderboardSubmittedRef = useRef<string>('');
   const [gameFlowPhase, setGameFlowPhase] = useState<GameFlowPhase>('intro');
@@ -1357,40 +1362,155 @@ export default function GameView(): JSX.Element {
     if (!accountInfo?.gameUserId) return;
     try {
       await navigator.clipboard.writeText(accountInfo.gameUserId);
+      setGameUserIdCopied(true);
     } catch {
+      setGameUserIdCopied(false);
     }
   };
+
+  useEffect(() => {
+    if (!gameUserIdCopied) return;
+    const timeoutId = window.setTimeout(() => {
+      setGameUserIdCopied(false);
+    }, 1200);
+    return () => window.clearTimeout(timeoutId);
+  }, [gameUserIdCopied]);
+
+  const nicknameInput = nicknameDraft.trim();
+  const nicknameFormatValid = /^[A-Za-z0-9_]{3,16}$/.test(nicknameInput);
+
+  useEffect(() => {
+    if (!registrationOpen) return;
+    if (!nicknameInput) {
+      setNicknameCheckState('idle');
+      return;
+    }
+
+    if (!nicknameFormatValid) {
+      setNicknameCheckState('invalid');
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      setNicknameCheckState('checking');
+      void fetch(`/api/profile/nickname/check?nickname=${encodeURIComponent(nicknameInput)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          if (response.status === 409) {
+            setNicknameCheckState('taken');
+            return;
+          }
+          if (response.status === 400) {
+            setNicknameCheckState('invalid');
+            return;
+          }
+          if (!response.ok) {
+            setNicknameCheckState('server_error');
+            return;
+          }
+
+          const json = await response.json().catch(() => ({} as Record<string, unknown>));
+          const available = json?.available;
+          if (available === false) {
+            setNicknameCheckState('taken');
+            return;
+          }
+          if (available === true || json?.ok === true) {
+            setNicknameCheckState('available');
+            return;
+          }
+          setNicknameCheckState('server_error');
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setNicknameCheckState('server_error');
+          }
+        });
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [nicknameFormatValid, nicknameInput, registrationOpen, token]);
 
   const onSubmitNickname = async (event?: FormEvent): Promise<void> => {
     event?.preventDefault();
     if (!token) return;
 
-    const nickname = nicknameDraft.trim();
-    if (nickname.length < 3 || nickname.length > 16) {
+    const nickname = nicknameInput;
+    setNicknameSubmitError(null);
+    if (!nicknameFormatValid) {
+      setNicknameCheckState('invalid');
+      setNicknameSubmitError('Invalid nickname format');
       return;
     }
 
-    const response = await fetch('/api/profile/nickname', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ nickname }),
-    });
+    if (nicknameCheckState !== 'available') return;
 
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok || !json?.ok) {
-      return;
+    setNicknameSubmitting(true);
+
+    try {
+      const response = await fetch('/api/profile/nickname', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nickname }),
+      });
+
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json?.ok) {
+        if (response.status === 409) {
+          setNicknameCheckState('taken');
+          setNicknameSubmitError('Nickname is already taken');
+          return;
+        }
+        if (response.status === 400) {
+          setNicknameCheckState('invalid');
+          setNicknameSubmitError('Invalid nickname format');
+          return;
+        }
+        setNicknameCheckState('server_error');
+        setNicknameSubmitError('Server error. Please try again.');
+        return;
+      }
+
+      setAccountInfo((prev) => (prev ? {
+        ...prev,
+        // GDX: keep identity update centralized here so social layer hooks can subscribe later.
+        gameNickname: String(json.gameNickname ?? nickname),
+        gameUserId: String(json.gameUserId ?? prev.gameUserId),
+      } : prev));
+      setRegistrationOpen(false);
+    } catch {
+      setNicknameCheckState('server_error');
+      setNicknameSubmitError('Server error. Please try again.');
+    } finally {
+      setNicknameSubmitting(false);
     }
-
-    setAccountInfo((prev) => (prev ? {
-      ...prev,
-      gameNickname: String(json.gameNickname ?? nickname),
-      gameUserId: String(json.gameUserId ?? prev.gameUserId),
-    } : prev));
-    setRegistrationOpen(false);
   };
+
+  const nicknameStatusText = nicknameCheckState === 'checking'
+    ? 'Checking…'
+    : nicknameCheckState === 'available'
+      ? '✅ Available'
+      : nicknameCheckState === 'taken'
+        ? '❌ Taken'
+        : nicknameCheckState === 'invalid'
+          ? '❌ Invalid'
+          : nicknameCheckState === 'server_error'
+            ? '❌ Server error'
+            : null;
+  const canSaveNickname = Boolean(
+    nicknameInput
+    && nicknameCheckState === 'available'
+    && !nicknameSubmitting,
+  );
 
   const onSubmitDisplayName = async (event?: FormEvent): Promise<void> => {
     event?.preventDefault();
@@ -1560,12 +1680,17 @@ export default function GameView(): JSX.Element {
                 maxLength={16}
                 minLength={3}
                 value={nicknameDraft}
-                onChange={(event) => setNicknameDraft(event.target.value)}
+                onChange={(event) => {
+                  setNicknameDraft(event.target.value);
+                  setNicknameSubmitError(null);
+                }}
                 placeholder="Game nickname"
                 autoFocus
               />
               <div className="settings-kv"><span>Length</span><strong>3–16</strong></div>
-              <button type="submit">Save nickname</button>
+              {nicknameStatusText ? <div className="settings-inline-status">{nicknameStatusText}</div> : null}
+              {nicknameSubmitError ? <div className="settings-inline-error">{nicknameSubmitError}</div> : null}
+              <button type="submit" disabled={!canSaveNickname}>{nicknameSubmitting ? 'Saving…' : 'Save nickname'}</button>
             </div>
           </form>
         </div>
@@ -2130,6 +2255,7 @@ export default function GameView(): JSX.Element {
                   <button type="button" onClick={() => { void onCopyReferral(); }}>Copy</button>
                   <button type="button" onClick={() => { void onCopyGameUserId(); }}>Copy User ID</button>
                 </div>
+                {gameUserIdCopied ? <div className="settings-inline-status">Copied</div> : null}
                 <input
                   type="text"
                   maxLength={24}
