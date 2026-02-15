@@ -1,3 +1,5 @@
+import { apiUrl } from '../utils/apiBase';
+
 const SESSION_TOKEN_KEY = 'rift_session_token';
 
 export type Wallet = { stars: number; crystals: number };
@@ -117,7 +119,7 @@ export async function fetchWallet(): Promise<Wallet | null> {
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/wallet/me', {
+    const res = await fetch(apiUrl('/api/wallet/me'), {
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = await res.json();
@@ -133,7 +135,7 @@ export async function fetchLedger(limit = 50): Promise<WalletLedgerEntry[]> {
   if (!token) return [];
 
   try {
-    const res = await fetch(`/api/wallet/ledger?limit=${encodeURIComponent(String(limit))}`, {
+    const res = await fetch(apiUrl(`/api/wallet/ledger?limit=${encodeURIComponent(String(limit))}`), {
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = await res.json();
@@ -146,7 +148,7 @@ export async function fetchLedger(limit = 50): Promise<WalletLedgerEntry[]> {
 
 export async function fetchShopCatalog(): Promise<ShopCatalogItem[]> {
   try {
-    const res = await fetch('/api/shop/catalog');
+    const res = await fetch(apiUrl('/api/shop/catalog'));
     const json = await res.json();
     if (!json?.ok || !Array.isArray(json.items)) return [];
     return json.items as ShopCatalogItem[];
@@ -160,7 +162,7 @@ export async function fetchShopOwned(): Promise<string[]> {
   if (!token) return [];
 
   try {
-    const res = await fetch('/api/shop/owned', {
+    const res = await fetch(apiUrl('/api/shop/owned'), {
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = await res.json();
@@ -176,7 +178,7 @@ export async function buyShopSku(sku: string): Promise<{ wallet: Wallet; ownedSk
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/shop/buy', {
+    const res = await fetch(apiUrl('/api/shop/buy'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -200,7 +202,7 @@ export async function createPurchaseIntent(sku: string): Promise<{ intentId: str
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/shop/purchase-intent', {
+    const res = await fetch(apiUrl('/api/shop/purchase-intent'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -221,7 +223,7 @@ export async function confirmPurchase(intentId: string): Promise<{ wallet: Walle
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/shop/purchase-confirm', {
+    const res = await fetch(apiUrl('/api/shop/purchase-confirm'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -251,7 +253,7 @@ export async function fetchLeaderboard(mode: LeaderboardMode): Promise<Leaderboa
   const token = getToken();
 
   try {
-    const res = await fetch(`/api/leaderboard/${encodeURIComponent(mode)}`, {
+    const res = await fetch(apiUrl(`/api/leaderboard/${encodeURIComponent(mode)}`), {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     const json = await res.json();
@@ -284,7 +286,7 @@ export async function submitLeaderboard(mode: LeaderboardMode, score: number): P
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/leaderboard/submit', {
+    const res = await fetch(apiUrl('/api/leaderboard/submit'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -310,7 +312,7 @@ export async function fetchFriends(): Promise<FriendsPayload | null> {
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/friends', {
+    const res = await fetch(apiUrl('/api/friends'), {
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = await res.json();
@@ -350,7 +352,7 @@ export async function requestFriend(toTgUserId: string): Promise<{ ok: boolean; 
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/friends/request', {
+    const res = await fetch(apiUrl('/api/friends/request'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -371,7 +373,7 @@ export async function respondFriend(fromTgUserId: string, action: 'accept' | 'de
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/friends/respond', {
+    const res = await fetch(apiUrl('/api/friends/respond'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -392,7 +394,7 @@ export async function createRoom(capacity: 2 | 3 | 4): Promise<{ roomCode: strin
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/rooms/create', {
+    const res = await fetch(apiUrl('/api/rooms/create'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -416,7 +418,7 @@ export async function joinRoom(roomCode: string): Promise<{ room: RoomState; mem
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/rooms/join', {
+    const res = await fetch(apiUrl('/api/rooms/join'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -459,7 +461,7 @@ export async function fetchMyRooms(): Promise<MyRoomEntry[]> {
   if (!token) return [];
 
   try {
-    const res = await fetch('/api/rooms/me', {
+    const res = await fetch(apiUrl('/api/rooms/me'), {
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = await res.json();
@@ -483,7 +485,7 @@ export async function fetchRoom(roomCode: string): Promise<{ room: RoomState; me
   if (!token) return null;
 
   try {
-    const res = await fetch(`/api/rooms/${encodeURIComponent(roomCode)}`, {
+    const res = await fetch(apiUrl(`/api/rooms/${encodeURIComponent(roomCode)}`), {
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = await res.json();
@@ -524,7 +526,7 @@ export async function leaveRoom(): Promise<{ ok: boolean; closedRoomCode?: strin
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/rooms/leave', {
+    const res = await fetch(apiUrl('/api/rooms/leave'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -548,7 +550,7 @@ export async function closeRoom(roomCode: string): Promise<{ ok: boolean; roomCo
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/rooms/close', {
+    const res = await fetch(apiUrl('/api/rooms/close'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -570,7 +572,7 @@ export async function setRoomReady(roomCode: string, ready: boolean): Promise<{ 
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/rooms/ready', {
+    const res = await fetch(apiUrl('/api/rooms/ready'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -615,7 +617,7 @@ export async function startRoom(roomCode: string): Promise<{ room: RoomState; me
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/rooms/start', {
+    const res = await fetch(apiUrl('/api/rooms/start'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

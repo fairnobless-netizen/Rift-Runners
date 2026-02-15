@@ -1,3 +1,5 @@
+import { apiUrl } from '../utils/apiBase';
+
 export const CAMPAIGN_STORAGE_KEY = 'rift_campaign_v1';
 export const SESSION_TOKEN_KEY = 'rift_session_token';
 export const MAX_STAGE = 7;
@@ -61,7 +63,7 @@ async function postCampaignToBackend(state: CampaignState): Promise<void> {
   }
 
   try {
-    await fetch('/api/campaign/progress', {
+    await fetch(apiUrl('/api/campaign/progress'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -84,7 +86,7 @@ export async function fetchCampaignFromBackend(): Promise<{ ok: boolean; hasProg
   }
 
   try {
-    const res = await fetch('/api/campaign/progress', {
+    const res = await fetch(apiUrl('/api/campaign/progress'), {
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = await res.json();
