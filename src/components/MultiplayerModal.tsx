@@ -17,6 +17,12 @@ import {
 type Props = {
   open: boolean;
   onClose: () => void;
+  hostDisplayName?: string | null;
+  gameNickname?: string | null;
+  account?: {
+    gameNickname?: string | null;
+  } | null;
+  tgUsername?: string | null;
 };
 
 type MainTab = 'friends' | 'find' | 'room' | 'browse' | 'referral';
@@ -41,10 +47,16 @@ type RoomState = {
 type Toast = { id: number; text: string };
 
 const roomPositions: RoomSlotPosition[] = ['nw', 'ne', 'sw', 'se'];
-const hostNickname = 'HostNickname';
 const localGuestNickname = 'GuestNickname';
 
-export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
+export function MultiplayerModal({
+  open,
+  onClose,
+  hostDisplayName,
+  gameNickname,
+  account,
+  tgUsername,
+}: Props): JSX.Element | null {
   const [tab, setTab] = useState<MainTab>('friends');
   const [roomView, setRoomView] = useState<RoomView>('room_home');
   const [confirmed, setConfirmed] = useState<FriendConfirmed[]>(friendsConfirmed);
@@ -69,6 +81,23 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
   const [joinLoading, setJoinLoading] = useState(false);
 
   const [joinBusy, setJoinBusy] = useState(false);
+
+
+  const resolvedHostDisplayName = useMemo(() => {
+    const candidates = [
+      hostDisplayName,
+      gameNickname,
+      account?.gameNickname,
+      tgUsername,
+      'Player',
+    ];
+    for (const candidate of candidates) {
+      const normalized = typeof candidate === 'string' ? candidate.trim() : '';
+      if (normalized.length > 0) return normalized;
+    }
+    return 'Player';
+  }, [account?.gameNickname, gameNickname, hostDisplayName, tgUsername]);
+
   const [joinError, setJoinError] = useState<string | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseQuery, setBrowseQuery] = useState('');
@@ -159,7 +188,7 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
 
     const slots: RoomSlot[] = roomPositions.map((position) => {
       if (position === 'nw') {
-        return { position, type: 'host', enabled: true, occupiedBy: hostNickname };
+        return { position, type: 'host', enabled: true, occupiedBy: resolvedHostDisplayName };
       }
       return {
         position,
@@ -193,7 +222,7 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
     const inviteCapacity = Math.max(room.capacity - 1, 1);
     const slots: RoomSlot[] = roomPositions.map((position, index) => {
       if (position === 'nw') {
-        return { position, type: 'host', enabled: true, occupiedBy: hostNickname };
+        return { position, type: 'host', enabled: true, occupiedBy: resolvedHostDisplayName };
       }
 
       const enabled = index <= inviteCapacity;
@@ -389,7 +418,7 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
                         >
                           {isHostSlot ? (
                             <>
-                              <strong>{hostNickname}</strong>
+                              <strong>{resolvedHostDisplayName}</strong>
                               <span>Host</span>
                             </>
                           ) : enabled ? (

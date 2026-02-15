@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, type FormEvent } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
@@ -299,6 +299,18 @@ export default function GameView(): JSX.Element {
   const currentTutorialStep = tutorialSteps[tutorialStepIndex] ?? null;
 
   const myRoomMember = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
+  const multiplayerHostDisplayName = useMemo(() => {
+    const normalizedDisplayName = (accountInfo?.displayName ?? profileName ?? '').trim();
+    if (normalizedDisplayName) return normalizedDisplayName;
+    return null;
+  }, [accountInfo?.displayName, profileName]);
+  const telegramUsername = useMemo(() => {
+    const username = (window as Window & { Telegram?: { WebApp?: { initDataUnsafe?: { user?: { username?: string } } } } })
+      .Telegram?.WebApp?.initDataUnsafe?.user?.username;
+    if (!username) return null;
+    const normalized = String(username).trim();
+    return normalized.length > 0 ? normalized : null;
+  }, []);
   const waitingForOtherPlayer = Boolean(
     multiplayerOpen
     && multiplayerTab === 'rooms'
@@ -2203,7 +2215,14 @@ export default function GameView(): JSX.Element {
         </div>
       )}
 
-      <MultiplayerModal open={multiplayerUiOpen} onClose={() => setMultiplayerUiOpen(false)} />
+      <MultiplayerModal
+        open={multiplayerUiOpen}
+        onClose={() => setMultiplayerUiOpen(false)}
+        hostDisplayName={multiplayerHostDisplayName}
+        gameNickname={accountInfo?.gameNickname ?? null}
+        account={accountInfo ? { gameNickname: accountInfo.gameNickname } : null}
+        tgUsername={telegramUsername}
+      />
 
       {settingsOpen && (
         <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
