@@ -8,7 +8,7 @@ import {
   listOutgoingRequestsV2,
   requestFriend,
   respondFriendRequest,
-  searchUsersByUsername,
+  searchUsers,
 } from '../db/repos';
 
 export const friendsRouter = Router();
@@ -37,8 +37,8 @@ friendsRouter.get('/search', async (req, res) => {
   const q = String(req.query?.q ?? '').trim();
   if (!q) return res.status(400).json({ ok: false, error: 'q_required' });
 
-  const users = await searchUsersByUsername(q);
-  return res.status(200).json({ users });
+  const users = await searchUsers(q);
+  return res.status(200).json({ ok: true, users });
 });
 
 friendsRouter.post('/request', async (req, res) => {
