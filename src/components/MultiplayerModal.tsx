@@ -3,7 +3,6 @@ import {
   friendsConfirmed,
   friendsIncoming,
   friendsOutgoing,
-  mockCreateRoom,
   mockJoinRoom,
   mockListRooms,
   mockSearchUsers,
@@ -21,13 +20,33 @@ type Props = {
 };
 
 type MainTab = 'friends' | 'find' | 'room' | 'browse' | 'referral';
-type RoomTab = 'create' | 'join';
+type RoomView = 'room_home' | 'create_setup' | 'join_list' | 'room_lobby';
+type RoomSlotPosition = 'nw' | 'ne' | 'sw' | 'se';
+
+type RoomSlot = {
+  position: RoomSlotPosition;
+  type: 'host' | 'invite';
+  enabled: boolean;
+  occupiedBy?: string;
+  ready?: boolean;
+};
+
+type RoomState = {
+  name: string;
+  isPrivate: boolean;
+  capacity: number;
+  slots: RoomSlot[];
+};
 
 type Toast = { id: number; text: string };
 
+const roomPositions: RoomSlotPosition[] = ['nw', 'ne', 'sw', 'se'];
+const hostNickname = 'HostNickname';
+const localGuestNickname = 'GuestNickname';
+
 export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
   const [tab, setTab] = useState<MainTab>('friends');
-  const [roomTab, setRoomTab] = useState<RoomTab>('create');
+  const [roomView, setRoomView] = useState<RoomView>('room_home');
   const [confirmed, setConfirmed] = useState<FriendConfirmed[]>(friendsConfirmed);
   const [incoming, setIncoming] = useState<FriendRequest[]>(friendsIncoming);
   const [outgoing, setOutgoing] = useState<FriendRequest[]>(friendsOutgoing);
@@ -35,14 +54,20 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [requestedIds, setRequestedIds] = useState<string[]>([]);
+
+  const [isHost, setIsHost] = useState(true);
+  const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [createName, setCreateName] = useState('');
   const [createPassword, setCreatePassword] = useState('');
-  const [createSlots, setCreateSlots] = useState<boolean[]>([true, true, false, false]);
-  const [creating, setCreating] = useState(false);
-  const [createdRoom, setCreatedRoom] = useState<RoomCard | null>(null);
-  const [playersCount, setPlayersCount] = useState(2);
-  const [joinCode, setJoinCode] = useState('');
-  const [joinPassword, setJoinPassword] = useState('');
+  const [createInviteSlots, setCreateInviteSlots] = useState<Record<Exclude<RoomSlotPosition, 'nw'>, boolean>>({
+    ne: false,
+    sw: false,
+    se: false,
+  });
+  const [joinSearch, setJoinSearch] = useState('');
+  const [joinRooms, setJoinRooms] = useState<RoomCard[]>([]);
+  const [joinLoading, setJoinLoading] = useState(false);
+
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -92,21 +117,123 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
   }, [browseQuery, open, tab]);
 
   useEffect(() => {
-    if (!createdRoom) return;
-    const id = window.setInterval(() => {
-      setPlayersCount((value) => (value >= createdRoom.capacity ? value : value + 1));
-    }, 1600);
-    return () => window.clearInterval(id);
-  }, [createdRoom]);
+    if (!open || tab !== 'room') return;
+    setJoinLoading(true);
+    void mockListRooms(joinSearch).then((data) => {
+      setJoinRooms(data);
+      setJoinLoading(false);
+    });
+  }, [joinSearch, open, tab]);
 
-  const activeSlots = useMemo(() => createSlots.filter(Boolean).length, [createSlots]);
+  const activeInviteCount = useMemo(
+    () => Object.values(createInviteSlots).filter(Boolean).length,
+    [createInviteSlots],
+  );
 
-  const toggleSlot = (index: number): void => {
-    const currentActive = createSlots.filter(Boolean).length;
-    const nextValue = !createSlots[index];
-    if (!nextValue && currentActive <= 2) return;
-    if (nextValue && currentActive >= 4) return;
-    setCreateSlots((prev) => prev.map((slot, i) => (i === index ? nextValue : slot)));
+  const createRoomEnabled = createName.trim().length > 0 && activeInviteCount >= 1;
+
+  const playersCount = useMemo(() => {
+    if (!currentRoom) return 0;
+    return currentRoom.slots.filter((slot) => Boolean(slot.occupiedBy)).length;
+  }, [currentRoom]);
+
+  const hostCanStart = useMemo(() => {
+    if (!currentRoom || !isHost) return false;
+    const inviteSlots = currentRoom.slots.filter((slot) => slot.type === 'invite' && slot.enabled);
+    if (inviteSlots.length === 0) return false;
+    return inviteSlots.every((slot) => Boolean(slot.occupiedBy) && slot.ready === true);
+  }, [currentRoom, isHost]);
+
+  const localGuestReady = useMemo(() => {
+    if (!currentRoom || isHost) return false;
+    const me = currentRoom.slots.find((slot) => slot.occupiedBy === localGuestNickname);
+    return Boolean(me?.ready);
+  }, [currentRoom, isHost]);
+
+  const toggleCreateInviteSlot = (position: Exclude<RoomSlotPosition, 'nw'>): void => {
+    setCreateInviteSlots((prev) => ({ ...prev, [position]: !prev[position] }));
+  };
+
+  const onCreateRoom = (): void => {
+    if (!createRoomEnabled) return;
+
+    const slots: RoomSlot[] = roomPositions.map((position) => {
+      if (position === 'nw') {
+        return { position, type: 'host', enabled: true, occupiedBy: hostNickname };
+      }
+      return {
+        position,
+        type: 'invite',
+        enabled: createInviteSlots[position],
+      };
+    });
+
+    setCurrentRoom({
+      name: createName.trim(),
+      isPrivate: Boolean(createPassword.trim()),
+      capacity: 1 + activeInviteCount,
+      slots,
+    });
+    setIsHost(true);
+    setRoomView('room_lobby');
+    setJoinError(null);
+    pushToast('Room created (mock)');
+  };
+
+  const onJoinRoomCard = async (room: RoomCard): Promise<void> => {
+    setJoinBusy(true);
+    setJoinError(null);
+    const result = await mockJoinRoom(room.code, room.password);
+    setJoinBusy(false);
+    if (!result.ok) {
+      setJoinError(result.error ?? 'Join failed');
+      return;
+    }
+
+    const inviteCapacity = Math.max(room.capacity - 1, 1);
+    const slots: RoomSlot[] = roomPositions.map((position, index) => {
+      if (position === 'nw') {
+        return { position, type: 'host', enabled: true, occupiedBy: hostNickname };
+      }
+
+      const enabled = index <= inviteCapacity;
+      return {
+        position,
+        type: 'invite',
+        enabled,
+        occupiedBy: index === 1 ? localGuestNickname : undefined,
+        ready: index === 1 ? false : undefined,
+      };
+    });
+
+    setCurrentRoom({
+      name: room.name,
+      isPrivate: room.hasPassword,
+      capacity: room.capacity,
+      slots,
+    });
+    setIsHost(false);
+    setRoomView('room_lobby');
+    pushToast('Joined room (mock)');
+  };
+
+  const onToggleReady = (): void => {
+    if (!currentRoom || isHost) return;
+    setCurrentRoom({
+      ...currentRoom,
+      slots: currentRoom.slots.map((slot) => {
+        if (slot.occupiedBy !== localGuestNickname) return slot;
+        return { ...slot, ready: !slot.ready };
+      }),
+    });
+  };
+
+  const onHostStart = (): void => {
+    if (!hostCanStart) return;
+    pushToast('Starting... (mock)');
+    setRoomView('room_home');
+    setCurrentRoom(null);
+    setIsHost(true);
   };
 
   const onCopy = async (value: string): Promise<void> => {
@@ -119,23 +246,6 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
       document.execCommand('copy');
       pushToast('Copied (fallback)');
     }
-  };
-
-  const onCreateRoom = async (): Promise<void> => {
-    if (!createName.trim()) {
-      pushToast('Room Name is required');
-      return;
-    }
-    setCreating(true);
-    const room = await mockCreateRoom({
-      roomName: createName.trim(),
-      password: createPassword.trim(),
-      activeSlots,
-    });
-    setCreatedRoom(room);
-    setPlayersCount(Math.min(2, room.capacity));
-    setCreating(false);
-    pushToast('Room created (mock)');
   };
 
   const onJoin = async (code: string, password?: string): Promise<void> => {
@@ -248,42 +358,117 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
           ) : null}
 
           {tab === 'room' ? (
-            <section className="rr-mp-section">
-              <div className="rr-room-subtabs">
-                <button type="button" className={roomTab === 'create' ? 'active' : ''} onClick={() => setRoomTab('create')}>Create</button>
-                <button type="button" className={roomTab === 'join' ? 'active' : ''} onClick={() => setRoomTab('join')}>Join</button>
-              </div>
+            <section className="rr-mp-section rr-room-section">
+              {roomView === 'room_home' ? (
+                <div className="rr-room-home">
+                  <h4>ROOM</h4>
+                  <button type="button" onClick={() => setRoomView('create_setup')}>Create Room</button>
+                  <button type="button" onClick={() => setRoomView('join_list')}>Join Room</button>
+                </div>
+              ) : null}
 
-              {roomTab === 'create' ? (
-                <>
+              {roomView === 'create_setup' ? (
+                <div className="rr-room-flow">
+                  <h4>Create Room</h4>
                   <input value={createName} onChange={(event) => setCreateName(event.target.value)} placeholder="Room Name" />
                   <input value={createPassword} onChange={(event) => setCreatePassword(event.target.value)} placeholder="Password (optional)" />
-                  <div className="rr-arena-grid" aria-label="arena slots">
-                    {createSlots.map((slot, index) => (
-                      <button key={String(index)} type="button" className={slot ? 'active' : ''} onClick={() => toggleSlot(index)}>{slot ? 'ACTIVE' : '+'}</button>
+
+                  <div className="rr-arena-container" aria-label="room arena">
+                    {roomPositions.map((position) => {
+                      const isHostSlot = position === 'nw';
+                      const enabled = isHostSlot ? true : createInviteSlots[position as Exclude<RoomSlotPosition, 'nw'>];
+                      return (
+                        <button
+                          key={position}
+                          type="button"
+                          className={`rr-arena-slot ${position} ${isHostSlot ? 'host' : enabled ? 'active' : 'inactive'}`}
+                          onClick={() => {
+                            if (isHostSlot) return;
+                            toggleCreateInviteSlot(position as Exclude<RoomSlotPosition, 'nw'>);
+                          }}
+                        >
+                          {isHostSlot ? (
+                            <>
+                              <strong>{hostNickname}</strong>
+                              <span>Host</span>
+                            </>
+                          ) : enabled ? (
+                            <>
+                              <strong>ACTIVE</strong>
+                              <span>Invite slot</span>
+                            </>
+                          ) : (
+                            <>
+                              <strong>Add Player</strong>
+                              <span>👤＋</span>
+                            </>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button type="button" onClick={onCreateRoom} disabled={!createRoomEnabled}>Create Room</button>
+                </div>
+              ) : null}
+
+              {roomView === 'join_list' ? (
+                <div className="rr-room-flow">
+                  <h4>Join Lobby</h4>
+                  <input value={joinSearch} onChange={(event) => setJoinSearch(event.target.value)} placeholder="Search by room name" />
+                  {joinLoading ? <p>Loading rooms...</p> : null}
+                  {!joinLoading && joinRooms.length === 0 ? <p className="rr-mp-empty">No rooms found</p> : null}
+                  {joinRooms.map((room) => (
+                    <div key={room.code} className="rr-mp-card rr-room-list-item">
+                      <strong>{room.name}</strong>
+                      <span>Players {room.players}/{room.capacity}</span>
+                      <span>{room.hasPassword ? '🔒' : ''}</span>
+                      <button type="button" disabled={joinBusy} onClick={() => { void onJoinRoomCard(room); }}>Join</button>
+                    </div>
+                  ))}
+                  {joinError ? <p className="rr-mp-error">{joinError}</p> : null}
+                </div>
+              ) : null}
+
+              {roomView === 'room_lobby' && currentRoom ? (
+                <div className="rr-room-flow">
+                  <div className="rr-room-lobby-head">
+                    <strong>{currentRoom.name}</strong>
+                    <span>{currentRoom.isPrivate ? '🔒 Private' : 'Public'}</span>
+                    <span>Players: {playersCount}/{currentRoom.capacity}</span>
+                  </div>
+
+                  <div className="rr-arena-container" aria-label="lobby arena slots">
+                    {currentRoom.slots.map((slot) => (
+                      <div key={slot.position} className={`rr-arena-slot ${slot.position} ${slot.type === 'host' ? 'host' : slot.enabled ? 'active' : 'inactive'}`}>
+                        {slot.type === 'host' ? (
+                          <>
+                            <strong>{slot.occupiedBy}</strong>
+                            <span>Host</span>
+                          </>
+                        ) : !slot.enabled ? (
+                          <span>Disabled</span>
+                        ) : slot.occupiedBy ? (
+                          <>
+                            <strong>{slot.occupiedBy}</strong>
+                            <span className={slot.ready ? 'rr-ready-on' : 'rr-ready-off'}>{slot.ready ? 'Ready' : 'Not ready'}</span>
+                          </>
+                        ) : (
+                          <span>Waiting...</span>
+                        )}
+                      </div>
                     ))}
                   </div>
-                  <button type="button" onClick={() => { void onCreateRoom(); }} disabled={creating}>{creating ? 'Creating...' : 'Create Room'}</button>
 
-                  {createdRoom ? (
-                    <div className="rr-mp-card rr-created-room">
-                      <strong>{createdRoom.name}</strong>
-                      <span>{playersCount}/{createdRoom.capacity}</span>
-                      <span>Code: {createdRoom.code}</span>
-                      <input ref={copyRef} readOnly value={createdRoom.code} />
-                      <button type="button" onClick={() => { void onCopy(createdRoom.code); }}>Copy code</button>
-                      <em>Waiting for players...</em>
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <input value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="Room Code" />
-                  <input value={joinPassword} onChange={(event) => setJoinPassword(event.target.value)} placeholder="Password (optional)" />
-                  <button type="button" disabled={joinBusy} onClick={() => { void onJoin(joinCode, joinPassword); }}>{joinBusy ? 'Joining...' : 'Join'}</button>
-                  {joinError ? <p className="rr-mp-error">{joinError}</p> : null}
-                </>
-              )}
+                  {isHost ? (
+                    <button type="button" disabled={!hostCanStart} onClick={onHostStart}>Start</button>
+                  ) : (
+                    <button type="button" className={localGuestReady ? 'rr-ready-button-on' : ''} onClick={onToggleReady}>
+                      {localGuestReady ? 'Ready' : 'Not Ready'}
+                    </button>
+                  )}
+                </div>
+              ) : null}
             </section>
           ) : null}
 
