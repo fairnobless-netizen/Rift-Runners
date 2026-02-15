@@ -101,7 +101,14 @@ type AccountInfo = {
 
 type MultiplayerTab = 'rooms' | 'friends';
 type GameFlowPhase = 'intro' | 'start' | 'playing';
-type NicknameCheckState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'auth_required' | 'server_error';
+type NicknameCheckState =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'taken'
+  | 'invalid'
+  | 'auth_required'
+  | 'server_error';
 
 const DEBUG_NICK = false;
 const PROFILE_BASE_CANDIDATES = ['/api/profile', '/api/profile/profile'] as const;
@@ -1441,6 +1448,7 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     if (!registrationOpen) return;
+
     if (!nicknameInput) {
       setNicknameCheckState('idle');
       return;
@@ -1451,60 +1459,57 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    // Backend nickname-check requires Bearer token
+    if (!token) {
+      setNicknameCheckState('auth_required');
+      return;
+    }
+
     const controller = new AbortController();
+
     const timeoutId = window.setTimeout(() => {
       setNicknameCheckState('checking');
-      const endpointPath = `/nickname-check?nick=${encodeURIComponent(nicknameInput)}`;
-      void fetchProfileWithFallback(endpointPath, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+
+      const endpoint = `/api/profile/nickname-check?nick=${encodeURIComponent(nicknameInput)}`;
+
+      void fetch(endpoint, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
         signal: controller.signal,
       })
         .then(async (response) => {
           const json = await response.json().catch(() => null);
+
           if (response.status === 401) {
             setNicknameCheckState('auth_required');
             return;
           }
+
           if (response.status === 409 || json?.available === false) {
             setNicknameCheckState('taken');
             return;
           }
+
           if (response.status === 400) {
             setNicknameCheckState('invalid');
             return;
           }
+
           if (!response.ok || !json || typeof json !== 'object') {
-            debugNicknameFailure({
-              endpoint: endpointPath,
-              method: 'GET',
-              payload: { nick: nicknameInput },
-              response,
-              responseBody: json,
-            });
             setNicknameCheckState('server_error');
             return;
           }
-          if (json?.available === true || json?.ok === true) {
+
+          if (json.available === true || json.ok === true) {
             setNicknameCheckState('available');
             return;
           }
-          debugNicknameFailure({
-            endpoint: endpointPath,
-            method: 'GET',
-            payload: { nick: nicknameInput },
-            response,
-            responseBody: json,
-          });
+
           setNicknameCheckState('server_error');
         })
-        .catch((error) => {
+        .catch(() => {
           if (!controller.signal.aborted) {
-            debugNicknameFailure({
-              endpoint: endpointPath,
-              method: 'GET',
-              payload: { nick: nicknameInput },
-              error,
-            });
             setNicknameCheckState('server_error');
           }
         });
@@ -1586,19 +1591,20 @@ export default function GameView(): JSX.Element {
     }
   };
 
-  const nicknameStatusText = nicknameCheckState === 'checking'
-    ? 'Checking…'
-    : nicknameCheckState === 'available'
-      ? '✅ Available'
-      : nicknameCheckState === 'taken'
-        ? '❌ Taken'
-        : nicknameCheckState === 'invalid'
-          ? '❌ Invalid'
-          : nicknameCheckState === 'auth_required'
-            ? '❌ Auth required. Please reopen from Telegram.'
-            : nicknameCheckState === 'server_error'
-              ? '❌ Server error'
-              : null;
+  const nicknameStatusText =
+    nicknameCheckState === 'checking'
+      ? 'Checking…'
+      : nicknameCheckState === 'available'
+        ? '✅ Available'
+        : nicknameCheckState === 'taken'
+          ? '❌ Taken'
+          : nicknameCheckState === 'invalid'
+            ? '❌ Invalid'
+            : nicknameCheckState === 'auth_required'
+              ? '❌ Auth required. Please reopen from Telegram.'
+              : nicknameCheckState === 'server_error'
+                ? '❌ Server error'
+                : null;
   const canSaveNickname = Boolean(
     nicknameInput.length >= 3
     && nicknameInput.length <= 16
