@@ -12,6 +12,8 @@
   --side-w-left: var(--side-w);
   --side-w-right: var(--side-w);
   --ui-scale: 1;
+  --tg-top-safe: max(16px, calc(var(--safe-top) + var(--tg-content-top, 0px)));
+  --tg-bottom-safe: max(12px, calc(var(--safe-bottom) + var(--tg-content-bottom, 0px)));
 }
 
 
@@ -990,14 +992,15 @@ html[data-orient="landscape"] .right-panel {
   inset: 0;
   background: #040812cc;
   display: grid;
-  place-items: center;
+  justify-items: center;
+  align-content: start;
   z-index: 40;
-  padding: 0.6rem;
+  padding: calc(var(--tg-top-safe) + 14px) 0.6rem calc(var(--tg-bottom-safe) + 10px);
 }
 
 .settings-modal {
-  width: min(92vw, 560px);
-  max-height: calc(var(--tg-viewport-stable-h) * 0.88);
+  width: min(90vw, 560px);
+  max-height: calc(var(--tg-viewport-stable-h) - var(--tg-top-safe) - var(--tg-bottom-safe) - 24px);
   overflow: auto;
   background: #0f1630;
   border: 1px solid #2c3b6c;
@@ -1229,8 +1232,6 @@ html[data-orient="landscape"] .right-panel {
 
 .rr-mp-overlay {
   z-index: 52;
-  align-items: flex-start;
-  padding-top: max(0.6rem, var(--safe-top));
 }
 
 .rr-mp-modal {

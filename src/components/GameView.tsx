@@ -298,6 +298,19 @@ export default function GameView(): JSX.Element {
   ];
   const currentTutorialStep = tutorialSteps[tutorialStepIndex] ?? null;
 
+  const multiplayerHostDisplayName = useMemo(() => {
+    const nickname = accountInfo?.gameNickname?.trim();
+    if (nickname) return nickname;
+
+    const telegramName = accountInfo?.displayName?.trim();
+    if (telegramName) return telegramName;
+
+    const fallbackProfileName = profileName.trim();
+    if (fallbackProfileName && fallbackProfileName !== '—') return fallbackProfileName;
+
+    return 'Player';
+  }, [accountInfo?.displayName, accountInfo?.gameNickname, profileName]);
+
   const myRoomMember = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
   const waitingForOtherPlayer = Boolean(
     multiplayerOpen
@@ -2203,7 +2216,11 @@ export default function GameView(): JSX.Element {
         </div>
       )}
 
-      <MultiplayerModal open={multiplayerUiOpen} onClose={() => setMultiplayerUiOpen(false)} />
+      <MultiplayerModal
+        open={multiplayerUiOpen}
+        onClose={() => setMultiplayerUiOpen(false)}
+        hostDisplayName={multiplayerHostDisplayName}
+      />
 
       {settingsOpen && (
         <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
