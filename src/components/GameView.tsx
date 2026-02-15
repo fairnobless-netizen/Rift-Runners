@@ -61,6 +61,7 @@ import { fetchLocalLeaderboard, submitLocalLeaderboard } from '../game/localLead
 import { WsDebugOverlay } from './WsDebugOverlay';
 import { useWsClient } from '../ws/useWsClient';
 import { resolveDevIdentity } from '../utils/devIdentity';
+import { apiUrl } from '../utils/apiBase';
 import { MultiplayerModal } from './MultiplayerModal';
 
 
@@ -117,7 +118,7 @@ async function fetchProfileWithFallback(path: string, init?: RequestInit): Promi
   let last404Response: Response | null = null;
 
   for (const base of PROFILE_BASE_CANDIDATES) {
-    const endpoint = `${base}${path}`;
+    const endpoint = apiUrl(`${base}${path}`);
     const response = await fetch(endpoint, init);
     if (DEBUG_NICK) {
       console.warn('[nickname-debug] endpoint attempt', { endpoint, status: response.status });
@@ -494,8 +495,8 @@ export default function GameView(): JSX.Element {
     const headers = { Authorization: `Bearer ${authToken}` };
 
     const [settingsRes, accountRes] = await Promise.all([
-      fetch('/api/settings/me', { headers }),
-      fetch('/api/profile/account', { headers }),
+      fetch(apiUrl('/api/settings/me'), { headers }),
+      fetch(apiUrl('/api/profile/account'), { headers }),
     ]);
 
     if (settingsRes.ok) {
@@ -537,7 +538,7 @@ export default function GameView(): JSX.Element {
 
     if (!token) return;
 
-    await fetch('/api/settings/me', {
+    await fetch(apiUrl('/api/settings/me'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -588,7 +589,7 @@ export default function GameView(): JSX.Element {
           return;
         }
 
-        const authRes = await fetch('/api/auth/telegram', {
+        const authRes = await fetch(apiUrl('/api/auth/telegram'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ initData: tgInitData }),
@@ -667,7 +668,7 @@ export default function GameView(): JSX.Element {
 
         // Best-effort profile name; if this fails, keep going
         try {
-          const meRes = await fetch('/api/profile/me', {
+          const meRes = await fetch(apiUrl('/api/profile/me'), {
             headers: { Authorization: `Bearer ${token}` },
           });
 
@@ -1687,7 +1688,7 @@ export default function GameView(): JSX.Element {
 
     if (!token) return;
 
-    const response = await fetch('/api/profile/name', {
+    const response = await fetch(apiUrl('/api/profile/name'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
