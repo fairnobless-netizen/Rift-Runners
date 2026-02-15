@@ -276,6 +276,9 @@ export class GameScene extends Phaser.Scene {
     this.ensurePolishedTextures();
     this.setAudioSettings(this.audioSettings);
     this.setupInput();
+    this.scale.on('resize', this.onScaleResize, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onSceneShutdown, this);
+    this.events.once(Phaser.Scenes.Events.DESTROY, this.onSceneShutdown, this);
     this.setupCamera();
     this.remotePlayers = new RemotePlayersRenderer(this);
     this.remotePlayers.setTransform({ tileSize: GAME_CONFIG.tileSize, offsetX: 0, offsetY: 0 });
@@ -474,9 +477,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setupCamera(): void {
-    const { tileSize, maxZoom } = GAME_CONFIG;
-    const worldWidth = this.arena.width * tileSize;
-    const worldHeight = this.arena.height * tileSize;
+    const { worldWidth, worldHeight } = this.getWorldDimensions();
+    const { maxZoom } = GAME_CONFIG;
     const viewportHeight = Math.max(1, this.scale.height);
     const minZoom = viewportHeight / worldHeight;
     this.minZoom = minZoom;
@@ -486,15 +488,52 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.roundPixels = true;
     this.cameras.main.setDeadzone(this.scale.width * 0.26, this.scale.height * 0.26);
     this.applyZoom(minZoom, false);
+    this.emitReady();
+  }
 
+  private getWorldDimensions(): { worldWidth: number; worldHeight: number } {
+    const { tileSize } = GAME_CONFIG;
+    return {
+      worldWidth: this.arena.width * tileSize,
+      worldHeight: this.arena.height * tileSize,
+    };
+  }
+
+  private emitReady(): void {
     gameEvents.emit(EVENT_READY, {
-      minZoom,
-      maxZoom,
+      minZoom: this.minZoom,
+      maxZoom: this.maxZoom,
       setZoom: (zoom: number) => {
         this.applyZoom(zoom, false);
       },
-      resetZoom: () => this.applyZoom(minZoom, false),
+      resetZoom: () => this.applyZoom(this.minZoom, false),
     });
+  }
+
+  private onScaleResize(): void {
+    const camera = this.cameras.main;
+    const { worldWidth, worldHeight } = this.getWorldDimensions();
+    const viewportHeight = Math.max(1, this.scale.height);
+    const oldMinZoom = this.minZoom;
+    const newMinZoom = viewportHeight / worldHeight;
+    const wasAtMin = camera.zoom <= oldMinZoom * 1.01;
+
+    this.minZoom = newMinZoom;
+    this.cameraFollowThresholdZoom = newMinZoom * 1.05;
+    camera.setBounds(0, 0, worldWidth, worldHeight, true);
+    camera.setDeadzone(this.scale.width * 0.26, this.scale.height * 0.26);
+
+    if (wasAtMin) {
+      this.applyZoom(newMinZoom, true);
+    } else {
+      this.applyZoom(camera.zoom, true);
+    }
+
+    this.emitReady();
+  }
+
+  private onSceneShutdown(): void {
+    this.scale.off('resize', this.onScaleResize, this);
   }
 
   private getLevelProgressModel(): LevelProgressModel {
@@ -1018,9 +1057,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private syncCameraBoundsToArena(): void {
-    const { tileSize } = GAME_CONFIG;
-    const worldWidth = this.arena.width * tileSize;
-    const worldHeight = this.arena.height * tileSize;
+    const { worldWidth, worldHeight } = this.getWorldDimensions();
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight, true);
   }
 
