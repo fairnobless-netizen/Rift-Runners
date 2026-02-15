@@ -1611,76 +1611,80 @@ export default function GameView(): JSX.Element {
 
       <section ref={pageShellRef} className="playfield-shell page-shell">
         <aside className="control-column control-column--left" aria-label="Movement controls">
-          <div className="left-nav" aria-label="Navigation quick controls">
-            <div className="nav-grid">
-              <button type="button" className="nav-btn" aria-label="Map placeholder">
-                <span className="nav-btn__plate" aria-hidden="true">
-                  <span className="nav-btn__icon" aria-hidden="true">🗺️</span>
-                </span>
-              </button>
-              <button type="button" className="nav-btn" aria-label="Leaderboard" onClick={() => setLeaderboardOpen(true)}>
-                <span className="nav-btn__plate" aria-hidden="true">
-                  <span className="nav-btn__icon" aria-hidden="true">🏆</span>
-                </span>
-              </button>
-              <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
-                <span className="nav-btn__plate" aria-hidden="true">
-                  <span className="nav-btn__icon" aria-hidden="true">⚙️</span>
-                </span>
-              </button>
-              <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}>
-                <span className="nav-btn__plate" aria-hidden="true">
-                  <span className="nav-btn__icon" aria-hidden="true">🛍️</span>
-                </span>
-              </button>
-            </div>
-            <div className="nav-secondary">
-              <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>
-                <span className="nav-btn__plate" aria-hidden="true">
-                  <span className="nav-btn__icon" aria-hidden="true">👥</span>
-                </span>
-              </button>
+          <div className="left-panel left-panel--icons">
+            <div className="left-nav" aria-label="Navigation quick controls">
+              <div className="nav-grid">
+                <button type="button" className="nav-btn" aria-label="Map placeholder">
+                  <span className="nav-btn__plate" aria-hidden="true">
+                    <span className="nav-btn__icon" aria-hidden="true">🗺️</span>
+                  </span>
+                </button>
+                <button type="button" className="nav-btn" aria-label="Leaderboard" onClick={() => setLeaderboardOpen(true)}>
+                  <span className="nav-btn__plate" aria-hidden="true">
+                    <span className="nav-btn__icon" aria-hidden="true">🏆</span>
+                  </span>
+                </button>
+                <button type="button" className="nav-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
+                  <span className="nav-btn__plate" aria-hidden="true">
+                    <span className="nav-btn__icon" aria-hidden="true">⚙️</span>
+                  </span>
+                </button>
+                <button type="button" className="nav-btn" aria-label="Store" onClick={() => setIsStoreOpen(true)}>
+                  <span className="nav-btn__plate" aria-hidden="true">
+                    <span className="nav-btn__icon" aria-hidden="true">🛍️</span>
+                  </span>
+                </button>
+              </div>
+              <div className="nav-secondary">
+                <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>
+                  <span className="nav-btn__plate" aria-hidden="true">
+                    <span className="nav-btn__icon" aria-hidden="true">👥</span>
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="left-joystick">
-            <div
-              ref={joystickTouchZoneRef}
-              className={`joystick-touch-zone ${joystickPressed ? 'joystick-touch-zone--active' : ''}`}
-              onPointerDown={onJoystickPointerDown}
-              onPointerMove={onJoystickPointerMove}
-              onPointerUp={onJoystickPointerUp}
-              onPointerCancel={onJoystickPointerUp}
-              onPointerLeave={onJoystickPointerLeave}
-              role="application"
-              aria-label="Virtual joystick"
-            >
-              <div className="joystick-wrap">
-                <div ref={joystickPadRef} className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}>
-                  <div
-                    className="joystick-knob"
-                    style={{
-                      transform: `translate(calc(-50% + ${joystickOffset.x}px), calc(-50% + ${joystickOffset.y}px))`,
-                    }}
-                  />
+          <div className="left-panel left-panel--joystick">
+            <div className="left-joystick">
+              <div
+                ref={joystickTouchZoneRef}
+                className={`joystick-touch-zone ${joystickPressed ? 'joystick-touch-zone--active' : ''}`}
+                onPointerDown={onJoystickPointerDown}
+                onPointerMove={onJoystickPointerMove}
+                onPointerUp={onJoystickPointerUp}
+                onPointerCancel={onJoystickPointerUp}
+                onPointerLeave={onJoystickPointerLeave}
+                role="application"
+                aria-label="Virtual joystick"
+              >
+                <div className="joystick-wrap">
+                  <div ref={joystickPadRef} className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}>
+                    <div
+                      className="joystick-knob"
+                      style={{
+                        transform: `translate(calc(-50% + ${joystickOffset.x}px), calc(-50% + ${joystickOffset.y}px))`,
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="landscape-fallback-dpad" aria-hidden="true">
-                {(['up', 'left', 'down', 'right'] as const).map((direction) => (
-                  <button
-                    key={direction}
-                    type="button"
-                    className={`dpad-btn dpad-${direction}`}
-                    onTouchStart={() => setDirection(direction, true)}
-                    onTouchEnd={() => setDirection(direction, false)}
-                    onMouseDown={() => setDirection(direction, true)}
-                    onMouseUp={() => setDirection(direction, false)}
-                    onMouseLeave={() => setDirection(direction, false)}
-                  >
-                    {direction === 'up' ? '↑' : direction === 'left' ? '←' : direction === 'down' ? '↓' : '→'}
-                  </button>
-                ))}
+                <div className="landscape-fallback-dpad" aria-hidden="true">
+                  {(['up', 'left', 'down', 'right'] as const).map((direction) => (
+                    <button
+                      key={direction}
+                      type="button"
+                      className={`dpad-btn dpad-${direction}`}
+                      onTouchStart={() => setDirection(direction, true)}
+                      onTouchEnd={() => setDirection(direction, false)}
+                      onMouseDown={() => setDirection(direction, true)}
+                      onMouseUp={() => setDirection(direction, false)}
+                      onMouseLeave={() => setDirection(direction, false)}
+                    >
+                      {direction === 'up' ? '↑' : direction === 'left' ? '←' : direction === 'down' ? '↓' : '→'}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

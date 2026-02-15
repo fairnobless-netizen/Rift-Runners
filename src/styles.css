@@ -232,9 +232,23 @@ body {
   flex-basis: var(--side-w-left);
   width: var(--side-w-left);
   flex-direction: column;
-  justify-content: space-between;
-  gap: calc(0.5rem * var(--ui-scale));
+  justify-content: flex-start;
+  gap: calc(8px * var(--ui-scale));
   align-self: stretch;
+}
+
+.left-panel {
+  width: 100%;
+  min-height: 0;
+}
+
+.left-panel--icons {
+  flex: 0 0 auto;
+}
+
+.left-panel--joystick {
+  flex: 1;
+  display: flex;
 }
 
 .control-column--right {
@@ -248,18 +262,18 @@ body {
 }
 
 .left-nav {
-  --nav-grid-gap: calc(0.24rem * var(--ui-scale));
+  --nav-grid-gap: calc(0.2rem * var(--ui-scale));
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: calc(0.38rem * var(--ui-scale));
+  gap: calc(0.22rem * var(--ui-scale));
 }
 
 .nav-secondary {
   width: 100%;
   display: flex;
   justify-content: flex-start;
-  margin-top: calc(0.55rem * var(--ui-scale));
+  margin-top: calc(0.2rem * var(--ui-scale));
 }
 
 .nav-grid {
@@ -306,24 +320,16 @@ body {
   justify-content: center;
   width: 78%;
   height: 78%;
-  font-size: calc(1.4rem * var(--ui-scale));
+  font-size: calc(1.26rem * var(--ui-scale));
   line-height: 1;
 }
 
 .left-joystick {
-  /* stays at the bottom, but not glued to it */
-  margin-top: auto;
-
-  /* make the joystick live in the LOWER HALF of the left column */
-  /* M32c: never drop joystick out of view on narrow layouts */
-  height: clamp(120px, 50%, 100%);
-
-  /* center joystick inside that lower half */
+  width: 100%;
+  height: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-
-  /* keep consistent padding with ui scale */
   padding: calc(6px * var(--ui-scale));
 }
 
@@ -338,7 +344,8 @@ body {
 .joystick-touch-zone {
   width: 100%;
   height: 100%;
-  aspect-ratio: auto;
+  aspect-ratio: unset;
+  max-width: none;
   border-radius: 16px;
   display: flex;
   align-items: center;
