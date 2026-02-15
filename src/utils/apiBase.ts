@@ -1,18 +1,28 @@
 // src/utils/apiBase.ts
-// API base for deployments where frontend and backend are on different origins.
-// If VITE_API_BASE_URL is not set, we fallback to same-origin requests.
+function normalize(base?: string | null): string {
+  const v = (base ?? '').trim();
+  if (!v) return '';
+  return v.endsWith('/') ? v.slice(0, -1) : v;
+}
 
-const RAW_BASE = (import.meta as any)?.env?.VITE_API_BASE_URL ?? '';
+function readMetaApiBase(): string {
+  try {
+    const el = document.querySelector('meta[name="rr-api-base"]') as HTMLMetaElement | null;
+    return normalize(el?.content);
+  } catch {
+    return '';
+  }
+}
 
-export const API_BASE =
-  typeof RAW_BASE === 'string' && RAW_BASE.trim().length > 0
-    ? (RAW_BASE.trim().endsWith('/') ? RAW_BASE.trim().slice(0, -1) : RAW_BASE.trim())
-    : '';
+// 1) build-time env (Vite)
+const envBase = normalize((import.meta as any)?.env?.VITE_API_BASE_URL);
+
+// 2) runtime meta fallback (also filled by Vite via %VITE_...% in index.html)
+const metaBase = typeof document !== 'undefined' ? readMetaApiBase() : '';
+
+export const API_BASE = envBase || metaBase;
 
 export function apiUrl(path: string): string {
-  // keep legacy behavior for local/dev where backend may be proxied/same-origin
-  if (!API_BASE) return path;
-
-  const normalized = path.startsWith('/') ? path : `/${path}`;
-  return `${API_BASE}${normalized}`;
+  const p = path.startsWith('/') ? path : `/${path}`;
+  return API_BASE ? `${API_BASE}${p}` : p;
 }
