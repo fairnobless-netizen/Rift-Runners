@@ -11,6 +11,18 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_tg_username
   ON users (LOWER(tg_username));
 
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS game_user_id TEXT UNIQUE;
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS game_nickname TEXT UNIQUE;
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS game_nickname_lower TEXT UNIQUE;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_game_nickname_lower
+  ON users (game_nickname_lower);
+
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
   tg_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,

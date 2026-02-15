@@ -93,6 +93,8 @@ type AudioSettings = {
 type AccountInfo = {
   id: string;
   displayName: string;
+  gameUserId: string;
+  gameNickname: string | null;
   referralLink: string;
   nameChangeRemaining: number;
 };
@@ -260,6 +262,7 @@ export default function GameView(): JSX.Element {
   const [audioSettings, setAudioSettings] = useState<AudioSettings>({ musicEnabled: true, sfxEnabled: true });
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
+  const [nicknameDraft, setNicknameDraft] = useState('');
   const [registrationOpen, setRegistrationOpen] = useState<boolean>(() => !(localStorage.getItem(DISPLAY_NAME_KEY) ?? '').trim());
   const leaderboardSubmittedRef = useRef<string>('');
   const [gameFlowPhase, setGameFlowPhase] = useState<GameFlowPhase>('intro');
@@ -462,6 +465,8 @@ export default function GameView(): JSX.Element {
         const account: AccountInfo = {
           id: String(accountJson.account.id ?? ''),
           displayName: String(accountJson.account.displayName ?? ''),
+          gameUserId: String(accountJson.account.gameUserId ?? ''),
+          gameNickname: accountJson.account.gameNickname == null ? null : String(accountJson.account.gameNickname),
           referralLink: String(accountJson.account.referralLink ?? ''),
           nameChangeRemaining: Number(accountJson.account.nameChangeRemaining ?? 3),
         };
@@ -469,8 +474,8 @@ export default function GameView(): JSX.Element {
         setDisplayNameDraft(account.displayName || (localStorage.getItem(DISPLAY_NAME_KEY) ?? ''));
         if (account.displayName) {
           localStorage.setItem(DISPLAY_NAME_KEY, account.displayName);
-          setRegistrationOpen(false);
         }
+        setRegistrationOpen(!account.gameNickname);
       }
     }
   }, [applyAudioSettings]);
@@ -1347,6 +1352,46 @@ export default function GameView(): JSX.Element {
     }
   };
 
+
+  const onCopyGameUserId = async (): Promise<void> => {
+    if (!accountInfo?.gameUserId) return;
+    try {
+      await navigator.clipboard.writeText(accountInfo.gameUserId);
+    } catch {
+    }
+  };
+
+  const onSubmitNickname = async (event?: FormEvent): Promise<void> => {
+    event?.preventDefault();
+    if (!token) return;
+
+    const nickname = nicknameDraft.trim();
+    if (nickname.length < 3 || nickname.length > 16) {
+      return;
+    }
+
+    const response = await fetch('/api/profile/nickname', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ nickname }),
+    });
+
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || !json?.ok) {
+      return;
+    }
+
+    setAccountInfo((prev) => (prev ? {
+      ...prev,
+      gameNickname: String(json.gameNickname ?? nickname),
+      gameUserId: String(json.gameUserId ?? prev.gameUserId),
+    } : prev));
+    setRegistrationOpen(false);
+  };
+
   const onSubmitDisplayName = async (event?: FormEvent): Promise<void> => {
     event?.preventDefault();
     const trimmed = displayNameDraft.trim();
@@ -1505,22 +1550,22 @@ export default function GameView(): JSX.Element {
       )}
       {registrationOpen && (
         <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Create your player">
-          <form className="settings-modal" onSubmit={(event) => { void onSubmitDisplayName(event); }}>
+          <form className="settings-modal" onSubmit={(event) => { void onSubmitNickname(event); }}>
             <div className="settings-header">
               <strong>Create your player</strong>
             </div>
             <div className="settings-panel">
               <input
                 type="text"
-                maxLength={24}
-                minLength={2}
-                value={displayNameDraft}
-                onChange={(event) => setDisplayNameDraft(event.target.value)}
-                placeholder="Display name"
+                maxLength={16}
+                minLength={3}
+                value={nicknameDraft}
+                onChange={(event) => setNicknameDraft(event.target.value)}
+                placeholder="Game nickname"
                 autoFocus
               />
-              <div className="settings-kv"><span>Length</span><strong>2–24</strong></div>
-              <button type="submit">Save</button>
+              <div className="settings-kv"><span>Length</span><strong>3–16</strong></div>
+              <button type="submit">Save nickname</button>
             </div>
           </form>
         </div>
@@ -2077,12 +2122,13 @@ export default function GameView(): JSX.Element {
                   void onSubmitDisplayName(event);
                 }}
               >
-                <div className="settings-kv"><span>ID</span><strong>{accountInfo?.id ?? '—'}</strong></div>
+                <div className="settings-kv"><span>User ID</span><strong>{accountInfo?.gameUserId || accountInfo?.id || '—'}</strong></div>
                 <div className="settings-kv"><span>Telegram</span><strong>{localTgUserId ?? 'Not connected'}</strong></div>
                 <div className="settings-kv"><span>Remaining</span><strong>{accountInfo?.nameChangeRemaining ?? 3}</strong></div>
                 <div className="settings-ref">
                   <input type="text" readOnly value={accountInfo?.referralLink ?? ''} />
                   <button type="button" onClick={() => { void onCopyReferral(); }}>Copy</button>
+                  <button type="button" onClick={() => { void onCopyGameUserId(); }}>Copy User ID</button>
                 </div>
                 <input
                   type="text"

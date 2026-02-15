@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { TELEGRAM_AUTH_MAX_AGE_SEC, getSessionTtlSeconds, isProduction, requireEnv } from '../config/env';
 import { verifyTelegramInitData } from '../auth/telegramInitDataVerify';
 import { randomToken, sha256Hex } from '../auth/session';
-import { ensureWallet, createSession, upsertUser } from '../db/repos';
+import { ensureGameUserId, ensureWallet, createSession, upsertUser } from '../db/repos';
 
 export const authRouter = Router();
 
@@ -25,12 +25,13 @@ authRouter.post('/auth/telegram', async (req, res) => {
       displayName: 'Dev Demo',
     });
     await ensureWallet(tgUserId);
+    const gameUserId = await ensureGameUserId(tgUserId);
 
     const token = randomToken(24);
     const tokenHash = sha256Hex(token);
     await createSession({ tokenHash, tgUserId, expiresAt });
 
-    return res.status(200).json({ ok: true, token, user });
+    return res.status(200).json({ ok: true, token, user: { ...user, gameUserId: user.gameUserId ?? gameUserId } });
   }
 
   let botToken: string;
@@ -59,11 +60,12 @@ authRouter.post('/auth/telegram', async (req, res) => {
     displayName: displayName.trim() || `TG ${vr.tgUserId}`,
   });
   await ensureWallet(vr.tgUserId);
+  const gameUserId = await ensureGameUserId(vr.tgUserId);
 
   const token = randomToken(24);
   const tokenHash = sha256Hex(token);
   await createSession({ tokenHash, tgUserId: vr.tgUserId, expiresAt });
 
   // GDX backend-relevant: later replace with JWT+refresh; for now token+hash+TTL in DB
-  return res.status(200).json({ ok: true, token, user });
+  return res.status(200).json({ ok: true, token, user: { ...user, gameUserId: user.gameUserId ?? gameUserId } });
 });

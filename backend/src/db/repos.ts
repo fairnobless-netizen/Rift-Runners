@@ -5,13 +5,15 @@ export async function upsertUser(params: {
   tgUserId: string;
   displayName: string;
   tgUsername?: string | null;
-}): Promise<{ tgUserId: string; tgUsername: string | null; displayName: string; createdAt: number; updatedAt: number }> {
+}): Promise<{ tgUserId: string; tgUsername: string | null; displayName: string; gameUserId: string | null; gameNickname: string | null; createdAt: number; updatedAt: number }> {
   const now = Date.now();
 
   const { rows } = await pgQuery<{
     tg_user_id: string;
     tg_username: string | null;
     display_name: string;
+    game_user_id: string | null;
+    game_nickname: string | null;
     created_at: number;
     updated_at: number;
   }>(
@@ -23,7 +25,7 @@ export async function upsertUser(params: {
       tg_username = COALESCE(EXCLUDED.tg_username, users.tg_username),
       display_name = EXCLUDED.display_name,
       updated_at = EXCLUDED.updated_at
-    RETURNING tg_user_id, tg_username, display_name, created_at, updated_at
+    RETURNING tg_user_id, tg_username, display_name, game_user_id, game_nickname, created_at, updated_at
     `,
     [params.tgUserId, params.tgUsername ? params.tgUsername.toLowerCase() : null, params.displayName, now],
   );
@@ -33,9 +35,117 @@ export async function upsertUser(params: {
     tgUserId: String(u.tg_user_id),
     tgUsername: u.tg_username == null ? null : String(u.tg_username),
     displayName: String(u.display_name),
+    gameUserId: u.game_user_id == null ? null : String(u.game_user_id),
+    gameNickname: u.game_nickname == null ? null : String(u.game_nickname),
     createdAt: Number(u.created_at),
     updatedAt: Number(u.updated_at),
   };
+}
+
+function randomGameUserId(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = 'RR-';
+  for (let i = 0; i < 6; i += 1) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
+}
+
+type NormalizedNickname = { raw: string; lower: string };
+
+function normalizeNickname(nickname: string): NormalizedNickname {
+  const raw = String(nickname ?? '').trim();
+  if (raw.length < 3 || raw.length > 16 || !/^[a-zA-Z0-9_]+$/.test(raw)) {
+    const error = new Error('invalid_nickname');
+    (error as any).code = 'INVALID_NICKNAME';
+    throw error;
+  }
+
+  return { raw, lower: raw.toLowerCase() };
+}
+
+export async function ensureGameUserId(tgUserId: string): Promise<string> {
+  const existing = await pgQuery<{ game_user_id: string | null }>(
+    `SELECT game_user_id FROM users WHERE tg_user_id = $1 LIMIT 1`,
+    [tgUserId],
+  );
+
+  const current = existing.rows[0]?.game_user_id;
+  if (current) return String(current);
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const candidate = randomGameUserId();
+    let updated: { rows: Array<{ game_user_id: string }> };
+    try {
+      updated = await pgQuery<{ game_user_id: string }>(
+        `
+        UPDATE users
+        SET game_user_id = $2
+        WHERE tg_user_id = $1
+          AND game_user_id IS NULL
+        RETURNING game_user_id
+        `,
+        [tgUserId, candidate],
+      );
+    } catch (error: any) {
+      if (error?.code === '23505') {
+        continue;
+      }
+      throw error;
+    }
+
+    if (updated.rows[0]?.game_user_id) {
+      return String(updated.rows[0].game_user_id);
+    }
+
+    const fallback = await pgQuery<{ game_user_id: string | null }>(
+      `SELECT game_user_id FROM users WHERE tg_user_id = $1 LIMIT 1`,
+      [tgUserId],
+    );
+    if (fallback.rows[0]?.game_user_id) {
+      return String(fallback.rows[0].game_user_id);
+    }
+  }
+
+  const error = new Error('failed_to_generate_game_user_id');
+  (error as any).code = 'GAME_USER_ID_GENERATION_FAILED';
+  throw error;
+}
+
+export async function isNicknameAvailable(nickname: string): Promise<boolean> {
+  const normalized = normalizeNickname(nickname);
+  const { rows } = await pgQuery<{ taken: number }>(
+    `SELECT COUNT(*)::int AS taken FROM users WHERE game_nickname_lower = $1`,
+    [normalized.lower],
+  );
+  return Number(rows[0]?.taken ?? 0) === 0;
+}
+
+export async function setNickname(tgUserId: string, nickname: string): Promise<{ gameNickname: string; gameUserId: string }> {
+  const normalized = normalizeNickname(nickname);
+  const gameUserId = await ensureGameUserId(tgUserId);
+
+  try {
+    await pgQuery(
+      `
+      UPDATE users
+      SET game_nickname = $2,
+          game_nickname_lower = $3,
+          updated_at = $4
+      WHERE tg_user_id = $1
+      `,
+      [tgUserId, normalized.raw, normalized.lower, Date.now()],
+    );
+  } catch (error: any) {
+    if (error?.code === '23505') {
+      const err = new Error('nickname_taken');
+      (err as any).code = 'NICK_TAKEN';
+      throw err;
+    }
+    throw error;
+  }
+
+  return { gameNickname: normalized.raw, gameUserId };
 }
 
 export async function ensureWallet(tgUserId: string): Promise<{ tgUserId: string; stars: number; crystals: number; plasma: number }> {
@@ -78,13 +188,13 @@ export async function createSession(params: {
 }
 
 export async function getUserAndWallet(tgUserId: string): Promise<{
-  user: { tgUserId: string; displayName: string; createdAt: number; updatedAt: number };
+  user: { tgUserId: string; displayName: string; gameNickname: string | null; gameUserId: string | null; createdAt: number; updatedAt: number };
   wallet: { tgUserId: string; stars: number; crystals: number; plasma: number };
 } | null> {
   const { rows } = await pgQuery<any>(
     `
     SELECT
-      u.tg_user_id, u.display_name, u.created_at, u.updated_at,
+      u.tg_user_id, u.display_name, u.game_nickname, u.game_user_id, u.created_at, u.updated_at,
       w.stars, w.crystals, w.plasma
     FROM users u
     LEFT JOIN wallets w ON w.tg_user_id = u.tg_user_id
@@ -101,6 +211,8 @@ export async function getUserAndWallet(tgUserId: string): Promise<{
     user: {
       tgUserId: String(r.tg_user_id),
       displayName: String(r.display_name),
+      gameNickname: r.game_nickname == null ? null : String(r.game_nickname),
+      gameUserId: r.game_user_id == null ? null : String(r.game_user_id),
       createdAt: Number(r.created_at),
       updatedAt: Number(r.updated_at),
     },
@@ -1431,30 +1543,52 @@ export async function updateDisplayNameWithLimit(params: {
 
 export type UserSearchRecord = {
   userId: string;
-  tgUsername: string;
+  tgUsername: string | null;
   displayName: string;
+  gameNickname: string | null;
+  gameUserId: string | null;
 };
 
-export async function searchUsersByUsername(query: string): Promise<UserSearchRecord[]> {
-  const q = String(query ?? '').trim().toLowerCase();
+export async function searchUsers(query: string): Promise<UserSearchRecord[]> {
+  const qTrimmed = String(query ?? '').trim().replace(/^@/, '');
+  const q = qTrimmed.toLowerCase();
   if (!q) return [];
 
-  const { rows } = await pgQuery<{ tg_user_id: string; tg_username: string; display_name: string }>(
+  const { rows } = await pgQuery<{
+    tg_user_id: string;
+    tg_username: string | null;
+    display_name: string;
+    game_nickname: string | null;
+    game_user_id: string | null;
+  }>(
     `
-    SELECT tg_user_id, tg_username, display_name
+    SELECT tg_user_id, tg_username, display_name, game_nickname, game_user_id
     FROM users
-    WHERE tg_username IS NOT NULL
+    WHERE (
+      tg_username IS NOT NULL
       AND LOWER(tg_username) LIKE $1
-    ORDER BY tg_username ASC
+    ) OR (
+      game_nickname_lower IS NOT NULL
+      AND game_nickname_lower LIKE $1
+    )
+    ORDER BY
+      CASE
+        WHEN game_nickname_lower = $2 THEN 0
+        WHEN tg_username IS NOT NULL AND LOWER(tg_username) = $2 THEN 1
+        ELSE 2
+      END,
+      display_name ASC
     LIMIT 20
     `,
-    [`%${q}%`],
+    [`%${q}%`, q],
   );
 
   return rows.map((row) => ({
     userId: String(row.tg_user_id),
-    tgUsername: String(row.tg_username),
+    tgUsername: row.tg_username == null ? null : String(row.tg_username),
     displayName: String(row.display_name ?? 'Unknown'),
+    gameNickname: row.game_nickname == null ? null : String(row.game_nickname),
+    gameUserId: row.game_user_id == null ? null : String(row.game_user_id),
   }));
 }
 
@@ -1906,11 +2040,18 @@ export async function getReferralStats(tgUserId: string): Promise<{ plasmaEarned
 }
 
 export async function redeemReferral(params: { inviteeTgUserId: string; code: string }): Promise<{ referrer: number; invitee: number }> {
-  const referrerUserId = String(params.code ?? '').trim();
-  if (!referrerUserId) {
+  const rawCode = String(params.code ?? '').trim();
+  const normalizedCode = rawCode.replace(/^ref_/i, '');
+  if (!normalizedCode) {
     const error = new Error('invalid_code');
     (error as any).code = 'INVALID_CODE';
     throw error;
+  }
+
+  let referrerUserId = normalizedCode;
+  const byGameUserId = await pgQuery<{ tg_user_id: string }>(`SELECT tg_user_id FROM users WHERE game_user_id = $1 LIMIT 1`, [normalizedCode]);
+  if (byGameUserId.rows[0]?.tg_user_id) {
+    referrerUserId = String(byGameUserId.rows[0].tg_user_id);
   }
 
   if (referrerUserId === params.inviteeTgUserId) {
