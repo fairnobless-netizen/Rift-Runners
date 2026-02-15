@@ -1035,6 +1035,16 @@ html[data-orient="landscape"] .right-panel {
   min-width: 0;
 }
 
+.settings-inline-status {
+  font-size: 0.86rem;
+  color: #b9c7f1;
+}
+
+.settings-inline-error {
+  font-size: 0.86rem;
+  color: #ff8a8a;
+}
+
 
 .store-card {
   border: 1px solid #2c3b6c;
