@@ -61,6 +61,7 @@ import { fetchLocalLeaderboard, submitLocalLeaderboard } from '../game/localLead
 import { WsDebugOverlay } from './WsDebugOverlay';
 import { useWsClient } from '../ws/useWsClient';
 import { resolveDevIdentity } from '../utils/devIdentity';
+import { MultiplayerModal } from './MultiplayerModal';
 
 
 const defaultStats: PlayerStats = {
@@ -239,6 +240,7 @@ export default function GameView(): JSX.Element {
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const [multiplayerOpen, setMultiplayerOpen] = useState(false);
+  const [multiplayerUiOpen, setMultiplayerUiOpen] = useState(false);
   const [multiplayerTab, setMultiplayerTab] = useState<MultiplayerTab>('rooms');
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState<string | null>(null);
@@ -1636,7 +1638,7 @@ export default function GameView(): JSX.Element {
                 </button>
               </div>
               <div className="nav-secondary">
-                <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>
+                <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerUiOpen(true)}>
                   <span className="nav-btn__plate" aria-hidden="true">
                     <span className="nav-btn__icon" aria-hidden="true">👥</span>
                   </span>
@@ -2030,6 +2032,8 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
+
+      <MultiplayerModal open={multiplayerUiOpen} onClose={() => setMultiplayerUiOpen(false)} />
 
       {settingsOpen && (
         <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">

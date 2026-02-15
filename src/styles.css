@@ -1216,3 +1216,217 @@ html[data-orient="landscape"] .right-panel {
 .leaderboard-row--4 {
   color: #b9c0d8;
 }
+
+.rr-mp-overlay {
+  z-index: 52;
+  align-items: flex-start;
+  padding-top: max(0.6rem, var(--safe-top));
+}
+
+.rr-mp-modal {
+  width: min(96vw, 780px);
+  border: 1px solid #3a5aa0;
+  background: linear-gradient(165deg, rgba(8, 16, 38, 0.94), rgba(7, 14, 31, 0.95));
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 28px rgba(64, 111, 220, 0.24), inset 0 0 0 1px rgba(130, 170, 255, 0.12);
+}
+
+.rr-mp-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.rr-mp-tabs button,
+.rr-room-subtabs button {
+  border: 1px solid #334b86;
+  background: rgba(11, 22, 49, 0.8);
+  color: #dbe7ff;
+  border-radius: 10px;
+  padding: 0.45rem 0.25rem;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+.rr-mp-tabs button.active,
+.rr-room-subtabs button.active {
+  border-color: #77a7ff;
+  box-shadow: 0 0 16px rgba(75, 134, 255, 0.45), inset 0 0 16px rgba(75, 134, 255, 0.2);
+  color: #ffffff;
+}
+
+.rr-mp-panel {
+  gap: 0.6rem;
+}
+
+.rr-mp-section {
+  border: 1px solid rgba(70, 98, 162, 0.8);
+  border-radius: 12px;
+  padding: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.rr-mp-section h4 {
+  margin: 0;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #c3d6ff;
+}
+
+.rr-mp-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.45rem;
+  align-items: center;
+  border: 1px solid #2c3f71;
+  border-radius: 10px;
+  padding: 0.45rem;
+  background: rgba(12, 21, 45, 0.75);
+}
+
+.rr-mp-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  color: #99beff;
+  border: 1px solid #3e5f9e;
+}
+
+.rr-mp-chip {
+  border-radius: 999px;
+  border: 1px solid #4968a5;
+  font-size: 0.68rem;
+  padding: 0.15rem 0.4rem;
+  text-transform: uppercase;
+}
+
+.rr-mp-chip.online { color: #74ffb6; border-color: #2f8f67; }
+.rr-mp-chip.offline { color: #98a5c6; }
+.rr-mp-chip.pending { color: #ffc87f; border-color: #7d633c; }
+
+.rr-mp-inline-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.rr-mp-section input,
+.rr-mp-section button,
+.rr-password-popup input,
+.rr-password-popup button {
+  border-radius: 9px;
+}
+
+.rr-mp-section input,
+.rr-password-popup input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #39548f;
+  background: rgba(4, 11, 27, 0.7);
+  color: #e2ecff;
+  padding: 0.5rem;
+}
+
+.rr-mp-section button,
+.rr-password-popup button {
+  border: 1px solid #4869ad;
+  background: linear-gradient(180deg, #345ca8, #263f7f);
+  color: #f4f8ff;
+  padding: 0.42rem 0.65rem;
+}
+
+.rr-mp-section button.ghost,
+.rr-password-popup button.ghost {
+  background: rgba(9, 18, 39, 0.8);
+}
+
+.rr-room-subtabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.rr-arena-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.rr-arena-grid button {
+  min-height: 44px;
+}
+
+.rr-created-room {
+  grid-template-columns: 1fr auto;
+}
+
+.rr-created-room input {
+  grid-column: 1 / -1;
+}
+
+.rr-created-room em {
+  grid-column: 1 / -1;
+  font-style: normal;
+  color: #a9bbdf;
+}
+
+.rr-mp-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+}
+
+.rr-mp-rules {
+  border: 1px solid #2f446f;
+  border-radius: 10px;
+  padding: 0.5rem;
+}
+
+.rr-mp-rules p,
+.rr-mp-empty,
+.rr-mp-error {
+  margin: 0;
+}
+
+.rr-mp-error {
+  color: #ff9090;
+}
+
+.rr-password-popup {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(82vw, 320px);
+  border: 1px solid #5c7bb9;
+  border-radius: 12px;
+  background: #0c1734f5;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.rr-toast-stack {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  pointer-events: none;
+}
+
+.rr-toast {
+  background: rgba(8, 18, 41, 0.94);
+  border: 1px solid #4d73bb;
+  border-radius: 9px;
+  padding: 0.35rem 0.55rem;
+  color: #d8e4ff;
+  font-size: 0.75rem;
+}
