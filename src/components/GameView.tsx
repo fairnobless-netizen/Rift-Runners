@@ -251,6 +251,9 @@ export default function GameView(): JSX.Element {
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [profileName, setProfileName] = useState<string>('—');
   const [token, setToken] = useState<string>(() => localStorage.getItem('rift_session_token') ?? '');
+  // D1: show why a new user has no token (no secrets!)
+  const [authDiag, setAuthDiag] = useState<string | null>(null);
+
   const [devIdentity] = useState(() => resolveDevIdentity(window.location.search));
   const [localTgUserId, setLocalTgUserId] = useState<string | undefined>(devIdentity.localFallbackTgUserId);
   const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
@@ -573,22 +576,71 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     const runAuth = async () => {
+      // D1: capture why auth/token bootstrap fails for new users (do NOT log secrets)
+      setAuthDiag(null);
+
       try {
         const tgInitData = (window as any)?.Telegram?.WebApp?.initData ?? '';
+        const initDataLen = typeof tgInitData === 'string' ? tgInitData.length : 0;
+
+        if (!tgInitData || initDataLen === 0) {
+          setAuthDiag('Auth failed: Telegram initData is empty. Please reopen from Telegram.');
+          return;
+        }
+
         const authRes = await fetch('/api/auth/telegram', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ initData: tgInitData }),
         });
 
-        const authJson = await authRes.json();
-        if (!authJson?.ok) return;
+        const contentType = authRes.headers.get('content-type') ?? '';
+        const rawText = await authRes.text();
+
+        let authJson: any = null;
+        if (contentType.includes('application/json')) {
+          try {
+            authJson = rawText ? JSON.parse(rawText) : null;
+          } catch {
+            authJson = null;
+          }
+        }
+
+        if (!authRes.ok) {
+          const msg =
+            (authJson && (authJson.error || authJson.message))
+              ? String(authJson.error || authJson.message)
+              : rawText
+                ? String(rawText).slice(0, 140).replace(/\s+/g, ' ')
+                : 'No response body';
+
+          setAuthDiag(
+            `Auth failed: status=${authRes.status} ${authRes.statusText}. ${msg} (initDataLen=${initDataLen}, contentType=${contentType || 'n/a'})`,
+          );
+          return;
+        }
+
+        if (!authJson || !authJson.ok) {
+          const msg =
+            (authJson && (authJson.error || authJson.message))
+              ? String(authJson.error || authJson.message)
+              : rawText
+                ? String(rawText).slice(0, 140).replace(/\s+/g, ' ')
+                : 'Unexpected non-JSON response';
+
+          setAuthDiag(`Auth failed: ok=false. ${msg} (initDataLen=${initDataLen}, contentType=${contentType || 'n/a'})`);
+          return;
+        }
 
         const token = String(authJson.token ?? '');
-        if (!token) return;
+        if (!token) {
+          setAuthDiag(`Auth failed: token missing in response (initDataLen=${initDataLen}).`);
+          return;
+        }
 
         localStorage.setItem('rift_session_token', token);
         setToken(token);
+
         const nextLocalTgUserId = String(authJson.user?.tgUserId ?? '');
         if (nextLocalTgUserId) {
           setLocalTgUserId(nextLocalTgUserId);
@@ -613,14 +665,22 @@ export default function GameView(): JSX.Element {
           // ignore
         }
 
-        const meRes = await fetch('/api/profile/me', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        // Best-effort profile name; if this fails, keep going
+        try {
+          const meRes = await fetch('/api/profile/me', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
 
-        const meJson = await meRes.json();
-        if (meJson?.ok) {
-          const backendName = String(meJson.user?.displayName ?? '—');
-          setProfileName(devIdentity.displayNameOverride ?? backendName);
+          const meContentType = meRes.headers.get('content-type') ?? '';
+          const meRaw = await meRes.text();
+          const meJson = meContentType.includes('application/json') ? JSON.parse(meRaw || 'null') : null;
+
+          if (meJson?.ok) {
+            const backendName = String(meJson.user?.displayName ?? '—');
+            setProfileName(devIdentity.displayNameOverride ?? backendName);
+          }
+        } catch {
+          // ignore
         }
 
         await loadSettingsAndAccount(token);
@@ -631,8 +691,10 @@ export default function GameView(): JSX.Element {
         ]);
         if (w) setWallet(w);
         setLedger(nextLedger);
-      } catch {
-        // keep silent (dev may run without backend)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setAuthDiag(`Auth error: ${msg}`);
+        // keep silent otherwise (dev may run without backend)
       }
 
       setProfileName((prev) => {
@@ -1790,6 +1852,9 @@ export default function GameView(): JSX.Element {
               />
               <div className="settings-kv"><span>Length</span><strong>3–16</strong></div>
               {nicknameStatusText ? <div className="settings-inline-status">{nicknameStatusText}</div> : null}
+              {nicknameCheckState === 'auth_required' && authDiag
+                ? <div className="settings-inline-error">{authDiag}</div>
+                : null}
               {nicknameSubmitError ? <div className="settings-inline-error">{nicknameSubmitError}</div> : null}
               <button type="submit" disabled={!canSaveNickname}>{nicknameSubmitting ? 'Saving…' : 'Save nickname'}</button>
             </div>
