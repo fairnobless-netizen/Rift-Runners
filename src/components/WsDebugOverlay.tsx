@@ -505,9 +505,10 @@ export function WsDebugOverlay({
     <div
       // IMPORTANT: out-of-flow overlay root, anchored to nearest positioned parent (.page)
       style={{
-        position: 'absolute',
+        position: 'fixed',
         inset: 0,
-        zIndex: 9999,
+        // GDX: keep probe/debug controls above any modal overlays for E2E clickability.
+        zIndex: 2147483647,
         pointerEvents: 'none', // root does not steal input
       }}
     >
@@ -515,10 +516,11 @@ export function WsDebugOverlay({
       {showDebugUi && (
         <div
           style={{
-            position: 'absolute',
+            position: 'fixed',
             left: 10,
             bottom: 10,
-            zIndex: 10000,
+            // GDX: ensure tray itself sits above overlay stacking contexts.
+            zIndex: 2147483647,
             pointerEvents: 'none',
           }}
         >
