@@ -22,18 +22,6 @@ type Props = {
 
 type MainTab = 'friends' | 'find' | 'room' | 'browse' | 'referral';
 type RoomTab = 'create' | 'join';
-type LobbyPlayer = {
-  name: string;
-  ready: boolean;
-  isSelf: boolean;
-};
-type MockLobbyRoom = {
-  code: string;
-  name: string;
-  activeSlots: boolean[];
-  players: Array<LobbyPlayer | null>;
-  hostIsSelf: boolean;
-};
 
 type Toast = { id: number; text: string };
 
@@ -51,7 +39,8 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
   const [createPassword, setCreatePassword] = useState('');
   const [createSlots, setCreateSlots] = useState<boolean[]>([true, true, false, false]);
   const [creating, setCreating] = useState(false);
-  const [roomLobby, setRoomLobby] = useState<MockLobbyRoom | null>(null);
+  const [createdRoom, setCreatedRoom] = useState<RoomCard | null>(null);
+  const [playersCount, setPlayersCount] = useState(2);
   const [joinCode, setJoinCode] = useState('');
   const [joinPassword, setJoinPassword] = useState('');
   const [joinBusy, setJoinBusy] = useState(false);
@@ -102,6 +91,14 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
     });
   }, [browseQuery, open, tab]);
 
+  useEffect(() => {
+    if (!createdRoom) return;
+    const id = window.setInterval(() => {
+      setPlayersCount((value) => (value >= createdRoom.capacity ? value : value + 1));
+    }, 1600);
+    return () => window.clearInterval(id);
+  }, [createdRoom]);
+
   const activeSlots = useMemo(() => createSlots.filter(Boolean).length, [createSlots]);
 
   const toggleSlot = (index: number): void => {
@@ -125,8 +122,8 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
   };
 
   const onCreateRoom = async (): Promise<void> => {
-    if (!createName.trim() || activeSlots < 2) {
-      pushToast('Room Name and at least 2 active slots are required');
+    if (!createName.trim()) {
+      pushToast('Room Name is required');
       return;
     }
     setCreating(true);
@@ -135,20 +132,8 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
       password: createPassword.trim(),
       activeSlots,
     });
-    const firstActiveSlot = createSlots.findIndex(Boolean);
-    const nextPlayers = createSlots.map((isActive, index) => {
-      if (!isActive) return null;
-      if (index === firstActiveSlot) return { name: 'You', ready: false, isSelf: true } as LobbyPlayer;
-      return null;
-    });
-    // backend-relevant: this lobby shape mirrors future WS events (roomCreated/playerJoined/playerReady/hostStart).
-    setRoomLobby({
-      code: room.code,
-      name: room.name,
-      activeSlots: [...createSlots],
-      players: nextPlayers,
-      hostIsSelf: true,
-    });
+    setCreatedRoom(room);
+    setPlayersCount(Math.min(2, room.capacity));
     setCreating(false);
     pushToast('Room created (mock)');
   };
@@ -169,71 +154,6 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
     pushToast('Joined room (mock)');
     setLockedRoom(null);
     setLockedPassword('');
-    const capacity = Math.max(2, Math.min(result.room?.capacity ?? 4, 4));
-    const activeSlotsFromRoom = [0, 1, 2, 3].map((index) => index < capacity);
-    const players = activeSlotsFromRoom.map((isActive, index) => {
-      if (!isActive) return null;
-      if (index === 0) return { name: 'Host', ready: true, isSelf: false } as LobbyPlayer;
-      if (index === 1) return { name: 'You', ready: false, isSelf: true } as LobbyPlayer;
-      return null;
-    });
-    setRoomLobby({
-      code: result.room?.code ?? code.trim().toUpperCase(),
-      name: result.room?.name ?? 'Joined room',
-      activeSlots: activeSlotsFromRoom,
-      players,
-      hostIsSelf: false,
-    });
-  };
-
-
-  const activeLobbySlots = roomLobby?.activeSlots.reduce<number[]>((acc, isActive, index) => {
-    if (isActive) acc.push(index);
-    return acc;
-  }, []) ?? [];
-  const allActiveOccupied = roomLobby ? activeLobbySlots.every((index) => roomLobby.players[index]) : false;
-  const allOccupiedReady = roomLobby ? activeLobbySlots.every((index) => {
-    const player = roomLobby.players[index];
-    return !player || player.ready;
-  }) : false;
-  const canHostStart = Boolean(roomLobby?.hostIsSelf && allActiveOccupied && allOccupiedReady);
-  const selfSlotIndex = roomLobby?.players.findIndex((player) => player?.isSelf) ?? -1;
-
-  const onToggleSelfReady = (): void => {
-    if (!roomLobby || selfSlotIndex < 0 || roomLobby.hostIsSelf) return;
-    setRoomLobby((prev) => {
-      if (!prev || selfSlotIndex < 0) return prev;
-      const players = [...prev.players];
-      const current = players[selfSlotIndex];
-      if (!current) return prev;
-      players[selfSlotIndex] = { ...current, ready: !current.ready };
-      return { ...prev, players };
-    });
-  };
-
-  const onMockFillLobby = (): void => {
-    if (!roomLobby) return;
-    setRoomLobby((prev) => {
-      if (!prev) return prev;
-      const players = prev.players.map((player, index) => {
-        if (!prev.activeSlots[index]) return null;
-        if (player) return player;
-        return { name: `Player ${index + 1}`, ready: false, isSelf: false } as LobbyPlayer;
-      });
-      return { ...prev, players };
-    });
-  };
-
-  const onMockReadyAll = (): void => {
-    if (!roomLobby) return;
-    setRoomLobby((prev) => {
-      if (!prev) return prev;
-      const players = prev.players.map((player, index) => {
-        if (!player || !prev.activeSlots[index]) return player;
-        return { ...player, ready: true };
-      });
-      return { ...prev, players };
-    });
   };
 
   if (!open) return null;
@@ -328,95 +248,42 @@ export function MultiplayerModal({ open, onClose }: Props): JSX.Element | null {
           ) : null}
 
           {tab === 'room' ? (
-            <section className="rr-mp-section rr-room-section">
+            <section className="rr-mp-section">
               <div className="rr-room-subtabs">
                 <button type="button" className={roomTab === 'create' ? 'active' : ''} onClick={() => setRoomTab('create')}>Create</button>
                 <button type="button" className={roomTab === 'join' ? 'active' : ''} onClick={() => setRoomTab('join')}>Join</button>
               </div>
 
-              {roomTab === 'join' ? (
+              {roomTab === 'create' ? (
                 <>
-                  <h4>Join room</h4>
-                  <input value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="Room Code" />
-                  <input value={joinPassword} onChange={(event) => setJoinPassword(event.target.value)} placeholder="Password (optional)" />
-                  <button type="button" disabled={joinBusy} onClick={() => { void onJoin(joinCode, joinPassword); }}>{joinBusy ? 'Joining...' : 'Join by code'}</button>
-                  {joinError ? <p className="rr-mp-error">{joinError}</p> : null}
-                  <div className="rr-room-join-list">
-                    {rooms.map((room) => (
-                      <div key={room.code} className="rr-mp-card">
-                        <strong>{room.name}</strong>
-                        <span>{room.players}/{room.capacity}</span>
-                        <span>{room.hasPassword ? '🔒' : '🔓'}</span>
-                        <button type="button" onClick={() => {
-                          if (room.hasPassword) {
-                            setLockedRoom(room);
-                            return;
-                          }
-                          void onJoin(room.code);
-                        }}>
-                          Join
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-
-              {roomTab === 'create' && !roomLobby ? (
-                <div className="rr-room-overlay" role="dialog" aria-modal="true" aria-label="Create Room Setup">
-                  <h4>Create Room Setup</h4>
                   <input value={createName} onChange={(event) => setCreateName(event.target.value)} placeholder="Room Name" />
                   <input value={createPassword} onChange={(event) => setCreatePassword(event.target.value)} placeholder="Password (optional)" />
                   <div className="rr-arena-grid" aria-label="arena slots">
                     {createSlots.map((slot, index) => (
-                      <button key={String(index)} type="button" className={slot ? 'active' : ''} onClick={() => toggleSlot(index)}>
-                        {slot ? `Slot ${index + 1}: Active` : `+ Add player (${index + 1})`}
-                      </button>
+                      <button key={String(index)} type="button" className={slot ? 'active' : ''} onClick={() => toggleSlot(index)}>{slot ? 'ACTIVE' : '+'}</button>
                     ))}
                   </div>
-                  <p className="rr-mp-empty">Active slots: {activeSlots} / 4 (min 2)</p>
-                  <button type="button" onClick={() => { void onCreateRoom(); }} disabled={creating || !createName.trim() || activeSlots < 2}>
-                    {creating ? 'Creating...' : 'Create Room'}
-                  </button>
-                </div>
-              ) : null}
+                  <button type="button" onClick={() => { void onCreateRoom(); }} disabled={creating}>{creating ? 'Creating...' : 'Create Room'}</button>
 
-              {roomTab === 'create' && roomLobby ? (
-                <div className="rr-room-overlay" role="dialog" aria-modal="true" aria-label="Room Lobby">
-                  <h4>Room Lobby — {roomLobby.name}</h4>
-                  <div className="rr-mp-row">
-                    <input ref={copyRef} readOnly value={roomLobby.code} />
-                    <button type="button" onClick={() => { void onCopy(roomLobby.code); }}>Copy code</button>
-                  </div>
-                  <div className="rr-arena-grid" aria-label="lobby slots">
-                    {roomLobby.activeSlots.map((isActive, index) => {
-                      if (!isActive) {
-                        return <div key={String(index)} className="rr-slot-disabled">Slot {index + 1} disabled</div>;
-                      }
-                      const player = roomLobby.players[index];
-                      if (!player) {
-                        return <div key={String(index)} className="rr-slot-waiting">Slot {index + 1}: Waiting…</div>;
-                      }
-                      return (
-                        <div key={String(index)} className="rr-slot-occupied">
-                          <strong>{player.name}</strong>
-                          <span>{player.ready ? 'Ready' : 'Not ready'}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {!roomLobby.hostIsSelf ? (
-                    <button type="button" onClick={onToggleSelfReady}>{roomLobby.players[selfSlotIndex]?.ready ? 'Unready' : 'Ready'}</button>
-                  ) : (
-                    <button type="button" disabled={!canHostStart}>Start</button>
-                  )}
-                  <div className="rr-mp-inline-actions">
-                    <button type="button" className="ghost" onClick={onMockFillLobby}>Mock fill slots</button>
-                    <button type="button" className="ghost" onClick={onMockReadyAll}>Mock ready all</button>
-                    <button type="button" className="ghost" onClick={() => setRoomLobby(null)}>Close lobby</button>
-                  </div>
-                </div>
-              ) : null}
+                  {createdRoom ? (
+                    <div className="rr-mp-card rr-created-room">
+                      <strong>{createdRoom.name}</strong>
+                      <span>{playersCount}/{createdRoom.capacity}</span>
+                      <span>Code: {createdRoom.code}</span>
+                      <input ref={copyRef} readOnly value={createdRoom.code} />
+                      <button type="button" onClick={() => { void onCopy(createdRoom.code); }}>Copy code</button>
+                      <em>Waiting for players...</em>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <input value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="Room Code" />
+                  <input value={joinPassword} onChange={(event) => setJoinPassword(event.target.value)} placeholder="Password (optional)" />
+                  <button type="button" disabled={joinBusy} onClick={() => { void onJoin(joinCode, joinPassword); }}>{joinBusy ? 'Joining...' : 'Join'}</button>
+                  {joinError ? <p className="rr-mp-error">{joinError}</p> : null}
+                </>
+              )}
             </section>
           ) : null}
 

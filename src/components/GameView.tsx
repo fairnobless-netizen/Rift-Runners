@@ -99,8 +99,6 @@ type AccountInfo = {
   nameChangeRemaining: number;
 };
 
-type NicknameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'server_error';
-
 type MultiplayerTab = 'rooms' | 'friends';
 type GameFlowPhase = 'intro' | 'start' | 'playing';
 type TutorialStep = {
@@ -265,10 +263,6 @@ export default function GameView(): JSX.Element {
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
   const [nicknameDraft, setNicknameDraft] = useState('');
-  const [nicknameStatus, setNicknameStatus] = useState<NicknameStatus>('idle');
-  const [nicknameBusy, setNicknameBusy] = useState(false);
-  const [nicknameErrorText, setNicknameErrorText] = useState<string | null>(null);
-  const [copyGameUserIdState, setCopyGameUserIdState] = useState<'idle' | 'copied'>('idle');
   const [registrationOpen, setRegistrationOpen] = useState<boolean>(() => !(localStorage.getItem(DISPLAY_NAME_KEY) ?? '').trim());
   const leaderboardSubmittedRef = useRef<string>('');
   const [gameFlowPhase, setGameFlowPhase] = useState<GameFlowPhase>('intro');
@@ -477,7 +471,6 @@ export default function GameView(): JSX.Element {
           nameChangeRemaining: Number(accountJson.account.nameChangeRemaining ?? 3),
         };
         setAccountInfo(account);
-        setNicknameDraft(account.gameNickname ?? '');
         setDisplayNameDraft(account.displayName || (localStorage.getItem(DISPLAY_NAME_KEY) ?? ''));
         if (account.displayName) {
           localStorage.setItem(DISPLAY_NAME_KEY, account.displayName);
@@ -1364,125 +1357,39 @@ export default function GameView(): JSX.Element {
     if (!accountInfo?.gameUserId) return;
     try {
       await navigator.clipboard.writeText(accountInfo.gameUserId);
-      setCopyGameUserIdState('copied');
-      window.setTimeout(() => setCopyGameUserIdState('idle'), 1300);
     } catch {
     }
   };
-
-  useEffect(() => {
-    if (!registrationOpen) return;
-
-    const nickname = nicknameDraft.trim();
-    const nicknameRegex = /^[A-Za-z0-9_]{3,16}$/;
-    setNicknameErrorText(null);
-
-    if (!nickname) {
-      setNicknameStatus('idle');
-      return;
-    }
-
-    if (!nicknameRegex.test(nickname)) {
-      setNicknameStatus('invalid');
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      if (!token) {
-        setNicknameStatus('server_error');
-        setNicknameErrorText('Server error, try again');
-        return;
-      }
-
-      setNicknameStatus('checking');
-      try {
-        const response = await fetch(`/api/profile/nickname-check?nick=${encodeURIComponent(nickname)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: controller.signal,
-        });
-
-        if (response.status === 400) {
-          setNicknameStatus('invalid');
-          return;
-        }
-
-        const json = await response.json().catch(() => ({}));
-        if (!response.ok || !json?.ok) {
-          setNicknameStatus('server_error');
-          setNicknameErrorText('Server error, try again');
-          return;
-        }
-
-        setNicknameStatus(Boolean(json.available) ? 'available' : 'taken');
-      } catch (error) {
-        if ((error as Error).name === 'AbortError') return;
-        setNicknameStatus('server_error');
-        setNicknameErrorText('Server error, try again');
-      }
-    }, 300);
-
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [nicknameDraft, registrationOpen, token]);
 
   const onSubmitNickname = async (event?: FormEvent): Promise<void> => {
     event?.preventDefault();
     if (!token) return;
 
     const nickname = nicknameDraft.trim();
-    const nicknameRegex = /^[A-Za-z0-9_]{3,16}$/;
-    if (!nicknameRegex.test(nickname) || nicknameStatus === 'checking' || nicknameBusy || nicknameStatus === 'taken') {
-      if (!nicknameRegex.test(nickname)) {
-        setNicknameStatus('invalid');
-      }
+    if (nickname.length < 3 || nickname.length > 16) {
       return;
     }
 
-    setNicknameBusy(true);
-    setNicknameErrorText(null);
-    try {
-      const response = await fetch('/api/profile/nickname', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ nickname }),
-      });
+    const response = await fetch('/api/profile/nickname', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ nickname }),
+    });
 
-      const json = await response.json().catch(() => ({}));
-      if (response.status === 409) {
-        setNicknameStatus('taken');
-        return;
-      }
-
-      if (response.status === 400) {
-        setNicknameStatus('invalid');
-        return;
-      }
-
-      if (!response.ok || !json?.ok) {
-        setNicknameStatus('server_error');
-        setNicknameErrorText('Server error, try again');
-        return;
-      }
-
-      // GDX: this account state is a temporary bridge until richer profile/social sync is connected.
-      setAccountInfo((prev) => (prev ? {
-        ...prev,
-        gameNickname: String(json.gameNickname ?? nickname),
-        gameUserId: String(json.gameUserId ?? prev.gameUserId),
-      } : prev));
-      setRegistrationOpen(false);
-    } catch {
-      setNicknameStatus('server_error');
-      setNicknameErrorText('Server error, try again');
-    } finally {
-      setNicknameBusy(false);
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || !json?.ok) {
+      return;
     }
+
+    setAccountInfo((prev) => (prev ? {
+      ...prev,
+      gameNickname: String(json.gameNickname ?? nickname),
+      gameUserId: String(json.gameUserId ?? prev.gameUserId),
+    } : prev));
+    setRegistrationOpen(false);
   };
 
   const onSubmitDisplayName = async (event?: FormEvent): Promise<void> => {
@@ -1657,21 +1564,8 @@ export default function GameView(): JSX.Element {
                 placeholder="Game nickname"
                 autoFocus
               />
-              <div className="settings-kv"><span>Format</span><strong>A-Z, a-z, 0-9, _</strong></div>
-              <div className={`nickname-status nickname-status--${nicknameStatus}`}>
-                {nicknameStatus === 'available' ? '✅ Available' : null}
-                {nicknameStatus === 'taken' ? '❌ Taken' : null}
-                {nicknameStatus === 'invalid' ? '❌ Invalid format' : null}
-                {nicknameStatus === 'checking' ? '⏳ Checking…' : null}
-                {nicknameStatus === 'server_error' ? `❌ ${nicknameErrorText ?? 'Server error, try again'}` : null}
-                {nicknameStatus === 'idle' ? 'Nickname length: 3–16' : null}
-              </div>
-              <button
-                type="submit"
-                disabled={nicknameBusy || nicknameStatus === 'checking' || nicknameStatus === 'taken' || nicknameStatus === 'invalid' || nicknameStatus === 'server_error'}
-              >
-                {nicknameBusy ? 'Saving...' : 'Save nickname'}
-              </button>
+              <div className="settings-kv"><span>Length</span><strong>3–16</strong></div>
+              <button type="submit">Save nickname</button>
             </div>
           </form>
         </div>
@@ -2234,7 +2128,7 @@ export default function GameView(): JSX.Element {
                 <div className="settings-ref">
                   <input type="text" readOnly value={accountInfo?.referralLink ?? ''} />
                   <button type="button" onClick={() => { void onCopyReferral(); }}>Copy</button>
-                  <button type="button" onClick={() => { void onCopyGameUserId(); }}>{copyGameUserIdState === 'copied' ? 'Copied' : 'Copy User ID'}</button>
+                  <button type="button" onClick={() => { void onCopyGameUserId(); }}>Copy User ID</button>
                 </div>
                 <input
                   type="text"
