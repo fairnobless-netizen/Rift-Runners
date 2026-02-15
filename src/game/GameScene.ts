@@ -62,6 +62,7 @@ import { createDeterministicRng, type DeterministicRng } from './rng';
 import { BossController } from './boss/BossController';
 import { createBossArena } from './boss/BossArena';
 import { generateBossNodeStones } from './level/bossNode';
+import { getDeterministicArenaTileTexture } from './tileTextures';
 import type {
   ControlsState,
   Direction,
@@ -332,98 +333,6 @@ export class GameScene extends Phaser.Scene {
       g.destroy();
     };
 
-    const createFloorTexture = (): void => {
-      const key = 'tile_floor';
-      if (this.textures.exists(key)) return;
-      const g = this.add.graphics().setVisible(false);
-      g.fillStyle(0x6d798e, 1);
-      g.fillRoundedRect(0, 0, textureSize, textureSize, 12);
-      const cobbleSize = textureSize / 3;
-      for (let row = 0; row < 3; row += 1) {
-        for (let col = 0; col < 3; col += 1) {
-          const jitterX = this.randomFloat() * 4 - 2;
-          const jitterY = this.randomFloat() * 4 - 2;
-          const stoneX = col * cobbleSize + 3 + jitterX;
-          const stoneY = row * cobbleSize + 3 + jitterY;
-          const width = cobbleSize - 6 + this.randomFloat() * 2;
-          const height = cobbleSize - 6 + this.randomFloat() * 2;
-          const shade = 0x8090aa + this.randomInt(0x101010);
-          g.fillStyle(shade, 0.8);
-          g.fillRoundedRect(stoneX, stoneY, width, height, 6);
-          g.lineStyle(2, 0x2f3645, 0.35);
-          g.strokeRoundedRect(stoneX, stoneY, width, height, 6);
-        }
-      }
-      for (let i = 0; i < 26; i += 1) {
-        const dotShade = 0x5c6678 + this.randomInt(0x111111);
-        g.fillStyle(dotShade, 0.22);
-        g.fillCircle(this.randomFloat() * textureSize, this.randomFloat() * textureSize, 1 + this.randomFloat() * 1.8);
-      }
-      g.lineStyle(3, 0xaeb9cd, 0.28);
-      g.strokeRoundedRect(2, 2, textureSize - 4, textureSize - 4, 10);
-      g.generateTexture(key, textureSize, textureSize);
-      g.destroy();
-    };
-
-    const createUnbreakableTexture = (key: string, variant: number): void => {
-      if (this.textures.exists(key)) return;
-      const g = this.add.graphics().setVisible(false);
-      g.fillStyle(0x120d12, 1);
-      g.fillRoundedRect(0, 0, textureSize, textureSize, 10);
-      for (let i = 0; i < 14; i += 1) {
-        const alpha = 0.2 + this.randomFloat() * 0.26;
-        const tone = variant % 2 === 0 ? 0x2b1418 : 0x251119;
-        g.fillStyle(tone + this.randomInt(0x080808), alpha);
-        const w = 14 + this.randomFloat() * 24;
-        const h = 10 + this.randomFloat() * 20;
-        const x = this.randomFloat() * (textureSize - w);
-        const y = this.randomFloat() * (textureSize - h);
-        g.fillRoundedRect(x, y, w, h, 5);
-      }
-      g.lineStyle(2, 0x8a2028, 0.35);
-      for (let i = 0; i < 8; i += 1) {
-        const x1 = this.randomFloat() * textureSize;
-        const y1 = this.randomFloat() * textureSize;
-        const x2 = Phaser.Math.Clamp(x1 + (this.randomFloat() * 34 - 17), 0, textureSize);
-        const y2 = Phaser.Math.Clamp(y1 + (this.randomFloat() * 34 - 17), 0, textureSize);
-        g.lineBetween(x1, y1, x2, y2);
-      }
-      g.lineStyle(4, 0xff3a32, 0.14);
-      g.strokeRoundedRect(3, 3, textureSize - 6, textureSize - 6, 10);
-      g.generateTexture(key, textureSize, textureSize);
-      g.destroy();
-    };
-
-    const createBreakableTexture = (): void => {
-      const key = 'tile_breakable';
-      if (this.textures.exists(key)) return;
-      const g = this.add.graphics().setVisible(false);
-      g.fillStyle(0x8a6848, 1);
-      g.fillRoundedRect(0, 0, textureSize, textureSize, 10);
-      for (let i = 0; i < 10; i += 1) {
-        const alpha = 0.24 + this.randomFloat() * 0.2;
-        const w = 16 + this.randomFloat() * 24;
-        const h = 10 + this.randomFloat() * 18;
-        const x = this.randomFloat() * (textureSize - w);
-        const y = this.randomFloat() * (textureSize - h);
-        g.fillStyle(0x9f7a58 + this.randomInt(0x090909), alpha);
-        g.fillRoundedRect(x, y, w, h, 4);
-      }
-      g.lineStyle(2, 0x3d2a1b, 0.32);
-      for (let i = -textureSize; i < textureSize * 2; i += 16) {
-        g.lineBetween(i, 0, i + textureSize, textureSize);
-      }
-      g.lineStyle(2, 0x4e2f1d, 0.42);
-      for (let i = 0; i < 6; i += 1) {
-        const x = this.randomFloat() * textureSize;
-        const y = this.randomFloat() * textureSize;
-        g.lineBetween(x, y, x + this.randomFloat() * 18 - 9, y + this.randomFloat() * 18 - 9);
-      }
-      g.lineStyle(3, 0xc8a987, 0.3);
-      g.strokeRoundedRect(3, 3, textureSize - 6, textureSize - 6, 9);
-      g.generateTexture(key, textureSize, textureSize);
-      g.destroy();
-    };
 
     const createExplosionTexture = (key: string, axis: 'core' | 'horizontal' | 'vertical'): void => {
       if (this.textures.exists(key)) return;
@@ -508,13 +417,6 @@ export class GameScene extends Phaser.Scene {
       eyeColor: 0x2c114b,
       hasOuterHalo: true,
     });
-
-    createFloorTexture();
-    createUnbreakableTexture('tile_wall_a', 0);
-    createUnbreakableTexture('tile_wall_b', 1);
-    createBreakableTexture();
-    createUnbreakableTexture('tile_column_a', 2);
-    createUnbreakableTexture('tile_column_b', 3);
 
     createExplosionTexture('fx_explosion_core', 'core');
     createExplosionTexture('fx_explosion_beam_h', 'horizontal');
@@ -915,8 +817,9 @@ export class GameScene extends Phaser.Scene {
     for (let y = 0; y < this.arena.tiles.length; y += 1) {
       for (let x = 0; x < this.arena.tiles[y].length; x += 1) {
         const tile = this.arena.tiles[y][x];
+        const floorTexture = getDeterministicArenaTileTexture(this, 'Floor', x, y, tileSize, this.arena.width, this.arena.height);
         this.add
-          .image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, 'tile_floor')
+          .image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, floorTexture)
           .setOrigin(0.5, 0.5)
           .setDisplaySize(tileSize - 2, tileSize - 2)
           .setDepth(DEPTH_FLOOR)
@@ -2019,9 +1922,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getPolishedTileTexture(tile: TileType, x: number, y: number): string {
-    if (tile === 'HardWall') return (x + y) % 2 === 0 ? 'tile_wall_a' : 'tile_wall_b';
-    if (tile === 'ANOMALOUS_STONE') return (x + y) % 2 === 0 ? 'tile_column_a' : 'tile_column_b';
-    return 'tile_breakable';
+    return getDeterministicArenaTileTexture(this, tile, x, y, GAME_CONFIG.tileSize, this.arena.width, this.arena.height);
   }
 
   private getPickupTextureKey(type: 'BombUp' | 'FireUp'): string {
