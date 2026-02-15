@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => ({
               theme_color: '#111827',
             },
             workbox: {
+              cleanupOutdatedCaches: true,
               globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff,woff2,ttf,eot,json,mp3,ogg,wav,glb,gltf}'],
               runtimeCaching: [
                 {
