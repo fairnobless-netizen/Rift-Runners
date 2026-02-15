@@ -24,6 +24,11 @@
 html {
   overscroll-behavior: none;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -47,6 +52,11 @@ body {
 .page {
   position: relative; /* IMPORTANT: anchor for WsDebugOverlay absolute root */
   display: flex;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
   flex-direction: column;
   gap: var(--shell-gap);
   height: var(--tg-viewport-stable-h);
@@ -268,8 +278,26 @@ body {
   display: grid;
   place-items: center;
   place-self: center;
-  background: #2a3764;
+  background: transparent;
   position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.nav-btn__plate {
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2a3764;
+  transform: scale(0.72);
+  transform-origin: center;
 }
 
 .nav-btn__icon {
@@ -278,7 +306,7 @@ body {
   justify-content: center;
   width: 78%;
   height: 78%;
-  font-size: calc(1.36rem * var(--ui-scale));
+  font-size: calc(1.56rem * var(--ui-scale));
   line-height: 1;
 }
 
@@ -307,13 +335,18 @@ body {
 }
 
 .joystick-touch-zone {
-  width: min(100%, calc(300px * var(--ui-scale)));
+  width: min(100%, calc(340px * var(--ui-scale)));
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .joystick-touch-zone--active {
@@ -445,6 +478,10 @@ button:disabled {
 
 .joystick-pad {
   position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
   width: min(100%, calc(150px * var(--ui-scale)));
   aspect-ratio: 1 / 1;
   border-radius: 50%;
