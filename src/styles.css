@@ -1036,6 +1036,18 @@ html[data-orient="landscape"] .right-panel {
 }
 
 
+.nickname-status {
+  font-size: 0.78rem;
+  min-height: 1.1rem;
+}
+
+.nickname-status--available { color: #74ffb6; }
+.nickname-status--taken,
+.nickname-status--invalid,
+.nickname-status--server_error { color: #ff9898; }
+.nickname-status--checking,
+.nickname-status--idle { color: #a9b8df; }
+
 .store-card {
   border: 1px solid #2c3b6c;
   border-radius: 10px;
@@ -1351,6 +1363,57 @@ html[data-orient="landscape"] .right-panel {
   gap: 0.4rem;
 }
 
+
+.rr-room-section {
+  position: relative;
+  min-height: 380px;
+}
+
+.rr-room-overlay {
+  position: absolute;
+  inset: 2.3rem 0 0;
+  border: 1px solid #5275ba;
+  border-radius: 12px;
+  background: rgba(7, 15, 34, 0.95);
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.rr-room-join-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 210px;
+  overflow: auto;
+}
+
+.rr-slot-disabled,
+.rr-slot-waiting,
+.rr-slot-occupied {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid #365084;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-size: 0.78rem;
+  background: rgba(10, 20, 45, 0.8);
+}
+
+.rr-slot-disabled {
+  opacity: 0.55;
+}
+
+.rr-slot-waiting {
+  color: #b9c8ec;
+}
+
+.rr-slot-occupied {
+  color: #d7e5ff;
+}
 .rr-arena-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
