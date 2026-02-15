@@ -2,10 +2,14 @@
 
 CREATE TABLE IF NOT EXISTS users (
   tg_user_id TEXT PRIMARY KEY,
+  tg_username TEXT,
   display_name TEXT NOT NULL,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_users_tg_username
+  ON users (LOWER(tg_username));
 
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
@@ -20,8 +24,12 @@ CREATE INDEX IF NOT EXISTS idx_sessions_tg_user_id ON sessions(tg_user_id);
 CREATE TABLE IF NOT EXISTS wallets (
   tg_user_id TEXT PRIMARY KEY REFERENCES users(tg_user_id) ON DELETE CASCADE,
   stars INTEGER NOT NULL DEFAULT 0,
-  crystals INTEGER NOT NULL DEFAULT 0
+  crystals INTEGER NOT NULL DEFAULT 0,
+  plasma INTEGER NOT NULL DEFAULT 0
 );
+
+ALTER TABLE wallets
+  ADD COLUMN IF NOT EXISTS plasma INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS ledger_entries (
   id TEXT PRIMARY KEY,
@@ -163,7 +171,12 @@ CREATE TABLE IF NOT EXISTS leaderboard_submit_limits (
 CREATE TABLE IF NOT EXISTS rooms (
   room_code TEXT PRIMARY KEY,                 -- short code used for join
   owner_tg_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  name TEXT,
   capacity INTEGER NOT NULL,                  -- 2/3/4
+  password_hash TEXT,
+  password_salt TEXT,
+  has_password BOOLEAN NOT NULL DEFAULT FALSE,
+  is_public BOOLEAN NOT NULL DEFAULT TRUE,
   status TEXT NOT NULL DEFAULT 'OPEN',        -- OPEN | CLOSED
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -189,6 +202,24 @@ ALTER TABLE rooms
 
 ALTER TABLE rooms
   ADD COLUMN IF NOT EXISTS started_by_tg_user_id TEXT NULL REFERENCES users(tg_user_id) ON DELETE SET NULL;
+
+ALTER TABLE rooms
+  ADD COLUMN IF NOT EXISTS name TEXT;
+
+ALTER TABLE rooms
+  ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
+ALTER TABLE rooms
+  ADD COLUMN IF NOT EXISTS password_salt TEXT;
+
+ALTER TABLE rooms
+  ADD COLUMN IF NOT EXISTS has_password BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE rooms
+  ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_rooms_public_name
+  ON rooms (is_public, LOWER(name));
 
 ALTER TABLE room_members
   ADD COLUMN IF NOT EXISTS ready BOOLEAN NOT NULL DEFAULT FALSE;
@@ -219,3 +250,16 @@ CREATE INDEX IF NOT EXISTS idx_friend_requests_to_status_created
 
 CREATE INDEX IF NOT EXISTS idx_friend_requests_from_status_created
   ON friend_requests (from_tg_user_id, status, created_at DESC);
+
+-- =========================================
+-- REFERRALS (Stage M17.10)
+-- =========================================
+
+CREATE TABLE IF NOT EXISTS referrals (
+  invitee_user_id TEXT PRIMARY KEY REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  referrer_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
+  created_at BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_referrals_referrer
+  ON referrals (referrer_user_id, created_at DESC);

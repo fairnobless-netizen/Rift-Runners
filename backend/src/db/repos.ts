@@ -4,56 +4,62 @@ import { pgQuery, getPgPool } from './pg';
 export async function upsertUser(params: {
   tgUserId: string;
   displayName: string;
-}): Promise<{ tgUserId: string; displayName: string; createdAt: number; updatedAt: number }> {
+  tgUsername?: string | null;
+}): Promise<{ tgUserId: string; tgUsername: string | null; displayName: string; createdAt: number; updatedAt: number }> {
   const now = Date.now();
 
   const { rows } = await pgQuery<{
     tg_user_id: string;
+    tg_username: string | null;
     display_name: string;
     created_at: number;
     updated_at: number;
   }>(
     `
-    INSERT INTO users (tg_user_id, display_name, created_at, updated_at)
-    VALUES ($1, $2, $3, $3)
+    INSERT INTO users (tg_user_id, tg_username, display_name, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, $4)
     ON CONFLICT (tg_user_id)
-    DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = EXCLUDED.updated_at
-    RETURNING tg_user_id, display_name, created_at, updated_at
+    DO UPDATE SET
+      tg_username = COALESCE(EXCLUDED.tg_username, users.tg_username),
+      display_name = EXCLUDED.display_name,
+      updated_at = EXCLUDED.updated_at
+    RETURNING tg_user_id, tg_username, display_name, created_at, updated_at
     `,
-    [params.tgUserId, params.displayName, now],
+    [params.tgUserId, params.tgUsername ? params.tgUsername.toLowerCase() : null, params.displayName, now],
   );
 
   const u = rows[0];
   return {
     tgUserId: String(u.tg_user_id),
+    tgUsername: u.tg_username == null ? null : String(u.tg_username),
     displayName: String(u.display_name),
     createdAt: Number(u.created_at),
     updatedAt: Number(u.updated_at),
   };
 }
 
-export async function ensureWallet(tgUserId: string): Promise<{ tgUserId: string; stars: number; crystals: number }> {
-  const { rows } = await pgQuery<{ tg_user_id: string; stars: number; crystals: number }>(
+export async function ensureWallet(tgUserId: string): Promise<{ tgUserId: string; stars: number; crystals: number; plasma: number }> {
+  const { rows } = await pgQuery<{ tg_user_id: string; stars: number; crystals: number; plasma: number }>(
     `
-    INSERT INTO wallets (tg_user_id, stars, crystals)
-    VALUES ($1, 0, 0)
+    INSERT INTO wallets (tg_user_id, stars, crystals, plasma)
+    VALUES ($1, 0, 0, 0)
     ON CONFLICT (tg_user_id) DO NOTHING
-    RETURNING tg_user_id, stars, crystals
+    RETURNING tg_user_id, stars, crystals, plasma
     `,
     [tgUserId],
   );
 
   if (rows[0]) {
-    return { tgUserId: String(rows[0].tg_user_id), stars: Number(rows[0].stars), crystals: Number(rows[0].crystals) };
+    return { tgUserId: String(rows[0].tg_user_id), stars: Number(rows[0].stars), crystals: Number(rows[0].crystals), plasma: Number(rows[0].plasma ?? 0) };
   }
 
-  const r2 = await pgQuery<{ tg_user_id: string; stars: number; crystals: number }>(
-    `SELECT tg_user_id, stars, crystals FROM wallets WHERE tg_user_id = $1 LIMIT 1`,
+  const r2 = await pgQuery<{ tg_user_id: string; stars: number; crystals: number; plasma: number }>(
+    `SELECT tg_user_id, stars, crystals, plasma FROM wallets WHERE tg_user_id = $1 LIMIT 1`,
     [tgUserId],
   );
 
   const w = r2.rows[0];
-  return { tgUserId: String(w.tg_user_id), stars: Number(w.stars), crystals: Number(w.crystals) };
+  return { tgUserId: String(w.tg_user_id), stars: Number(w.stars), crystals: Number(w.crystals), plasma: Number(w.plasma ?? 0) };
 }
 
 export async function createSession(params: {
@@ -73,13 +79,13 @@ export async function createSession(params: {
 
 export async function getUserAndWallet(tgUserId: string): Promise<{
   user: { tgUserId: string; displayName: string; createdAt: number; updatedAt: number };
-  wallet: { tgUserId: string; stars: number; crystals: number };
+  wallet: { tgUserId: string; stars: number; crystals: number; plasma: number };
 } | null> {
   const { rows } = await pgQuery<any>(
     `
     SELECT
       u.tg_user_id, u.display_name, u.created_at, u.updated_at,
-      w.stars, w.crystals
+      w.stars, w.crystals, w.plasma
     FROM users u
     LEFT JOIN wallets w ON w.tg_user_id = u.tg_user_id
     WHERE u.tg_user_id = $1
@@ -102,6 +108,7 @@ export async function getUserAndWallet(tgUserId: string): Promise<{
       tgUserId: String(r.tg_user_id),
       stars: Number(r.stars ?? 0),
       crystals: Number(r.crystals ?? 0),
+      plasma: Number(r.plasma ?? 0),
     },
   };
 }
@@ -1417,6 +1424,537 @@ export async function updateDisplayNameWithLimit(params: {
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export type UserSearchRecord = {
+  userId: string;
+  tgUsername: string;
+  displayName: string;
+};
+
+export async function searchUsersByUsername(query: string): Promise<UserSearchRecord[]> {
+  const q = String(query ?? '').trim().toLowerCase();
+  if (!q) return [];
+
+  const { rows } = await pgQuery<{ tg_user_id: string; tg_username: string; display_name: string }>(
+    `
+    SELECT tg_user_id, tg_username, display_name
+    FROM users
+    WHERE tg_username IS NOT NULL
+      AND LOWER(tg_username) LIKE $1
+    ORDER BY tg_username ASC
+    LIMIT 20
+    `,
+    [`%${q}%`],
+  );
+
+  return rows.map((row) => ({
+    userId: String(row.tg_user_id),
+    tgUsername: String(row.tg_username),
+    displayName: String(row.display_name ?? 'Unknown'),
+  }));
+}
+
+export type FriendUserView = { userId: string; tgUsername: string | null; displayName: string };
+export type FriendRequestView = { requestId: string; user: FriendUserView; createdAt: string };
+
+export async function listConfirmedFriendsV2(tgUserId: string): Promise<FriendUserView[]> {
+  const { rows } = await pgQuery<{ user_id: string; tg_username: string | null; display_name: string }>(
+    `
+    SELECT fe.tg_user_id_b AS user_id, u.tg_username, u.display_name
+    FROM friend_edges fe
+    JOIN users u ON u.tg_user_id = fe.tg_user_id_b
+    WHERE fe.tg_user_id_a = $1
+    ORDER BY u.display_name ASC
+    `,
+    [tgUserId],
+  );
+
+  return rows.map((row) => ({ userId: String(row.user_id), tgUsername: row.tg_username == null ? null : String(row.tg_username), displayName: String(row.display_name ?? 'Unknown') }));
+}
+
+export async function listIncomingRequestsV2(tgUserId: string): Promise<FriendRequestView[]> {
+  const { rows } = await pgQuery<{ from_tg_user_id: string; tg_username: string | null; display_name: string; created_at: string }>(
+    `
+    SELECT fr.from_tg_user_id, u.tg_username, u.display_name, fr.created_at
+    FROM friend_requests fr
+    JOIN users u ON u.tg_user_id = fr.from_tg_user_id
+    WHERE fr.to_tg_user_id = $1 AND fr.status = 'PENDING'
+    ORDER BY fr.created_at DESC
+    `,
+    [tgUserId],
+  );
+  return rows.map((row) => ({
+    requestId: `${String(row.from_tg_user_id)}:${tgUserId}`,
+    user: { userId: String(row.from_tg_user_id), tgUsername: row.tg_username == null ? null : String(row.tg_username), displayName: String(row.display_name ?? 'Unknown') },
+    createdAt: String(row.created_at),
+  }));
+}
+
+export async function listOutgoingRequestsV2(tgUserId: string): Promise<FriendRequestView[]> {
+  const { rows } = await pgQuery<{ to_tg_user_id: string; tg_username: string | null; display_name: string; created_at: string }>(
+    `
+    SELECT fr.to_tg_user_id, u.tg_username, u.display_name, fr.created_at
+    FROM friend_requests fr
+    JOIN users u ON u.tg_user_id = fr.to_tg_user_id
+    WHERE fr.from_tg_user_id = $1 AND fr.status = 'PENDING'
+    ORDER BY fr.created_at DESC
+    `,
+    [tgUserId],
+  );
+  return rows.map((row) => ({
+    requestId: `${tgUserId}:${String(row.to_tg_user_id)}`,
+    user: { userId: String(row.to_tg_user_id), tgUsername: row.tg_username == null ? null : String(row.tg_username), displayName: String(row.display_name ?? 'Unknown') },
+    createdAt: String(row.created_at),
+  }));
+}
+
+export async function createFriendRequestByUsername(fromTgUserId: string, username: string): Promise<void> {
+  const normalized = String(username ?? '').trim().replace(/^@+/, '').toLowerCase();
+  if (!normalized) {
+    const error = new Error('invalid_username');
+    (error as any).code = 'INVALID_USERNAME';
+    throw error;
+  }
+
+  const targetRes = await pgQuery<{ tg_user_id: string }>(
+    `SELECT tg_user_id FROM users WHERE LOWER(tg_username) = $1 LIMIT 1`,
+    [normalized],
+  );
+
+  const toTgUserId = String(targetRes.rows[0]?.tg_user_id ?? '');
+  if (!toTgUserId) {
+    const error = new Error('user_not_found');
+    (error as any).code = 'USER_NOT_FOUND';
+    throw error;
+  }
+
+  await requestFriend(fromTgUserId, toTgUserId);
+}
+
+export async function cancelFriendRequest(fromTgUserId: string, requestId: string): Promise<void> {
+  const [fromId, toId] = String(requestId ?? '').split(':');
+  if (!fromId || !toId || fromId !== fromTgUserId) {
+    const error = new Error('forbidden');
+    (error as any).code = 'FORBIDDEN';
+    throw error;
+  }
+
+  const existing = await pgQuery<{ from_tg_user_id: string }>(
+    `SELECT from_tg_user_id FROM friend_requests WHERE from_tg_user_id = $1 AND to_tg_user_id = $2 AND status = 'PENDING' LIMIT 1`,
+    [fromId, toId],
+  );
+
+  if (!existing.rows[0]) {
+    const error = new Error('request_not_found');
+    (error as any).code = 'REQUEST_NOT_FOUND';
+    throw error;
+  }
+
+  await pgQuery(
+    `DELETE FROM friend_requests WHERE from_tg_user_id = $1 AND to_tg_user_id = $2 AND status = 'PENDING'`,
+    [fromId, toId],
+  );
+}
+
+function randomRoomCode(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 6; i += 1) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
+}
+
+async function hashRoomPassword(password: string): Promise<{ hash: string; salt: string }> {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = await new Promise<string>((resolve, reject) => {
+    crypto.scrypt(password, salt, 64, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey.toString('hex'));
+    });
+  });
+  return { hash, salt };
+}
+
+async function verifyRoomPassword(password: string, salt: string, expectedHash: string): Promise<boolean> {
+  const hash = await new Promise<string>((resolve, reject) => {
+    crypto.scrypt(password, salt, 64, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey.toString('hex'));
+    });
+  });
+
+  const a = Buffer.from(hash, 'hex');
+  const b = Buffer.from(expectedHash, 'hex');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+export type RoomModel = {
+  code: string;
+  name: string;
+  players: number;
+  capacity: number;
+  hasPassword: boolean;
+  createdBy: FriendUserView;
+};
+
+async function getRoomModelByCode(roomCode: string): Promise<RoomModel | null> {
+  const { rows } = await pgQuery<{
+    room_code: string;
+    name: string | null;
+    capacity: number;
+    has_password: boolean;
+    owner_tg_user_id: string;
+    owner_tg_username: string | null;
+    owner_display_name: string;
+    players: number;
+  }>(
+    `
+    SELECT
+      r.room_code,
+      r.name,
+      r.capacity,
+      r.has_password,
+      r.owner_tg_user_id,
+      u.tg_username AS owner_tg_username,
+      u.display_name AS owner_display_name,
+      COUNT(rm.tg_user_id)::int AS players
+    FROM rooms r
+    JOIN users u ON u.tg_user_id = r.owner_tg_user_id
+    LEFT JOIN room_members rm ON rm.room_code = r.room_code
+    WHERE r.room_code = $1
+      AND r.status = 'OPEN'
+    GROUP BY r.room_code, r.name, r.capacity, r.has_password, r.owner_tg_user_id, u.tg_username, u.display_name
+    LIMIT 1
+    `,
+    [roomCode],
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    code: String(row.room_code),
+    name: String(row.name ?? `Room ${row.room_code}`),
+    players: Number(row.players ?? 0),
+    capacity: Number(row.capacity),
+    hasPassword: Boolean(row.has_password),
+    createdBy: {
+      userId: String(row.owner_tg_user_id),
+      tgUsername: row.owner_tg_username == null ? null : String(row.owner_tg_username),
+      displayName: String(row.owner_display_name ?? 'Unknown'),
+    },
+  };
+}
+
+export async function createRoomPublic(params: { tgUserId: string; name: string; capacity: 2 | 3 | 4; password?: string }): Promise<RoomModel> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+  let code = '';
+
+  try {
+    await client.query('BEGIN');
+
+    const cleanName = String(params.name ?? '').trim().slice(0, 64) || 'Public Room';
+    const rawPassword = String(params.password ?? '');
+    const hasPassword = rawPassword.length > 0;
+    const hashed = hasPassword ? await hashRoomPassword(rawPassword) : null;
+
+    for (let i = 0; i < 8; i += 1) {
+      code = randomRoomCode();
+      const exists = await client.query<{ room_code: string }>(`SELECT room_code FROM rooms WHERE room_code = $1 LIMIT 1`, [code]);
+      if (!exists.rows[0]) break;
+      code = '';
+    }
+    if (!code) {
+      const error = new Error('room_code_generation_failed');
+      (error as any).code = 'ROOM_CODE_GENERATION_FAILED';
+      throw error;
+    }
+
+    await client.query(
+      `
+      INSERT INTO rooms (room_code, owner_tg_user_id, name, capacity, password_hash, password_salt, has_password, is_public, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, 'OPEN')
+      `,
+      [code, params.tgUserId, cleanName, params.capacity, hashed?.hash ?? null, hashed?.salt ?? null, hasPassword],
+    );
+
+    await client.query(
+      `INSERT INTO room_members (room_code, tg_user_id, joined_at, ready) VALUES ($1, $2, now(), FALSE) ON CONFLICT DO NOTHING`,
+      [code, params.tgUserId],
+    );
+
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  const model = await getRoomModelByCode(code);
+  if (!model) {
+    const error = new Error('room_not_found');
+    (error as any).code = 'ROOM_NOT_FOUND';
+    throw error;
+  }
+  return model;
+}
+
+export async function listPublicRooms(query?: string): Promise<RoomModel[]> {
+  const needle = String(query ?? '').trim().toLowerCase();
+  const hasNeedle = needle.length > 0;
+  const { rows } = await pgQuery<{
+    room_code: string;
+    name: string | null;
+    capacity: number;
+    has_password: boolean;
+    owner_tg_user_id: string;
+    owner_tg_username: string | null;
+    owner_display_name: string;
+    players: number;
+  }>(
+    `
+    SELECT
+      r.room_code,
+      r.name,
+      r.capacity,
+      r.has_password,
+      r.owner_tg_user_id,
+      u.tg_username AS owner_tg_username,
+      u.display_name AS owner_display_name,
+      COUNT(rm.tg_user_id)::int AS players
+    FROM rooms r
+    JOIN users u ON u.tg_user_id = r.owner_tg_user_id
+    LEFT JOIN room_members rm ON rm.room_code = r.room_code
+    WHERE r.status = 'OPEN'
+      AND r.is_public = TRUE
+      AND ($1 = '' OR LOWER(COALESCE(r.name, '')) LIKE $2)
+    GROUP BY r.room_code, r.name, r.capacity, r.has_password, r.owner_tg_user_id, u.tg_username, u.display_name
+    ORDER BY r.created_at DESC
+    LIMIT 100
+    `,
+    [hasNeedle ? needle : '', `%${needle}%`],
+  );
+
+  return rows.map((row) => ({
+    code: String(row.room_code),
+    name: String(row.name ?? `Room ${row.room_code}`),
+    players: Number(row.players ?? 0),
+    capacity: Number(row.capacity),
+    hasPassword: Boolean(row.has_password),
+    createdBy: {
+      userId: String(row.owner_tg_user_id),
+      tgUsername: row.owner_tg_username == null ? null : String(row.owner_tg_username),
+      displayName: String(row.owner_display_name ?? 'Unknown'),
+    },
+  }));
+}
+
+export async function joinRoomWithPassword(params: { tgUserId: string; roomCode: string; password?: string }): Promise<RoomModel> {
+  const normalizedCode = String(params.roomCode ?? '').trim().toUpperCase();
+  const pool = getPgPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const roomRes = await client.query<{ room_code: string; capacity: number; has_password: boolean; password_hash: string | null; password_salt: string | null; status: string }>(
+      `SELECT room_code, capacity, has_password, password_hash, password_salt, status FROM rooms WHERE room_code = $1 FOR UPDATE`,
+      [normalizedCode],
+    );
+    const room = roomRes.rows[0];
+
+    if (!room || String(room.status) !== 'OPEN') {
+      const error = new Error('room_not_found');
+      (error as any).code = 'ROOM_NOT_FOUND';
+      throw error;
+    }
+
+    if (room.has_password) {
+      const supplied = String(params.password ?? '');
+      if (!supplied || !room.password_hash || !room.password_salt) {
+        const error = new Error('wrong_password');
+        (error as any).code = 'WRONG_PASSWORD';
+        throw error;
+      }
+
+      const matches = await verifyRoomPassword(supplied, room.password_salt, room.password_hash);
+      if (!matches) {
+        const error = new Error('wrong_password');
+        (error as any).code = 'WRONG_PASSWORD';
+        throw error;
+      }
+    }
+
+    const existingMembership = await client.query<{ room_code: string }>(
+      `SELECT room_code FROM room_members WHERE room_code = $1 AND tg_user_id = $2 LIMIT 1`,
+      [normalizedCode, params.tgUserId],
+    );
+
+    if (!existingMembership.rows[0]) {
+      const memberCountRes = await client.query<{ count: number }>(
+        `SELECT COUNT(*)::int AS count FROM room_members WHERE room_code = $1`,
+        [normalizedCode],
+      );
+      const memberCount = Number(memberCountRes.rows[0]?.count ?? 0);
+      if (memberCount >= Number(room.capacity)) {
+        const error = new Error('room_full');
+        (error as any).code = 'ROOM_FULL';
+        throw error;
+      }
+
+      await client.query(`INSERT INTO room_members (room_code, tg_user_id, joined_at, ready) VALUES ($1, $2, now(), FALSE)`, [normalizedCode, params.tgUserId]);
+    }
+
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  const roomModel = await getRoomModelByCode(normalizedCode);
+  if (!roomModel) {
+    const error = new Error('room_not_found');
+    (error as any).code = 'ROOM_NOT_FOUND';
+    throw error;
+  }
+  return roomModel;
+}
+
+export async function leaveRoomV2(params: { tgUserId: string; roomCode: string }): Promise<void> {
+  const normalizedCode = String(params.roomCode ?? '').trim().toUpperCase();
+  const pool = getPgPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const roomRes = await client.query<{ owner_tg_user_id: string }>(
+      `SELECT owner_tg_user_id FROM rooms WHERE room_code = $1 AND status = 'OPEN' FOR UPDATE`,
+      [normalizedCode],
+    );
+
+    const room = roomRes.rows[0];
+    if (!room) {
+      const error = new Error('room_not_found');
+      (error as any).code = 'ROOM_NOT_FOUND';
+      throw error;
+    }
+
+    const deletion = await client.query(
+      `DELETE FROM room_members WHERE room_code = $1 AND tg_user_id = $2`,
+      [normalizedCode, params.tgUserId],
+    );
+
+    if (!deletion.rowCount) {
+      const error = new Error('not_a_member');
+      (error as any).code = 'NOT_A_MEMBER';
+      throw error;
+    }
+
+    const countRes = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM room_members WHERE room_code = $1`, [normalizedCode]);
+    const remaining = Number(countRes.rows[0]?.count ?? 0);
+
+    if (remaining === 0) {
+      await client.query(`DELETE FROM rooms WHERE room_code = $1`, [normalizedCode]);
+    }
+
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function listMyRoomsV2(tgUserId: string): Promise<RoomModel[]> {
+  const { rows } = await pgQuery<{ room_code: string }>(
+    `
+    SELECT rm.room_code
+    FROM room_members rm
+    JOIN rooms r ON r.room_code = rm.room_code
+    WHERE rm.tg_user_id = $1 AND r.status = 'OPEN'
+    ORDER BY rm.joined_at DESC
+    `,
+    [tgUserId],
+  );
+
+  const models = await Promise.all(rows.map((row) => getRoomModelByCode(String(row.room_code))));
+  return models.filter((room): room is RoomModel => room != null);
+}
+
+const REFERRAL_REWARD_REFERRER = 50;
+const REFERRAL_REWARD_INVITEE = 10;
+
+export async function getReferralStats(tgUserId: string): Promise<{ plasmaEarned: number; invitedCount: number }> {
+  const [countRes] = await Promise.all([
+    pgQuery<{ count: number }>(`SELECT COUNT(*)::int AS count FROM referrals WHERE referrer_user_id = $1`, [tgUserId]),
+  ]);
+
+  const invitedCount = Number(countRes.rows[0]?.count ?? 0);
+  const plasmaEarned = invitedCount * REFERRAL_REWARD_REFERRER;
+  return { plasmaEarned, invitedCount };
+}
+
+export async function redeemReferral(params: { inviteeTgUserId: string; code: string }): Promise<{ referrer: number; invitee: number }> {
+  const referrerUserId = String(params.code ?? '').trim();
+  if (!referrerUserId) {
+    const error = new Error('invalid_code');
+    (error as any).code = 'INVALID_CODE';
+    throw error;
+  }
+
+  if (referrerUserId === params.inviteeTgUserId) {
+    const error = new Error('self_redeem_not_allowed');
+    (error as any).code = 'SELF_REDEEM';
+    throw error;
+  }
+
+  const pool = getPgPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const referrerExists = await client.query<{ tg_user_id: string }>(`SELECT tg_user_id FROM users WHERE tg_user_id = $1 LIMIT 1`, [referrerUserId]);
+    if (!referrerExists.rows[0]) {
+      const error = new Error('invalid_code');
+      (error as any).code = 'INVALID_CODE';
+      throw error;
+    }
+
+    const already = await client.query<{ invitee_user_id: string }>(`SELECT invitee_user_id FROM referrals WHERE invitee_user_id = $1 LIMIT 1`, [params.inviteeTgUserId]);
+    if (already.rows[0]) {
+      const error = new Error('already_redeemed');
+      (error as any).code = 'ALREADY_REDEEMED';
+      throw error;
+    }
+
+    const now = Date.now();
+    await client.query(
+      `INSERT INTO referrals (invitee_user_id, referrer_user_id, created_at) VALUES ($1, $2, $3)`,
+      [params.inviteeTgUserId, referrerUserId, now],
+    );
+
+    await client.query(`INSERT INTO wallets (tg_user_id, stars, crystals, plasma) VALUES ($1, 0, 0, 0) ON CONFLICT (tg_user_id) DO NOTHING`, [referrerUserId]);
+    await client.query(`INSERT INTO wallets (tg_user_id, stars, crystals, plasma) VALUES ($1, 0, 0, 0) ON CONFLICT (tg_user_id) DO NOTHING`, [params.inviteeTgUserId]);
+
+    await client.query(`UPDATE wallets SET plasma = plasma + $2 WHERE tg_user_id = $1`, [referrerUserId, REFERRAL_REWARD_REFERRER]);
+    await client.query(`UPDATE wallets SET plasma = plasma + $2 WHERE tg_user_id = $1`, [params.inviteeTgUserId, REFERRAL_REWARD_INVITEE]);
+
+    await client.query('COMMIT');
+    return { referrer: REFERRAL_REWARD_REFERRER, invitee: REFERRAL_REWARD_INVITEE };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
   } finally {
     client.release();
   }

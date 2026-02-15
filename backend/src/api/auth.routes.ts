@@ -21,6 +21,7 @@ authRouter.post('/auth/telegram', async (req, res) => {
 
     const user = await upsertUser({
       tgUserId,
+      tgUsername: 'dev_demo',
       displayName: 'Dev Demo',
     });
     await ensureWallet(tgUserId);
@@ -54,6 +55,7 @@ authRouter.post('/auth/telegram', async (req, res) => {
 
   const user = await upsertUser({
     tgUserId: vr.tgUserId,
+    tgUsername: vr.user?.username ? String(vr.user.username) : null,
     displayName: displayName.trim() || `TG ${vr.tgUserId}`,
   });
   await ensureWallet(vr.tgUserId);

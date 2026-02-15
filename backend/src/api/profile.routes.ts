@@ -4,6 +4,8 @@ import {
   computeNameChangeRemaining,
   getUserAndWallet,
   getUserSettings,
+  getReferralStats,
+  redeemReferral,
   updateDisplayNameWithLimit,
   upsertUserSettings,
 } from '../db/repos';
@@ -90,4 +92,36 @@ profileRouter.post('/profile/name', async (req, res) => {
   }
 
   return res.status(200).json({ ok: true, displayName, remaining: result.remaining });
+});
+
+
+profileRouter.get('/profile/referral', async (req, res) => {
+  const s = await resolveSessionFromRequest(req as any);
+  if (!s) return res.status(401).json({ ok: false, error: 'unauthorized' });
+
+  const tgBotUsername = String(process.env.TG_BOT_USERNAME ?? '').trim();
+  const link = tgBotUsername
+    ? `https://t.me/${tgBotUsername}?startapp=ref_${encodeURIComponent(s.tgUserId)}`
+    : `https://t.me/share/url?url=${encodeURIComponent(s.tgUserId)}`;
+
+  const stats = await getReferralStats(s.tgUserId);
+  return res.status(200).json({ link, plasmaEarned: stats.plasmaEarned, invitedCount: stats.invitedCount });
+});
+
+profileRouter.post('/profile/referral/redeem', async (req, res) => {
+  const s = await resolveSessionFromRequest(req as any);
+  if (!s) return res.status(401).json({ ok: false, error: 'unauthorized' });
+
+  const code = String(req.body?.code ?? '').trim();
+  if (!code) return res.status(400).json({ ok: false, error: 'code_required' });
+
+  try {
+    const awarded = await redeemReferral({ inviteeTgUserId: s.tgUserId, code });
+    return res.status(200).json({ ok: true, awarded });
+  } catch (error: any) {
+    if (error?.code === 'INVALID_CODE') return res.status(404).json({ ok: false, error: 'invalid_code' });
+    if (error?.code === 'SELF_REDEEM') return res.status(400).json({ ok: false, error: 'self_redeem_not_allowed' });
+    if (error?.code === 'ALREADY_REDEEMED') return res.status(409).json({ ok: false, error: 'already_redeemed' });
+    return res.status(500).json({ ok: false, error: 'internal_error' });
+  }
 });
