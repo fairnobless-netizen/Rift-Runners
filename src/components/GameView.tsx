@@ -181,6 +181,7 @@ export default function GameView(): JSX.Element {
   const gameRef = useRef<Phaser.Game | null>(null);
   const sceneRef = useRef<GameScene | null>(null);
   const inputSeqRef = useRef(0);
+  const joystickTouchZoneRef = useRef<HTMLDivElement | null>(null);
   const joystickPadRef = useRef<HTMLDivElement | null>(null);
   const joystickPointerIdRef = useRef<number | null>(null);
   const hudLivesRef = useRef<HTMLSpanElement | null>(null);
@@ -396,7 +397,7 @@ export default function GameView(): JSX.Element {
             ? detonateBtnRef.current
             : currentTutorialStep.id === 'multiplayer'
               ? multiplayerBtnRef.current
-              : joystickPadRef.current;
+              : joystickTouchZoneRef.current;
 
     tutorialStepTargetRef.current = nextTarget;
 
@@ -858,11 +859,11 @@ export default function GameView(): JSX.Element {
     event.preventDefault();
     event.stopPropagation();
 
-    const pad = joystickPadRef.current;
-    if (!pad) return;
+    const touchZone = joystickTouchZoneRef.current;
+    if (!touchZone) return;
 
-    if (typeof pad.setPointerCapture === 'function') {
-      pad.setPointerCapture(event.pointerId);
+    if (typeof touchZone.setPointerCapture === 'function') {
+      touchZone.setPointerCapture(event.pointerId);
     }
     joystickPointerIdRef.current = event.pointerId;
     setJoystickPressed(true);
@@ -881,9 +882,9 @@ export default function GameView(): JSX.Element {
   };
 
   const releaseJoystick = (pointerId?: number): void => {
-    const pad = joystickPadRef.current;
-    if (pad && pointerId !== undefined && typeof pad.hasPointerCapture === 'function' && pad.hasPointerCapture(pointerId)) {
-      pad.releasePointerCapture(pointerId);
+    const touchZone = joystickTouchZoneRef.current;
+    if (touchZone && pointerId !== undefined && typeof touchZone.hasPointerCapture === 'function' && touchZone.hasPointerCapture(pointerId)) {
+      touchZone.releasePointerCapture(pointerId);
     }
     joystickPointerIdRef.current = null;
     setJoystickPressed(false);
@@ -906,8 +907,8 @@ export default function GameView(): JSX.Element {
     event.preventDefault();
     event.stopPropagation();
 
-    const pad = joystickPadRef.current;
-    if (pad && typeof pad.hasPointerCapture === 'function' && pad.hasPointerCapture(event.pointerId)) {
+    const touchZone = joystickTouchZoneRef.current;
+    if (touchZone && typeof touchZone.hasPointerCapture === 'function' && touchZone.hasPointerCapture(event.pointerId)) {
       return;
     }
 
@@ -1644,7 +1645,7 @@ export default function GameView(): JSX.Element {
 
           <div className="left-joystick">
             <div
-              ref={joystickPadRef}
+              ref={joystickTouchZoneRef}
               className={`joystick-touch-zone ${joystickPressed ? 'joystick-touch-zone--active' : ''}`}
               onPointerDown={onJoystickPointerDown}
               onPointerMove={onJoystickPointerMove}
@@ -1655,7 +1656,7 @@ export default function GameView(): JSX.Element {
               aria-label="Virtual joystick"
             >
               <div className="joystick-wrap">
-                <div className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}>
+                <div ref={joystickPadRef} className={`joystick-pad ${joystickPressed ? 'joystick-pad--active' : ''}`}>
                   <div
                     className="joystick-knob"
                     style={{

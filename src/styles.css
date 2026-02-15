@@ -248,11 +248,11 @@ body {
 }
 
 .left-nav {
-  --nav-grid-gap: calc(0.32rem * var(--ui-scale));
+  --nav-grid-gap: calc(0.24rem * var(--ui-scale));
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: calc(0.5rem * var(--ui-scale));
+  gap: calc(0.38rem * var(--ui-scale));
 }
 
 .nav-secondary {
@@ -306,7 +306,7 @@ body {
   justify-content: center;
   width: 78%;
   height: 78%;
-  font-size: calc(1.56rem * var(--ui-scale));
+  font-size: calc(1.4rem * var(--ui-scale));
   line-height: 1;
 }
 
@@ -324,20 +324,22 @@ body {
   justify-content: center;
 
   /* keep consistent padding with ui scale */
-  padding: calc(10px * var(--ui-scale));
+  padding: calc(6px * var(--ui-scale));
 }
 
 .joystick-wrap {
   width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .joystick-touch-zone {
-  width: min(100%, calc(340px * var(--ui-scale)));
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -439,8 +441,8 @@ body {
 
 .game-canvas {
   aspect-ratio: var(--arena-ar, 576 / 448);
-  width: 100%;
-  height: auto;
+  width: auto;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
   min-width: 0;
