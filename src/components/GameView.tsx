@@ -101,9 +101,31 @@ type AccountInfo = {
 
 type MultiplayerTab = 'rooms' | 'friends';
 type GameFlowPhase = 'intro' | 'start' | 'playing';
-type NicknameCheckState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'server_error';
+type NicknameCheckState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'auth_required' | 'server_error';
 
 const DEBUG_NICK = false;
+const PROFILE_BASE_CANDIDATES = ['/api/profile', '/api/profile/profile'] as const;
+
+async function fetchProfileWithFallback(path: string, init?: RequestInit): Promise<Response> {
+  let last404Response: Response | null = null;
+
+  for (const base of PROFILE_BASE_CANDIDATES) {
+    const endpoint = `${base}${path}`;
+    const response = await fetch(endpoint, init);
+    if (DEBUG_NICK) {
+      console.warn('[nickname-debug] endpoint attempt', { endpoint, status: response.status });
+    }
+    if (response.status === 404) {
+      last404Response = response;
+      continue;
+    }
+    return response;
+  }
+
+  if (last404Response) return last404Response;
+  throw new Error('Profile endpoint not reachable');
+}
+
 type TutorialStep = {
   id: string;
   title: string;
@@ -1432,14 +1454,18 @@ export default function GameView(): JSX.Element {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
       setNicknameCheckState('checking');
-      const endpoint = `/api/profile/nickname-check?nick=${encodeURIComponent(nicknameInput)}`;
-      void fetch(endpoint, {
+      const endpointPath = `/nickname-check?nick=${encodeURIComponent(nicknameInput)}`;
+      void fetchProfileWithFallback(endpointPath, {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         signal: controller.signal,
       })
         .then(async (response) => {
-          const json = await response.json().catch(() => ({} as Record<string, unknown>));
-          if (response.status === 409) {
+          const json = await response.json().catch(() => null);
+          if (response.status === 401) {
+            setNicknameCheckState('auth_required');
+            return;
+          }
+          if (response.status === 409 || json?.available === false) {
             setNicknameCheckState('taken');
             return;
           }
@@ -1447,9 +1473,9 @@ export default function GameView(): JSX.Element {
             setNicknameCheckState('invalid');
             return;
           }
-          if (!response.ok) {
+          if (!response.ok || !json || typeof json !== 'object') {
             debugNicknameFailure({
-              endpoint,
+              endpoint: endpointPath,
               method: 'GET',
               payload: { nick: nicknameInput },
               response,
@@ -1458,17 +1484,12 @@ export default function GameView(): JSX.Element {
             setNicknameCheckState('server_error');
             return;
           }
-          const available = json?.available;
-          if (available === false) {
-            setNicknameCheckState('taken');
-            return;
-          }
-          if (available === true || json?.ok === true) {
+          if (json?.available === true || json?.ok === true) {
             setNicknameCheckState('available');
             return;
           }
           debugNicknameFailure({
-            endpoint,
+            endpoint: endpointPath,
             method: 'GET',
             payload: { nick: nicknameInput },
             response,
@@ -1479,7 +1500,7 @@ export default function GameView(): JSX.Element {
         .catch((error) => {
           if (!controller.signal.aborted) {
             debugNicknameFailure({
-              endpoint,
+              endpoint: endpointPath,
               method: 'GET',
               payload: { nick: nicknameInput },
               error,
@@ -1512,9 +1533,9 @@ export default function GameView(): JSX.Element {
     setNicknameSubmitting(true);
 
     try {
-      const endpoint = '/api/profile/nickname';
+      const endpointPath = '/nickname';
       const payload = { nickname };
-      const response = await fetch(endpoint, {
+      const response = await fetchProfileWithFallback(endpointPath, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -1523,12 +1544,17 @@ export default function GameView(): JSX.Element {
         body: JSON.stringify(payload),
       });
 
-      const json = await response.json().catch(() => ({}));
+      const json = await response.json().catch(() => null);
+      if (response.status === 401) {
+        setNicknameCheckState('auth_required');
+        setNicknameSubmitError('Auth required. Please reopen from Telegram.');
+        return;
+      }
       if (!response.ok || !json?.ok) {
         if (!response.ok) {
-          debugNicknameFailure({ endpoint, method: 'POST', payload, response, responseBody: json });
+          debugNicknameFailure({ endpoint: endpointPath, method: 'POST', payload, response, responseBody: json });
         }
-        if (response.status === 409) {
+        if (response.status === 409 || json?.available === false) {
           setNicknameCheckState('taken');
           setNicknameSubmitError('Nickname is already taken');
           return;
@@ -1538,7 +1564,7 @@ export default function GameView(): JSX.Element {
           setNicknameSubmitError('Invalid nickname format');
           return;
         }
-        debugNicknameFailure({ endpoint, method: 'POST', payload, response, responseBody: json });
+        debugNicknameFailure({ endpoint: endpointPath, method: 'POST', payload, response, responseBody: json });
         setNicknameCheckState('server_error');
         setNicknameSubmitError('Server error. Please try again.');
         return;
@@ -1552,7 +1578,7 @@ export default function GameView(): JSX.Element {
       } : prev));
       setRegistrationOpen(false);
     } catch (error) {
-      debugNicknameFailure({ endpoint: '/api/profile/nickname', method: 'POST', payload: { nickname }, error });
+      debugNicknameFailure({ endpoint: '/nickname', method: 'POST', payload: { nickname }, error });
       setNicknameCheckState('server_error');
       setNicknameSubmitError('Server error. Please try again.');
     } finally {
@@ -1568,11 +1594,15 @@ export default function GameView(): JSX.Element {
         ? '❌ Taken'
         : nicknameCheckState === 'invalid'
           ? '❌ Invalid'
-          : nicknameCheckState === 'server_error'
-            ? '❌ Server error'
-            : null;
+          : nicknameCheckState === 'auth_required'
+            ? '❌ Auth required. Please reopen from Telegram.'
+            : nicknameCheckState === 'server_error'
+              ? '❌ Server error'
+              : null;
   const canSaveNickname = Boolean(
-    nicknameInput
+    nicknameInput.length >= 3
+    && nicknameInput.length <= 16
+    && nicknameFormatValid
     && nicknameCheckState === 'available'
     && !nicknameSubmitting,
   );
