@@ -64,6 +64,7 @@ import { useWsClient } from '../ws/useWsClient';
 import { resolveDevIdentity } from '../utils/devIdentity';
 import { apiUrl } from '../utils/apiBase';
 import { RROverlayModal } from './RROverlayModal';
+import { MultiplayerModal } from './MultiplayerModal';
 
 
 const defaultStats: PlayerStats = {
@@ -101,7 +102,6 @@ type AccountInfo = {
   nameChangeRemaining: number;
 };
 
-type MultiplayerTab = 'rooms' | 'friends';
 type GameFlowPhase = 'intro' | 'start' | 'playing';
 type NicknameCheckState =
   | 'idle'
@@ -257,12 +257,11 @@ export default function GameView(): JSX.Element {
   const [leaderboardMe, setLeaderboardMe] = useState<LeaderboardMeEntry | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
-  const [multiplayerOpen, setMultiplayerOpen] = useState(false);
-  const [multiplayerTab, setMultiplayerTab] = useState<MultiplayerTab>('rooms');
+  const [multiplayerUiOpen, setMultiplayerUiOpen] = useState(false);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState<string | null>(null);
-  const [joinCodeDraft, setJoinCodeDraft] = useState('');
   const [joiningRoomCode, setJoiningRoomCode] = useState<string | null>(null);
+  const [deepLinkJoinCode, setDeepLinkJoinCode] = useState<string | null>(null);
   const [myRooms, setMyRooms] = useState<MyRoomEntry[]>([]);
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
@@ -270,7 +269,6 @@ export default function GameView(): JSX.Element {
   const [startingRoom, setStartingRoom] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [friendsError, setFriendsError] = useState<string | null>(null);
-  const [friendTargetDraft, setFriendTargetDraft] = useState('');
   const [friendsList, setFriendsList] = useState<FriendEntry[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<IncomingFriendRequest[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<OutgoingFriendRequest[]>([]);
@@ -313,8 +311,7 @@ export default function GameView(): JSX.Element {
 
   const myRoomMember = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
   const waitingForOtherPlayer = Boolean(
-    multiplayerOpen
-    && multiplayerTab === 'rooms'
+    multiplayerUiOpen
     && currentRoom
     && ((myRoomMember?.ready ?? false) || startingRoom)
     && (currentRoom.phase ?? 'LOBBY') !== 'STARTED',
@@ -1107,8 +1104,6 @@ export default function GameView(): JSX.Element {
 
       setCurrentRoom(result.room);
       setCurrentRoomMembers(result.members);
-      setJoinCodeDraft(roomCode);
-
       const rooms = await fetchMyRooms();
       setMyRooms(rooms);
     } finally {
@@ -1254,8 +1249,8 @@ export default function GameView(): JSX.Element {
     }
   }, []);
 
-  const onSendFriendRequest = useCallback(async (): Promise<void> => {
-    const toTgUserId = friendTargetDraft.trim();
+  const onSendFriendRequest = useCallback(async (toTgUserIdRaw: string): Promise<void> => {
+    const toTgUserId = toTgUserIdRaw.trim();
     if (!toTgUserId) return;
 
     setFriendsError(null);
@@ -1268,10 +1263,8 @@ export default function GameView(): JSX.Element {
       setFriendsError(result.error ?? 'Request failed');
       return;
     }
-
-    setFriendTargetDraft('');
     await loadFriends();
-  }, [friendTargetDraft, loadFriends]);
+  }, [loadFriends]);
 
   const onRespondFriendRequest = useCallback(async (fromTgUserId: string, action: 'accept' | 'decline'): Promise<void> => {
     setFriendsError(null);
@@ -1288,7 +1281,7 @@ export default function GameView(): JSX.Element {
     await loadFriends();
   }, [loadFriends]);
 
-  const onInviteFriend = useCallback(async (): Promise<void> => {
+  const onInviteFriend = useCallback(async (_tgUserId: string): Promise<void> => {
     let roomCode = currentRoom?.roomCode;
     if (!roomCode) {
       const created = await createRoom(2);
@@ -1350,17 +1343,13 @@ export default function GameView(): JSX.Element {
   }, [activeLeaderboardMode, currentRoomMembers, isMultiplayerMode, lifeState.gameOver, localTgUserId, loadLeaderboard, stats.score]);
 
   useEffect(() => {
-    if (!multiplayerOpen) return;
-    if (multiplayerTab === 'rooms') {
-      void loadRooms();
-      return;
-    }
+    if (!multiplayerUiOpen) return;
+    void loadRooms();
     void loadFriends();
-  }, [loadFriends, loadRooms, multiplayerOpen, multiplayerTab]);
+  }, [loadFriends, loadRooms, multiplayerUiOpen]);
 
   useEffect(() => {
-    if (!multiplayerOpen) return;
-    if (multiplayerTab !== 'rooms') return;
+    if (!multiplayerUiOpen) return;
     if (!currentRoom?.roomCode) return;
 
     const id = window.setInterval(() => {
@@ -1370,7 +1359,7 @@ export default function GameView(): JSX.Element {
     return () => {
       window.clearInterval(id);
     };
-  }, [currentRoom?.roomCode, loadRooms, multiplayerOpen, multiplayerTab]);
+  }, [currentRoom?.roomCode, loadRooms, multiplayerUiOpen]);
 
   useEffect(() => {
     if (!token) return;
@@ -1381,15 +1370,9 @@ export default function GameView(): JSX.Element {
       const deepLinkRoomCode = startParam.replace('room_', '').trim().toUpperCase();
       if (!deepLinkRoomCode) return;
 
-      setMultiplayerOpen(true);
-      setMultiplayerTab('rooms');
-      setJoinCodeDraft(deepLinkRoomCode);
-      const timer = window.setTimeout(() => {
-        void joinRoomByCode(deepLinkRoomCode);
-      }, 300);
-      return () => {
-        window.clearTimeout(timer);
-      };
+      setDeepLinkJoinCode(deepLinkRoomCode);
+      setMultiplayerUiOpen(true);
+      return undefined;
     }
 
     const search = new URLSearchParams(window.location.search);
@@ -1399,16 +1382,10 @@ export default function GameView(): JSX.Element {
     const deepLinkRoomCode = startappRaw.slice(5).trim().toUpperCase();
     if (!deepLinkRoomCode) return;
 
-    setMultiplayerOpen(true);
-    setMultiplayerTab('rooms');
-    setJoinCodeDraft(deepLinkRoomCode);
-    const timer = window.setTimeout(() => {
-      void joinRoomByCode(deepLinkRoomCode);
-    }, 300);
+    setDeepLinkJoinCode(deepLinkRoomCode);
+    setMultiplayerUiOpen(true);
 
-    return () => {
-      window.clearTimeout(timer);
-    };
+    return undefined;
   }, [joinRoomByCode, token]);
 
   const onBuy = async (sku: string): Promise<void> => {
@@ -1944,7 +1921,7 @@ export default function GameView(): JSX.Element {
                 </button>
               </div>
               <div className="nav-secondary">
-                <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>
+                <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerUiOpen(true)}>
                   <span className="nav-btn__plate" aria-hidden="true">
                     <span className="nav-btn__icon" aria-hidden="true">👥</span>
                   </span>
@@ -2157,171 +2134,39 @@ export default function GameView(): JSX.Element {
           </RROverlayModal>
       )}
 
-      {multiplayerOpen && (
-        <RROverlayModal
-          title="Multiplayer"
-          tabs={([
-            { key: 'rooms', label: 'Rooms' },
-            { key: 'friends', label: 'Friends' },
-          ] as const)}
-          activeTab={multiplayerTab}
-          onTabChange={(tab) => setMultiplayerTab(tab as MultiplayerTab)}
-          onClose={() => setMultiplayerOpen(false)}
-        >
-              {multiplayerTab === 'rooms' ? (
-                <>
-              <div className="room-create-row">
-                <span>Create room</span>
-                <div className="room-create-actions">
-                  <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(2); }}>2p</button>
-                  <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(3); }}>3p</button>
-                  <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(4); }}>4p</button>
-                </div>
-              </div>
-
-              <div className="room-join-row">
-                <input
-                  type="text"
-                  value={joinCodeDraft}
-                  onChange={(event) => setJoinCodeDraft(event.target.value.toUpperCase())}
-                  placeholder="Room code"
-                />
-                <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void joinRoomByCode(joinCodeDraft); }}>{joiningRoomCode ? 'Joining...' : 'Join'}</button>
-              </div>
-
-              {roomsError ? <div>{roomsError}</div> : null}
-              {roomsLoading ? <div>Loading rooms...</div> : null}
-              {joiningRoomCode ? <div>Joining {joiningRoomCode}...</div> : null}
-
-              <div className="room-section">
-                <strong>My rooms</strong>
-                {myRooms.length === 0 ? (
-                  <div>No joined rooms yet.</div>
-                ) : (
-                  myRooms.map((room) => (
-                    <button
-                      key={room.roomCode}
-                      type="button"
-                      className="room-list-item"
-                      disabled={Boolean(joiningRoomCode)}
-                      onClick={() => { void joinRoomByCode(room.roomCode); }}
-                    >
-                      <span>{room.roomCode}</span>
-                      <span>{room.memberCount}/{room.capacity}</span>
-                      <span>{room.status}</span>
-                    </button>
-                  ))
-                )}
-              </div>
-
-              <div className="room-section">
-                <strong>Current room</strong>
-                {!currentRoom ? (
-                  <div>Not in a room.</div>
-                ) : (
-                  <>
-                    <div className="settings-kv"><span>Code</span><strong>{currentRoom.roomCode}</strong></div>
-                    <div className="settings-kv"><span>Status</span><strong>{currentRoom.status}</strong></div>
-                    <div className="settings-kv"><span>Phase</span><strong>{currentRoom.phase ?? 'LOBBY'}</strong></div>
-                    <div className="room-create-actions">
-                      <button type="button" onClick={() => { void onCopyInviteLink(); }}>Copy invite link</button>
-                      {currentRoom.ownerTgUserId && currentRoom.ownerTgUserId === localTgUserId ? (
-                        <button type="button" onClick={() => { void onCloseRoom(); }}>Close room</button>
-                      ) : (
-                        <button type="button" onClick={() => { void onLeaveRoom(); }}>Leave</button>
-                      )}
-                    </div>
-                    <div className="room-create-actions">
-                      <button type="button" disabled={settingReady} onClick={() => { void onToggleReady(); }}>
-                        {settingReady ? 'Saving...' : ((currentRoomMembers.find((m) => m.tgUserId === localTgUserId)?.ready ?? false) ? 'Ready ✓' : 'Set Ready')}
-                      </button>
-                      {currentRoom.ownerTgUserId && currentRoom.ownerTgUserId === localTgUserId ? (
-                        <button
-                          type="button"
-                          disabled={startingRoom || currentRoomMembers.length < 2 || currentRoomMembers.some((member) => !(member.ready ?? false)) || (currentRoom.phase ?? 'LOBBY') === 'STARTED'}
-                          onClick={() => { void onStartRoom(); }}
-                        >
-                          {startingRoom ? 'Starting...' : 'Start'}
-                        </button>
-                      ) : null}
-                    </div>
-                    <div className="room-members-list">
-                      {currentRoomMembers.map((member) => (
-                        <div key={member.tgUserId} className="settings-kv">
-                          <span>{member.displayName}</span>
-                          <strong>{member.ready ?? false ? 'Ready' : 'Not ready'}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-                </>
-              ) : (
-                <>
-                  <div className="room-join-row">
-                    <input
-                      type="text"
-                      value={friendTargetDraft}
-                      onChange={(event) => setFriendTargetDraft(event.target.value)}
-                      placeholder="tg_user_id"
-                    />
-                    <button type="button" onClick={() => { void onSendFriendRequest(); }}>Send request</button>
-                  </div>
-
-                  {friendsError ? <div>{friendsError}</div> : null}
-                  {friendsLoading ? <div>Loading friends...</div> : null}
-
-                  <div className="room-section">
-                    <strong>Incoming</strong>
-                    {incomingRequests.length === 0 ? (
-                      <div>No incoming requests.</div>
-                    ) : (
-                      incomingRequests.map((request) => (
-                        <div key={request.fromTgUserId} className="friend-list-item">
-                          <span>{request.displayName}</span>
-                          <strong>{request.fromTgUserId}</strong>
-                          <div className="friend-actions">
-                            <button type="button" onClick={() => { void onRespondFriendRequest(request.fromTgUserId, 'accept'); }}>Accept</button>
-                            <button type="button" onClick={() => { void onRespondFriendRequest(request.fromTgUserId, 'decline'); }}>Decline</button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  <div className="room-section">
-                    <strong>Outgoing</strong>
-                    {outgoingRequests.length === 0 ? (
-                      <div>No outgoing requests.</div>
-                    ) : (
-                      outgoingRequests.map((request) => (
-                        <div key={request.toTgUserId} className="settings-kv">
-                          <span>{request.displayName}</span>
-                          <strong>{request.status}</strong>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  <div className="room-section">
-                    <strong>Friends</strong>
-                    {friendsList.length === 0 ? (
-                      <div>No friends yet.</div>
-                    ) : (
-                      friendsList.map((friend) => (
-                        <div key={friend.tgUserId} className="friend-list-item">
-                          <span>{friend.displayName}</span>
-                          <strong>{friend.tgUserId}</strong>
-                          <button type="button" onClick={() => { void onInviteFriend(); }}>Invite</button>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
-        </RROverlayModal>
-      )}
+      <MultiplayerModal
+        open={multiplayerUiOpen}
+        onClose={() => setMultiplayerUiOpen(false)}
+        initialTab={deepLinkJoinCode ? 'room' : undefined}
+        initialRoomTab={deepLinkJoinCode ? 'join' : undefined}
+        initialJoinCode={deepLinkJoinCode ?? undefined}
+        autoJoin={Boolean(deepLinkJoinCode)}
+        roomsLoading={roomsLoading}
+        roomsError={roomsError}
+        myRooms={myRooms}
+        currentRoom={currentRoom}
+        currentRoomMembers={currentRoomMembers}
+        joiningRoomCode={joiningRoomCode}
+        settingReady={settingReady}
+        startingRoom={startingRoom}
+        onCreateRoom={onCreateRoom}
+        onJoinRoomByCode={joinRoomByCode}
+        onLeaveRoom={onLeaveRoom}
+        onCloseRoom={onCloseRoom}
+        onStartRoom={onStartRoom}
+        onToggleReady={onToggleReady}
+        onCopyInviteLink={onCopyInviteLink}
+        friendsLoading={friendsLoading}
+        friendsError={friendsError}
+        friendsList={friendsList}
+        incomingRequests={incomingRequests}
+        outgoingRequests={outgoingRequests}
+        onSendFriendRequest={onSendFriendRequest}
+        onRespondFriendRequest={onRespondFriendRequest}
+        onInviteFriend={onInviteFriend}
+        localTgUserId={localTgUserId}
+        onConsumeInitialJoinCode={() => setDeepLinkJoinCode(null)}
+      />
 
       {settingsOpen && (
         <RROverlayModal
