@@ -1,37 +1,116 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  FriendEntry,
+  IncomingFriendRequest,
+  MyRoomEntry,
+  OutgoingFriendRequest,
+  RoomMember,
+  RoomState,
+} from '../game/wallet';
+
+type MainTab = 'friends' | 'find' | 'room' | 'browse' | 'referral';
+type RoomTab = 'create' | 'join';
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  hostDisplayName?: string | null;
-  gameNickname?: string | null;
-  account?: {
-    gameNickname?: string | null;
-  } | null;
-  tgUsername?: string | null;
+  initialTab?: 'room' | 'friends';
+  initialRoomTab?: 'create' | 'join';
+  initialJoinCode?: string;
+  autoJoin?: boolean;
+  roomsLoading: boolean;
+  roomsError: string | null;
+  myRooms: MyRoomEntry[];
+  currentRoom: RoomState | null;
+  currentRoomMembers: RoomMember[];
+  joiningRoomCode: string | null;
+  settingReady: boolean;
+  startingRoom: boolean;
+  onCreateRoom: (capacity: 2 | 3 | 4) => Promise<void>;
+  onJoinRoomByCode: (code: string) => Promise<void>;
+  onLeaveRoom: () => Promise<void>;
+  onCloseRoom: () => Promise<void>;
+  onStartRoom: () => Promise<void>;
+  onToggleReady: () => Promise<void>;
+  onCopyInviteLink: () => Promise<void>;
+  friendsLoading: boolean;
+  friendsError: string | null;
+  friendsList: FriendEntry[];
+  incomingRequests: IncomingFriendRequest[];
+  outgoingRequests: OutgoingFriendRequest[];
+  onSendFriendRequest: (tgUserId: string) => Promise<void>;
+  onRespondFriendRequest: (fromTgUserId: string, action: 'accept' | 'decline') => Promise<void>;
+  onInviteFriend: (tgUserId: string) => Promise<void>;
+  localTgUserId?: string;
+  onConsumeInitialJoinCode?: () => void;
 };
-
-type MainTab = 'friends' | 'find' | 'room' | 'browse' | 'referral';
-
-type FriendConfirmed = {
-  id: string;
-  name: string;
-  status: 'online' | 'offline';
-};
-
-type FriendRequest = {
-  id: string;
-  name: string;
-};
-
-const emptyConfirmedFriends: FriendConfirmed[] = [];
-const emptyIncomingRequests: FriendRequest[] = [];
 
 export function MultiplayerModal({
   open,
   onClose,
+  initialTab,
+  initialRoomTab,
+  initialJoinCode,
+  autoJoin,
+  roomsLoading,
+  roomsError,
+  myRooms,
+  currentRoom,
+  currentRoomMembers,
+  joiningRoomCode,
+  settingReady,
+  startingRoom,
+  onCreateRoom,
+  onJoinRoomByCode,
+  onLeaveRoom,
+  onCloseRoom,
+  onStartRoom,
+  onToggleReady,
+  onCopyInviteLink,
+  friendsLoading,
+  friendsError,
+  friendsList,
+  incomingRequests,
+  outgoingRequests,
+  onSendFriendRequest,
+  onRespondFriendRequest,
+  onInviteFriend,
+  localTgUserId,
+  onConsumeInitialJoinCode,
 }: Props): JSX.Element | null {
-  const [tab, setTab] = useState<MainTab>('friends');
+  const [tab, setTab] = useState<MainTab>(initialTab ?? 'room');
+  const [roomTab, setRoomTab] = useState<RoomTab>(initialRoomTab ?? 'join');
+  const [joinCodeDraft, setJoinCodeDraft] = useState(initialJoinCode ?? '');
+  const [friendTargetDraft, setFriendTargetDraft] = useState('');
+  const autoJoinRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    if (initialTab) setTab(initialTab);
+    if (initialRoomTab) setRoomTab(initialRoomTab);
+    if (initialJoinCode) setJoinCodeDraft(initialJoinCode);
+  }, [initialJoinCode, initialRoomTab, initialTab, open]);
+
+  useEffect(() => {
+    if (!open || !autoJoin || !initialJoinCode) return;
+    if (autoJoinRef.current === initialJoinCode) return;
+    if (joiningRoomCode === initialJoinCode) return;
+    if (currentRoom?.roomCode === initialJoinCode) {
+      autoJoinRef.current = initialJoinCode;
+      onConsumeInitialJoinCode?.();
+      return;
+    }
+
+    autoJoinRef.current = initialJoinCode;
+    void onJoinRoomByCode(initialJoinCode).finally(() => {
+      onConsumeInitialJoinCode?.();
+    });
+  }, [autoJoin, currentRoom?.roomCode, initialJoinCode, joiningRoomCode, onConsumeInitialJoinCode, onJoinRoomByCode, open]);
+
+  const meReady = useMemo(
+    () => currentRoomMembers.find((member) => member.tgUserId === localTgUserId)?.ready ?? false,
+    [currentRoomMembers, localTgUserId],
+  );
 
   if (!open) return null;
 
@@ -55,49 +134,171 @@ export function MultiplayerModal({
           {tab === 'friends' ? (
             <>
               <section className="rr-mp-section">
-                <h4>Confirmed Friends</h4>
-                {emptyConfirmedFriends.length === 0 ? <p className="rr-mp-empty">No friends yet</p> : null}
+                <h4>Find friend by tg_user_id</h4>
+                <div className="rr-mp-row">
+                  <input
+                    type="text"
+                    value={friendTargetDraft}
+                    onChange={(event) => setFriendTargetDraft(event.target.value)}
+                    placeholder="tg_user_id"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void onSendFriendRequest(friendTargetDraft);
+                      setFriendTargetDraft('');
+                    }}
+                  >
+                    Send
+                  </button>
+                </div>
+              </section>
+
+              {friendsError ? <p className="rr-mp-error">{friendsError}</p> : null}
+              {friendsLoading ? <p className="rr-mp-empty">Loading friends...</p> : null}
+
+              <section className="rr-mp-section">
+                <h4>Incoming requests</h4>
+                {incomingRequests.length === 0 ? <p className="rr-mp-empty">No incoming requests.</p> : null}
+                {incomingRequests.map((request) => (
+                  <div key={request.fromTgUserId} className="rr-mp-card">
+                    <span className="rr-mp-avatar">👤</span>
+                    <span>{request.displayName}</span>
+                    <button type="button" onClick={() => { void onRespondFriendRequest(request.fromTgUserId, 'accept'); }}>Accept</button>
+                    <button type="button" className="ghost" onClick={() => { void onRespondFriendRequest(request.fromTgUserId, 'decline'); }}>Decline</button>
+                  </div>
+                ))}
               </section>
 
               <section className="rr-mp-section">
-                <h4>Incoming Requests</h4>
-                {emptyIncomingRequests.length === 0 ? <p className="rr-mp-empty">No incoming requests</p> : null}
+                <h4>Outgoing requests</h4>
+                {outgoingRequests.length === 0 ? <p className="rr-mp-empty">No outgoing requests.</p> : null}
+                {outgoingRequests.map((request) => (
+                  <div key={request.toTgUserId} className="rr-mp-card">
+                    <span className="rr-mp-avatar">⏳</span>
+                    <span>{request.displayName}</span>
+                    <span className="rr-mp-chip pending">{request.status}</span>
+                  </div>
+                ))}
               </section>
 
               <section className="rr-mp-section">
-                <h4>Outgoing Requests</h4>
-                <p className="rr-mp-empty">Coming soon</p>
+                <h4>Friends</h4>
+                {friendsList.length === 0 ? <p className="rr-mp-empty">No friends yet.</p> : null}
+                {friendsList.map((friend) => (
+                  <div key={friend.tgUserId} className="rr-mp-card">
+                    <span className="rr-mp-avatar">👥</span>
+                    <span>{friend.displayName}</span>
+                    <span className="rr-mp-chip">friend</span>
+                    <button type="button" onClick={() => { void onInviteFriend(friend.tgUserId); }}>Invite</button>
+                  </div>
+                ))}
               </section>
             </>
           ) : null}
 
-          {tab === 'find' ? (
-            <section className="rr-mp-section">
-              <h4>Find friends</h4>
-              <p className="rr-mp-empty">Coming soon</p>
-            </section>
-          ) : null}
-
           {tab === 'room' ? (
-            <section className="rr-mp-section rr-room-section">
-              <h4>Room</h4>
-              <p className="rr-mp-empty">Coming soon</p>
-            </section>
+            <>
+              <div className="rr-room-subtabs">
+                <button type="button" className={roomTab === 'create' ? 'active' : ''} onClick={() => setRoomTab('create')}>Create</button>
+                <button type="button" className={roomTab === 'join' ? 'active' : ''} onClick={() => setRoomTab('join')}>Join</button>
+              </div>
+
+              {roomTab === 'create' ? (
+                <section className="rr-mp-section rr-room-section">
+                  <h4>Create room</h4>
+                  <div className="rr-arena-grid">
+                    <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(2); }}>2 players</button>
+                    <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(3); }}>3 players</button>
+                    <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(4); }}>4 players</button>
+                  </div>
+                </section>
+              ) : null}
+
+              {roomTab === 'join' ? (
+                <section className="rr-mp-section rr-room-section">
+                  <h4>Join room</h4>
+                  <div className="rr-mp-row">
+                    <input
+                      type="text"
+                      value={joinCodeDraft}
+                      onChange={(event) => setJoinCodeDraft(event.target.value.toUpperCase())}
+                      placeholder="Room code"
+                    />
+                    <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onJoinRoomByCode(joinCodeDraft); }}>
+                      {joiningRoomCode ? 'Joining...' : 'Join'}
+                    </button>
+                  </div>
+
+                  {roomsError ? <p className="rr-mp-error">{roomsError}</p> : null}
+                  {roomsLoading ? <p className="rr-mp-empty">Loading rooms...</p> : null}
+                  {joiningRoomCode ? <p className="rr-mp-empty">Joining {joiningRoomCode}...</p> : null}
+
+                  <section className="rr-mp-section">
+                    <h4>My rooms</h4>
+                    {myRooms.length === 0 ? <p className="rr-mp-empty">No joined rooms yet.</p> : null}
+                    {myRooms.map((room) => (
+                      <button
+                        key={room.roomCode}
+                        type="button"
+                        className="rr-mp-row"
+                        disabled={Boolean(joiningRoomCode)}
+                        onClick={() => { void onJoinRoomByCode(room.roomCode); }}
+                      >
+                        <span>{room.roomCode}</span>
+                        <span>{room.memberCount}/{room.capacity} · {room.status}</span>
+                      </button>
+                    ))}
+                  </section>
+
+                  <section className="rr-mp-section">
+                    <h4>Current room</h4>
+                    {!currentRoom ? (
+                      <p className="rr-mp-empty">Not in a room.</p>
+                    ) : (
+                      <>
+                        <div className="settings-kv"><span>Code</span><strong>{currentRoom.roomCode}</strong></div>
+                        <div className="settings-kv"><span>Status</span><strong>{currentRoom.status}</strong></div>
+                        <div className="settings-kv"><span>Phase</span><strong>{currentRoom.phase ?? 'LOBBY'}</strong></div>
+                        <div className="rr-mp-inline-actions">
+                          <button type="button" onClick={() => { void onCopyInviteLink(); }}>Copy invite</button>
+                          {currentRoom.ownerTgUserId === localTgUserId ? (
+                            <button type="button" className="ghost" onClick={() => { void onCloseRoom(); }}>Close room</button>
+                          ) : (
+                            <button type="button" className="ghost" onClick={() => { void onLeaveRoom(); }}>Leave</button>
+                          )}
+                        </div>
+                        <div className="rr-mp-inline-actions">
+                          <button type="button" disabled={settingReady} onClick={() => { void onToggleReady(); }}>
+                            {settingReady ? 'Saving...' : (meReady ? 'Ready ✓' : 'Set Ready')}
+                          </button>
+                          {currentRoom.ownerTgUserId === localTgUserId ? (
+                            <button
+                              type="button"
+                              disabled={startingRoom || currentRoomMembers.length < 2 || currentRoomMembers.some((member) => !(member.ready ?? false)) || (currentRoom.phase ?? 'LOBBY') === 'STARTED'}
+                              onClick={() => { void onStartRoom(); }}
+                            >
+                              {startingRoom ? 'Starting...' : 'Start'}
+                            </button>
+                          ) : null}
+                        </div>
+                        {currentRoomMembers.map((member) => (
+                          <div key={member.tgUserId} className="settings-kv">
+                            <span>{member.displayName}</span>
+                            <strong>{member.ready ? 'Ready' : 'Not ready'}</strong>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </section>
+                </section>
+              ) : null}
+            </>
           ) : null}
 
-          {tab === 'browse' ? (
-            <section className="rr-mp-section">
-              <h4>Browse rooms</h4>
-              <p className="rr-mp-empty">Coming soon</p>
-            </section>
-          ) : null}
-
-          {tab === 'referral' ? (
-            <section className="rr-mp-section">
-              <h4>Referral</h4>
-              <p className="rr-mp-empty">Coming soon</p>
-            </section>
-          ) : null}
+          {tab === 'find' ? <section className="rr-mp-section"><h4>Find</h4><p className="rr-mp-empty">Coming soon</p></section> : null}
+          {tab === 'browse' ? <section className="rr-mp-section"><h4>Browse</h4><p className="rr-mp-empty">Coming soon</p></section> : null}
+          {tab === 'referral' ? <section className="rr-mp-section"><h4>Referral</h4><p className="rr-mp-empty">Coming soon</p></section> : null}
         </div>
       </div>
     </div>
