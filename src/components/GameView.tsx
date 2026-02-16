@@ -63,7 +63,6 @@ import { WsDebugOverlay } from './WsDebugOverlay';
 import { useWsClient } from '../ws/useWsClient';
 import { resolveDevIdentity } from '../utils/devIdentity';
 import { apiUrl } from '../utils/apiBase';
-import { MultiplayerModal } from './MultiplayerModal';
 import { RROverlayModal } from './RROverlayModal';
 
 
@@ -259,7 +258,6 @@ export default function GameView(): JSX.Element {
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const [multiplayerOpen, setMultiplayerOpen] = useState(false);
-  const [multiplayerUiOpen, setMultiplayerUiOpen] = useState(false);
   const [multiplayerTab, setMultiplayerTab] = useState<MultiplayerTab>('rooms');
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState<string | null>(null);
@@ -314,18 +312,6 @@ export default function GameView(): JSX.Element {
   const currentTutorialStep = tutorialSteps[tutorialStepIndex] ?? null;
 
   const myRoomMember = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
-  const multiplayerHostDisplayName = useMemo(() => {
-    const normalizedDisplayName = (accountInfo?.displayName ?? profileName ?? '').trim();
-    if (normalizedDisplayName) return normalizedDisplayName;
-    return null;
-  }, [accountInfo?.displayName, profileName]);
-  const telegramUsername = useMemo(() => {
-    const username = (window as Window & { Telegram?: { WebApp?: { initDataUnsafe?: { user?: { username?: string } } } } })
-      .Telegram?.WebApp?.initDataUnsafe?.user?.username;
-    if (!username) return null;
-    const normalized = String(username).trim();
-    return normalized.length > 0 ? normalized : null;
-  }, []);
   const waitingForOtherPlayer = Boolean(
     multiplayerOpen
     && multiplayerTab === 'rooms'
@@ -1958,7 +1944,7 @@ export default function GameView(): JSX.Element {
                 </button>
               </div>
               <div className="nav-secondary">
-                <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerUiOpen(true)}>
+                <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerOpen(true)}>
                   <span className="nav-btn__plate" aria-hidden="true">
                     <span className="nav-btn__icon" aria-hidden="true">👥</span>
                   </span>
@@ -2340,15 +2326,6 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-
-      <MultiplayerModal
-        open={multiplayerUiOpen}
-        onClose={() => setMultiplayerUiOpen(false)}
-        hostDisplayName={multiplayerHostDisplayName}
-        gameNickname={accountInfo?.gameNickname ?? null}
-        account={accountInfo ? { gameNickname: accountInfo.gameNickname } : null}
-        tgUsername={telegramUsername}
-      />
 
       {settingsOpen && (
         <RROverlayModal
