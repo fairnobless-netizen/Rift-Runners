@@ -123,19 +123,32 @@ export async function isNicknameAvailable(nickname: string): Promise<boolean> {
 
 export async function setNickname(tgUserId: string, nickname: string): Promise<{ gameNickname: string; gameUserId: string }> {
   const normalized = normalizeNickname(nickname);
-  const gameUserId = await ensureGameUserId(tgUserId);
+  await ensureGameUserId(tgUserId);
 
   try {
-    await pgQuery(
+    const { rows } = await pgQuery<{ game_nickname: string; game_user_id: string | null }>(
       `
       UPDATE users
       SET game_nickname = $2,
           game_nickname_lower = $3,
           updated_at = $4
       WHERE tg_user_id = $1
+      RETURNING game_nickname, game_user_id
       `,
       [tgUserId, normalized.raw, normalized.lower, Date.now()],
     );
+
+    const row = rows[0];
+    if (!row?.game_user_id) {
+      const err = new Error('user_not_found');
+      (err as any).code = 'USER_NOT_FOUND';
+      throw err;
+    }
+
+    return {
+      gameNickname: String(row.game_nickname),
+      gameUserId: String(row.game_user_id),
+    };
   } catch (error: any) {
     if (error?.code === '23505') {
       const err = new Error('nickname_taken');
@@ -144,8 +157,6 @@ export async function setNickname(tgUserId: string, nickname: string): Promise<{
     }
     throw error;
   }
-
-  return { gameNickname: normalized.raw, gameUserId };
 }
 
 export async function ensureWallet(tgUserId: string): Promise<{ tgUserId: string; stars: number; crystals: number; plasma: number }> {

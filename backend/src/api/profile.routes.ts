@@ -111,6 +111,7 @@ profileRouter.post('/profile/nickname', async (req, res) => {
   } catch (error: any) {
     if (error?.code === 'INVALID_NICKNAME') return res.status(400).json({ ok: false, error: 'invalid_nickname' });
     if (error?.code === 'NICK_TAKEN') return res.status(409).json({ ok: false, error: 'nickname_taken' });
+    if (error?.code === 'USER_NOT_FOUND') return res.status(404).json({ ok: false, error: 'user_not_found' });
     return res.status(500).json({ ok: false, error: 'internal_error' });
   }
 });
