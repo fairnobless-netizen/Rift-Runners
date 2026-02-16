@@ -112,27 +112,6 @@ type NicknameCheckState =
   | 'server_error';
 
 const DEBUG_NICK = false;
-const PROFILE_BASE_CANDIDATES = ['/api/profile', '/api/profile/profile'] as const;
-
-async function fetchProfileWithFallback(path: string, init?: RequestInit): Promise<Response> {
-  let last404Response: Response | null = null;
-
-  for (const base of PROFILE_BASE_CANDIDATES) {
-    const endpoint = apiUrl(`${base}${path}`);
-    const response = await fetch(endpoint, init);
-    if (DEBUG_NICK) {
-      console.warn('[nickname-debug] endpoint attempt', { endpoint, status: response.status });
-    }
-    if (response.status === 404) {
-      last404Response = response;
-      continue;
-    }
-    return response;
-  }
-
-  if (last404Response) return last404Response;
-  throw new Error('Profile endpoint not reachable');
-}
 
 type TutorialStep = {
   id: string;
@@ -1609,9 +1588,9 @@ export default function GameView(): JSX.Element {
     setNicknameSubmitting(true);
 
     try {
-      const endpointPath = '/nickname';
+      const endpoint = apiUrl('/api/profile/nickname');
       const payload = { nickname };
-      const response = await fetchProfileWithFallback(endpointPath, {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -1628,7 +1607,7 @@ export default function GameView(): JSX.Element {
       }
       if (!response.ok || !json?.ok) {
         if (!response.ok) {
-          debugNicknameFailure({ endpoint: endpointPath, method: 'POST', payload, response, responseBody: json });
+          debugNicknameFailure({ endpoint, method: 'POST', payload, response, responseBody: json });
         }
         if (response.status === 409 || json?.available === false) {
           setNicknameCheckState('taken');
@@ -1640,7 +1619,7 @@ export default function GameView(): JSX.Element {
           setNicknameSubmitError('Invalid nickname format');
           return;
         }
-        debugNicknameFailure({ endpoint: endpointPath, method: 'POST', payload, response, responseBody: json });
+        debugNicknameFailure({ endpoint, method: 'POST', payload, response, responseBody: json });
         setNicknameCheckState('server_error');
         setNicknameSubmitError('Server error. Please try again.');
         return;
@@ -1660,7 +1639,7 @@ export default function GameView(): JSX.Element {
 
       setRegistrationOpen(false);
     } catch (error) {
-      debugNicknameFailure({ endpoint: '/nickname', method: 'POST', payload: { nickname }, error });
+      debugNicknameFailure({ endpoint: '/api/profile/nickname', method: 'POST', payload: { nickname }, error });
       setNicknameCheckState('server_error');
       setNicknameSubmitError('Server error. Please try again.');
     } finally {
