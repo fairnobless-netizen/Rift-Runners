@@ -28,15 +28,23 @@ function parseInitData(initData: string): Map<string, string> {
   return map;
 }
 
-/**
- * Telegram Mini Apps initData verification:
- * - secretKey = HMAC-SHA256(botToken, "WebAppData")? (legacy confusion) — for Mini Apps it's:
- *   secretKey = SHA256(botToken)
- * - data_check_string = sorted key=value lines excluding `hash`
- * - hash = HMAC-SHA256(data_check_string, secretKey) hex
- *
- * TODO backend: consider nonce/idempotency cache in addition to auth_date freshness
- */
+function safeEqualHex(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a, 'hex');
+  const bBuf = Buffer.from(b, 'hex');
+  if (aBuf.length === 0 || bBuf.length === 0 || aBuf.length !== bBuf.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+function logVerifyDiagnostic(map: Map<string, string>, dataCheckStringLength: number): void {
+  const keys = Array.from(map.keys()).sort();
+  console.warn('[telegram-auth] initData verification failed', {
+    keys,
+    dataCheckStringLength,
+  });
+}
+
 export function verifyTelegramInitData(
   initData: string,
   botToken: string,
@@ -81,13 +89,14 @@ export function verifyTelegramInitData(
   pairs.sort();
   const dataCheckString = pairs.join('\n');
 
-  const secretKey = crypto.createHash('sha256').update(botToken).digest();
+  const secretKey = crypto.createHmac('sha256', botToken).update('WebAppData').digest();
   const hmacHex = crypto
     .createHmac('sha256', secretKey)
     .update(dataCheckString)
     .digest('hex');
 
-  if (hmacHex !== hash) {
+  if (!safeEqualHex(hmacHex, hash)) {
+    logVerifyDiagnostic(map, dataCheckString.length);
     return {
       ok: false,
       error: 'signature_invalid',
