@@ -1280,6 +1280,57 @@ html[data-orient="landscape"] .right-panel {
   border-radius: 12px;
 }
 
+
+.rr-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.rr-overlay-tabs {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.rr-overlay-tab,
+.rr-overlay-close {
+  border: 1px solid #334b86;
+  background: rgba(11, 22, 49, 0.8);
+  color: #dbe7ff;
+  border-radius: 10px;
+}
+
+.rr-overlay-tab {
+  padding: 0.38rem 0.52rem;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+}
+
+.rr-overlay-tab.active {
+  border-color: #77a7ff;
+  box-shadow: 0 0 16px rgba(75, 134, 255, 0.45), inset 0 0 16px rgba(75, 134, 255, 0.2);
+  color: #ffffff;
+}
+
+.rr-overlay-close {
+  padding: 0.38rem 0.62rem;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+}
+
+.rr-overlay-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.rr-panel {
+  padding: 0.12rem 0;
+}
 .rr-mp-overlay {
   z-index: 52;
 

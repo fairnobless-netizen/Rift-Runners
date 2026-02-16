@@ -64,6 +64,7 @@ import { useWsClient } from '../ws/useWsClient';
 import { resolveDevIdentity } from '../utils/devIdentity';
 import { apiUrl } from '../utils/apiBase';
 import { MultiplayerModal } from './MultiplayerModal';
+import { RROverlayModal } from './RROverlayModal';
 
 
 const defaultStats: PlayerStats = {
@@ -2079,25 +2080,18 @@ export default function GameView(): JSX.Element {
 
 
       {leaderboardOpen && (
-        <div className="settings-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Leaderboard">
-          <div className="settings-modal rr-overlay-modal">
-            <div className="settings-header">
-              <strong>Leaderboard</strong>
-              <button type="button" onClick={() => setLeaderboardOpen(false)}>Close</button>
-            </div>
-            <div className="settings-tabs">
-              {(['solo', 'duo', 'trio', 'squad'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={leaderboardMode === mode ? 'active' : ''}
-                  onClick={() => setLeaderboardMode(mode)}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
-            <div className="settings-panel">
+        <RROverlayModal
+          title="Leaderboard"
+          tabs={([
+            { key: 'solo', label: 'Solo' },
+            { key: 'duo', label: 'Duo' },
+            { key: 'trio', label: 'Trio' },
+            { key: 'squad', label: 'Squad' },
+          ] as const)}
+          activeTab={leaderboardMode}
+          onTabChange={(mode) => setLeaderboardMode(mode as LeaderboardMode)}
+          onClose={() => setLeaderboardOpen(false)}
+        >
               {leaderboardLoading ? (
                 <div>Loading leaderboard...</div>
               ) : leaderboardError ? (
@@ -2123,24 +2117,21 @@ export default function GameView(): JSX.Element {
               ) : (
                 <div>No personal record yet.</div>
               )}
-            </div>
-          </div>
-        </div>
+          </RROverlayModal>
       )}
 
       {isStoreOpen && (
-        <div className="settings-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Store">
-          <div className="settings-modal rr-overlay-modal">
-            <div className="settings-header">
-              <strong>Store</strong>
-              <button type="button" onClick={() => setIsStoreOpen(false)}>Close</button>
-            </div>
-            <div className="settings-tabs">
-              <button type="button" className={storeTab === 'boosts' ? 'active' : ''} onClick={() => setStoreTab('boosts')}>Boosts</button>
-              <button type="button" className={storeTab === 'cosmetics' ? 'active' : ''} onClick={() => setStoreTab('cosmetics')}>Cosmetics</button>
-              <button type="button" className={storeTab === 'packs' ? 'active' : ''} onClick={() => setStoreTab('packs')}>Packs</button>
-            </div>
-            <div className="settings-panel">
+        <RROverlayModal
+          title="Store"
+          tabs={([
+            { key: 'boosts', label: 'Boosts' },
+            { key: 'cosmetics', label: 'Cosmetics' },
+            { key: 'packs', label: 'Packs' },
+          ] as const)}
+          activeTab={storeTab}
+          onTabChange={(tab) => setStoreTab(tab as 'boosts' | 'cosmetics' | 'packs')}
+          onClose={() => setIsStoreOpen(false)}
+        >
               {storeLoading ? (
                 <div>Loading store...</div>
               ) : storeError ? (
@@ -2177,9 +2168,7 @@ export default function GameView(): JSX.Element {
                     );
                   })
               )}
-            </div>
-          </div>
-        </div>
+          </RROverlayModal>
       )}
 
       {multiplayerOpen && (
@@ -2362,19 +2351,18 @@ export default function GameView(): JSX.Element {
       />
 
       {settingsOpen && (
-        <div className="settings-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Settings">
-          <div className="settings-modal rr-overlay-modal">
-            <div className="settings-header">
-              <strong>Settings</strong>
-              <button type="button" onClick={() => setSettingsOpen(false)}>Close</button>
-            </div>
-            <div className="settings-tabs">
-              <button type="button" className={settingsTab === 'audio' ? 'active' : ''} onClick={() => setSettingsTab('audio')}>Audio</button>
-              <button type="button" className={settingsTab === 'account' ? 'active' : ''} onClick={() => setSettingsTab('account')}>Account</button>
-            </div>
-
-            {settingsTab === 'audio' ? (
-              <div className="settings-panel">
+        <RROverlayModal
+          title="Settings"
+          tabs={([
+            { key: 'audio', label: 'Audio' },
+            { key: 'account', label: 'Account' },
+          ] as const)}
+          activeTab={settingsTab}
+          onTabChange={(tab) => setSettingsTab(tab as 'audio' | 'account')}
+          onClose={() => setSettingsOpen(false)}
+        >
+          {settingsTab === 'audio' ? (
+            <>
                 <label className="settings-row">
                   <span>Music</span>
                   <input
@@ -2395,9 +2383,9 @@ export default function GameView(): JSX.Element {
                     }}
                   />
                 </label>
-              </div>
-            ) : (
-              <div className="settings-panel">
+            </>
+          ) : (
+            <>
                 <div className="settings-kv"><span>User ID</span><strong>{accountInfo?.gameUserId || accountInfo?.id || '—'}</strong></div>
                 <div className="settings-kv"><span>Telegram</span><strong>{localTgUserId ?? 'Not connected'}</strong></div>
                 <div className="settings-kv"><span>Game nickname</span><strong>{accountInfo?.gameNickname ?? '—'}</strong></div>
@@ -2420,10 +2408,9 @@ export default function GameView(): JSX.Element {
                 >
                   Change nickname
                 </button>
-              </div>
-            )}
-          </div>
-        </div>
+            </>
+          )}
+        </RROverlayModal>
       )}
 
       <WsDebugOverlay
