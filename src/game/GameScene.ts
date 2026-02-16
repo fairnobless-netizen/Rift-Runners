@@ -853,14 +853,19 @@ export class GameScene extends Phaser.Scene {
     for (const node of stale) node.destroy();
 
     const { tileSize } = GAME_CONFIG;
+    const themeId = this.getArenaThemeId();
+
     for (let y = 0; y < this.arena.tiles.length; y += 1) {
       for (let x = 0; x < this.arena.tiles[y].length; x += 1) {
         const tile = this.arena.tiles[y][x];
-        const floorTexture = getDeterministicArenaTileTexture(this, 'Floor', x, y, tileSize, this.arena.width, this.arena.height);
+
+        // Floor is always rendered (even under blocks).
+        const floorTexture = getDeterministicArenaTileTexture(this, 'Floor', x, y, tileSize, this.arena.width, this.arena.height, themeId);
         this.add
           .image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, floorTexture)
           .setOrigin(0.5, 0.5)
-          .setDisplaySize(tileSize - 2, tileSize - 2)
+          // No more "tileSize - 2" gap grid; seams are inside texture.
+          .setDisplaySize(tileSize, tileSize)
           .setDepth(DEPTH_FLOOR)
           .setData('arenaTile', true);
 
@@ -870,7 +875,7 @@ export class GameScene extends Phaser.Scene {
         const block = this.add
           .image(x * tileSize + tileSize / 2, y * tileSize + tileSize / 2, tileTexture)
           .setOrigin(0.5, 0.5)
-          .setDisplaySize(tileSize - 2, tileSize - 2)
+          .setDisplaySize(tileSize, tileSize)
           .setDepth(DEPTH_BREAKABLE)
           .setData('arenaTile', true);
 
@@ -1958,8 +1963,15 @@ export class GameScene extends Phaser.Scene {
     return this.textures.exists(asset.textureKey) ? asset.textureKey : 'fallback-missing';
   }
 
+  private getArenaThemeId(): number {
+    // Theme is a VISUAL concern; must be deterministic within a given level.
+    // zoneIndex already derives from levelIndex (see startLevel()).
+    return Number.isFinite(this.zoneIndex) ? Math.max(0, Math.floor(this.zoneIndex)) : 0;
+  }
+
   private getPolishedTileTexture(tile: TileType, x: number, y: number): string {
-    return getDeterministicArenaTileTexture(this, tile, x, y, GAME_CONFIG.tileSize, this.arena.width, this.arena.height);
+    const themeId = this.getArenaThemeId();
+    return getDeterministicArenaTileTexture(this, tile, x, y, GAME_CONFIG.tileSize, this.arena.width, this.arena.height, themeId);
   }
 
   private getPickupTextureKey(type: 'BombUp' | 'FireUp'): string {
