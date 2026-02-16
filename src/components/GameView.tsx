@@ -2158,18 +2158,16 @@ export default function GameView(): JSX.Element {
       )}
 
       {multiplayerOpen && (
-        <div className="settings-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Multiplayer">
-          <div className="settings-modal rr-overlay-modal">
-            <div className="settings-header">
-              <strong>Multiplayer</strong>
-              <button type="button" onClick={() => setMultiplayerOpen(false)}>Close</button>
-            </div>
-            <div className="settings-tabs">
-              <button type="button" className={multiplayerTab === 'rooms' ? 'active' : ''} onClick={() => setMultiplayerTab('rooms')}>Rooms</button>
-              <button type="button" className={multiplayerTab === 'friends' ? 'active' : ''} onClick={() => setMultiplayerTab('friends')}>Friends</button>
-            </div>
-
-            <div className="settings-panel">
+        <RROverlayModal
+          title="Multiplayer"
+          tabs={([
+            { key: 'rooms', label: 'Rooms' },
+            { key: 'friends', label: 'Friends' },
+          ] as const)}
+          activeTab={multiplayerTab}
+          onTabChange={(tab) => setMultiplayerTab(tab as MultiplayerTab)}
+          onClose={() => setMultiplayerOpen(false)}
+        >
               {multiplayerTab === 'rooms' ? (
                 <>
               <div className="room-create-row">
@@ -2322,9 +2320,7 @@ export default function GameView(): JSX.Element {
                   </div>
                 </>
               )}
-            </div>
-          </div>
-        </div>
+        </RROverlayModal>
       )}
 
       {settingsOpen && (
