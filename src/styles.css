@@ -1653,3 +1653,160 @@ html[data-orient="landscape"] .right-panel {
 .rr-room-list-item {
   grid-template-columns: 1fr auto auto auto;
 }
+
+.rr-room-shell {
+  min-height: 360px;
+}
+
+.rr-room-home {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.rr-room-home button {
+  min-height: 42px;
+}
+
+.rr-room-flow {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.rr-room-flow-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.rr-room-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.rr-room-field span {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: #9eb3de;
+  text-transform: uppercase;
+}
+
+.rr-room-corner-board {
+  position: relative;
+  min-height: 210px;
+  border: 1px solid #375792;
+  border-radius: 12px;
+  background: radial-gradient(circle at center, rgba(26, 46, 88, 0.38), rgba(8, 15, 33, 0.9));
+  padding: 0.45rem;
+}
+
+.rr-room-corner-board.lobby {
+  min-height: 240px;
+}
+
+.rr-room-slot-preview {
+  position: absolute;
+  width: min(42%, 170px);
+  min-height: 64px;
+  border: 1px solid #3a5489;
+  border-radius: 10px;
+  background: rgba(11, 21, 44, 0.85);
+  color: #dce7ff;
+  padding: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.2rem;
+  text-align: left;
+}
+
+.rr-room-slot-preview strong {
+  font-size: 0.73rem;
+}
+
+.rr-room-slot-preview span {
+  font-size: 0.67rem;
+  opacity: 0.88;
+}
+
+.rr-room-slot-preview.nw { top: 0.45rem; left: 0.45rem; }
+.rr-room-slot-preview.ne { top: 0.45rem; right: 0.45rem; }
+.rr-room-slot-preview.sw { bottom: 0.45rem; left: 0.45rem; }
+.rr-room-slot-preview.se { bottom: 0.45rem; right: 0.45rem; }
+
+.rr-room-slot-preview.host {
+  border-color: #67a2ff;
+  background: rgba(31, 66, 132, 0.46);
+}
+
+.rr-room-slot-preview.enabled,
+.rr-room-slot-preview.ready {
+  border-color: #5fda93;
+  box-shadow: 0 0 14px rgba(95, 218, 147, 0.3), inset 0 0 0 1px rgba(101, 255, 166, 0.16);
+}
+
+.rr-room-slot-preview.waiting {
+  opacity: 0.85;
+}
+
+.rr-room-board-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: min(42%, 180px);
+  text-align: center;
+}
+
+.rr-room-board-center button {
+  width: 100%;
+}
+
+.rr-room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 170px;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.rr-room-list-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.4rem;
+  align-items: center;
+  border: 1px solid #334b86;
+  background: rgba(11, 22, 49, 0.8);
+  border-radius: 9px;
+  padding: 0.4rem 0.5rem;
+  color: #dbe7ff;
+}
+
+.rr-room-code-fallback {
+  border-top: 1px solid rgba(65, 91, 144, 0.65);
+  margin-top: 0.2rem;
+  padding-top: 0.45rem;
+}
+
+.rr-room-actions {
+  justify-content: flex-end;
+}
+
+.rr-slot-kick {
+  position: absolute;
+  right: 0.28rem;
+  top: 0.28rem;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  opacity: 0.65;
+}
