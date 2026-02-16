@@ -35,6 +35,7 @@ import {
   createRoom,
   fetchFriends,
   fetchMyRooms,
+  fetchPublicRooms,
   fetchRoom,
   fetchLeaderboard,
   fetchShopCatalog,
@@ -55,6 +56,7 @@ import {
   type LeaderboardTopEntry,
   type MyRoomEntry,
   type OutgoingFriendRequest,
+  type PublicRoomEntry,
   type RoomMember,
   type RoomState,
   type ShopCatalogItem,
@@ -264,6 +266,7 @@ export default function GameView(): JSX.Element {
   const [joiningRoomCode, setJoiningRoomCode] = useState<string | null>(null);
   const [deepLinkJoinCode, setDeepLinkJoinCode] = useState<string | null>(null);
   const [myRooms, setMyRooms] = useState<MyRoomEntry[]>([]);
+  const [publicRooms, setPublicRooms] = useState<PublicRoomEntry[]>([]);
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
   const [settingReady, setSettingReady] = useState(false);
@@ -311,9 +314,11 @@ export default function GameView(): JSX.Element {
   const currentTutorialStep = tutorialSteps[tutorialStepIndex] ?? null;
 
   const myRoomMember = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
+  const isRoomOwner = Boolean(localTgUserId && currentRoom?.ownerTgUserId && localTgUserId === currentRoom.ownerTgUserId);
   const waitingForOtherPlayer = Boolean(
     multiplayerUiOpen
     && currentRoom
+    && !isRoomOwner
     && ((myRoomMember?.ready ?? false) || startingRoom)
     && (currentRoom.phase ?? 'LOBBY') !== 'STARTED',
   );
@@ -1053,12 +1058,16 @@ export default function GameView(): JSX.Element {
     }
   }, []);
 
-  const loadRooms = useCallback(async (): Promise<void> => {
+  const loadRooms = useCallback(async (publicQuery?: string): Promise<void> => {
     setRoomsLoading(true);
     setRoomsError(null);
     try {
-      const rooms = await fetchMyRooms();
+      const [rooms, availableRooms] = await Promise.all([
+        fetchMyRooms(),
+        fetchPublicRooms(publicQuery),
+      ]);
       setMyRooms(rooms);
+      setPublicRooms(availableRooms);
 
       if (currentRoom?.roomCode) {
         const roomData = await fetchRoom(currentRoom.roomCode);
@@ -1105,8 +1114,9 @@ export default function GameView(): JSX.Element {
 
       setCurrentRoom(result.room);
       setCurrentRoomMembers(result.members);
-      const rooms = await fetchMyRooms();
+      const [rooms, availableRooms] = await Promise.all([fetchMyRooms(), fetchPublicRooms()]);
       setMyRooms(rooms);
+      setPublicRooms(availableRooms);
     } finally {
       setJoiningRoomCode((prev) => (prev === roomCode ? null : prev));
     }
@@ -1140,8 +1150,9 @@ export default function GameView(): JSX.Element {
 
     setCurrentRoom(null);
     setCurrentRoomMembers([]);
-    const rooms = await fetchMyRooms();
+    const [rooms, availableRooms] = await Promise.all([fetchMyRooms(), fetchPublicRooms()]);
     setMyRooms(rooms);
+    setPublicRooms(availableRooms);
   }, [currentRoom]);
 
   const onCloseRoom = useCallback(async (): Promise<void> => {
@@ -1161,8 +1172,9 @@ export default function GameView(): JSX.Element {
 
     setCurrentRoom(null);
     setCurrentRoomMembers([]);
-    const rooms = await fetchMyRooms();
+    const [rooms, availableRooms] = await Promise.all([fetchMyRooms(), fetchPublicRooms()]);
     setMyRooms(rooms);
+    setPublicRooms(availableRooms);
   }, [currentRoom?.roomCode]);
 
 
@@ -2140,6 +2152,7 @@ export default function GameView(): JSX.Element {
         roomsLoading={roomsLoading}
         roomsError={roomsError}
         myRooms={myRooms}
+        publicRooms={publicRooms}
         currentRoom={currentRoom}
         currentRoomMembers={currentRoomMembers}
         joiningRoomCode={joiningRoomCode}
@@ -2147,6 +2160,7 @@ export default function GameView(): JSX.Element {
         startingRoom={startingRoom}
         onCreateRoom={onCreateRoom}
         onJoinRoomByCode={joinRoomByCode}
+        onSearchPublicRooms={loadRooms}
         onLeaveRoom={onLeaveRoom}
         onCloseRoom={onCloseRoom}
         onStartRoom={onStartRoom}

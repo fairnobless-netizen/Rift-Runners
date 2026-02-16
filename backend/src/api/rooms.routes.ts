@@ -86,7 +86,7 @@ roomsRouter.get('/me', async (req, res) => {
   if (!session) return res.status(401).json({ ok: false, error: 'unauthorized' });
 
   const rooms = await listMyRoomsV2(session.tgUserId);
-  return res.status(200).json({ rooms });
+  return res.status(200).json({ ok: true, rooms });
 });
 
 // Legacy compatibility endpoints

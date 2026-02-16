@@ -72,6 +72,15 @@ export type MyRoomEntry = {
   memberCount: number;
 };
 
+export type PublicRoomEntry = {
+  roomCode: string;
+  name: string;
+  hostDisplayName: string;
+  players: number;
+  capacity: number;
+  hasPassword: boolean;
+};
+
 
 export type FriendEntry = {
   tgUserId: string;
@@ -497,6 +506,32 @@ export async function fetchMyRooms(): Promise<MyRoomEntry[]> {
       phase: String(room?.phase ?? 'LOBBY'),
       createdAt: String(room?.createdAt ?? ''),
       memberCount: Number(room?.memberCount ?? 0),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchPublicRooms(query?: string): Promise<PublicRoomEntry[]> {
+  const token = getToken();
+  if (!token) return [];
+
+  try {
+    const normalizedQuery = String(query ?? '').trim();
+    const suffix = normalizedQuery ? `?query=${encodeURIComponent(normalizedQuery)}` : '';
+    const res = await fetch(apiUrl(`/api/rooms/public${suffix}`), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json();
+    if (!Array.isArray(json?.rooms)) return [];
+
+    return json.rooms.map((room: any) => ({
+      roomCode: String(room?.code ?? ''),
+      name: String(room?.name ?? ''),
+      hostDisplayName: String(room?.createdBy?.displayName ?? 'Unknown'),
+      players: Number(room?.players ?? 0),
+      capacity: Number(room?.capacity ?? 0),
+      hasPassword: Boolean(room?.hasPassword),
     }));
   } catch {
     return [];

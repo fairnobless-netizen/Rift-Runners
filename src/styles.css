@@ -1752,6 +1752,13 @@ html[data-orient="landscape"] .right-panel {
   opacity: 0.85;
 }
 
+.rr-room-slot-preview.disabled {
+  border-color: rgba(119, 138, 176, 0.45);
+  background: rgba(13, 20, 34, 0.65);
+  opacity: 0.52;
+  box-shadow: none;
+}
+
 .rr-room-board-center {
   position: absolute;
   left: 50%;
