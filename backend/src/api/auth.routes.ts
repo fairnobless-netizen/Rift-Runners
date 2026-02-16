@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { TELEGRAM_AUTH_MAX_AGE_SEC, getSessionTtlSeconds, isProduction, requireEnv } from '../config/env';
 import { verifyTelegramInitData } from '../auth/telegramInitDataVerify';
 import { randomToken, sha256Hex } from '../auth/session';
-import { ensureGameUserId, ensureWallet, createSession, upsertUser } from '../db/repos';
+import { ensureGameUserId, ensureReferralCode, ensureWallet, createSession, upsertUser } from '../db/repos';
 
 export const authRouter = Router();
 
@@ -26,6 +26,7 @@ authRouter.post('/auth/telegram', async (req, res) => {
     });
     await ensureWallet(tgUserId);
     const gameUserId = await ensureGameUserId(tgUserId);
+    await ensureReferralCode(tgUserId);
 
     const token = randomToken(24);
     const tokenHash = sha256Hex(token);
@@ -61,6 +62,7 @@ authRouter.post('/auth/telegram', async (req, res) => {
   });
   await ensureWallet(vr.tgUserId);
   const gameUserId = await ensureGameUserId(vr.tgUserId);
+  await ensureReferralCode(vr.tgUserId);
 
   const token = randomToken(24);
   const tokenHash = sha256Hex(token);

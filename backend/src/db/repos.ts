@@ -42,6 +42,55 @@ export async function upsertUser(params: {
   };
 }
 
+
+function randomReferralCode(): string {
+  return crypto.randomBytes(6).toString('base64url').replace(/[^a-zA-Z0-9]/g, '').slice(0, 10).toUpperCase();
+}
+
+export async function ensureReferralCode(tgUserId: string): Promise<string> {
+  const existing = await pgQuery<{ referral_code: string | null }>(
+    `SELECT referral_code FROM users WHERE tg_user_id = $1 LIMIT 1`,
+    [tgUserId],
+  );
+
+  const current = existing.rows[0]?.referral_code;
+  if (current) return String(current);
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const candidate = randomReferralCode();
+    try {
+      const updated = await pgQuery<{ referral_code: string }>(
+        `
+        UPDATE users
+        SET referral_code = $2
+        WHERE tg_user_id = $1 AND referral_code IS NULL
+        RETURNING referral_code
+        `,
+        [tgUserId, candidate],
+      );
+
+      if (updated.rows[0]?.referral_code) {
+        return String(updated.rows[0].referral_code);
+      }
+
+      const fallback = await pgQuery<{ referral_code: string | null }>(
+        `SELECT referral_code FROM users WHERE tg_user_id = $1 LIMIT 1`,
+        [tgUserId],
+      );
+      if (fallback.rows[0]?.referral_code) {
+        return String(fallback.rows[0].referral_code);
+      }
+    } catch (error: any) {
+      if (error?.code === '23505') continue;
+      throw error;
+    }
+  }
+
+  const error = new Error('failed_to_generate_referral_code');
+  (error as any).code = 'REFERRAL_CODE_GENERATION_FAILED';
+  throw error;
+}
+
 function randomGameUserId(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let out = 'RR-';
@@ -2037,16 +2086,123 @@ export async function listMyRoomsV2(tgUserId: string): Promise<RoomModel[]> {
   return models.filter((room): room is RoomModel => room != null);
 }
 
-const REFERRAL_REWARD_REFERRER = 50;
-const REFERRAL_REWARD_INVITEE = 10;
+const REFERRAL_REWARD_REFERRER = 100;
+
+export async function claimReferral(params: { inviteeTgUserId: string; refCode: string }): Promise<{ claimed: boolean; referrerUserId: string | null }> {
+  const code = String(params.refCode ?? '').trim().replace(/^ref_/i, '').toUpperCase();
+  if (!code) {
+    const error = new Error('invalid_code');
+    (error as any).code = 'INVALID_CODE';
+    throw error;
+  }
+
+  const pool = getPgPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const inviteeRes = await client.query<{ referred_by_user_id: string | null }>(
+      `SELECT referred_by_user_id FROM users WHERE tg_user_id = $1 LIMIT 1 FOR UPDATE`,
+      [params.inviteeTgUserId],
+    );
+    if (!inviteeRes.rows[0]) {
+      const error = new Error('user_not_found');
+      (error as any).code = 'USER_NOT_FOUND';
+      throw error;
+    }
+
+    const existingReferrer = inviteeRes.rows[0].referred_by_user_id;
+    if (existingReferrer) {
+      await client.query('COMMIT');
+      return { claimed: false, referrerUserId: String(existingReferrer) };
+    }
+
+    const referrerRes = await client.query<{ tg_user_id: string }>(
+      `SELECT tg_user_id FROM users WHERE referral_code = $1 LIMIT 1`,
+      [code],
+    );
+    const referrerUserId = referrerRes.rows[0]?.tg_user_id ? String(referrerRes.rows[0].tg_user_id) : null;
+    if (!referrerUserId) {
+      const error = new Error('invalid_code');
+      (error as any).code = 'INVALID_CODE';
+      throw error;
+    }
+
+    if (referrerUserId === params.inviteeTgUserId) {
+      const error = new Error('self_referral_not_allowed');
+      (error as any).code = 'SELF_REFERRAL';
+      throw error;
+    }
+
+    const now = Date.now();
+    await client.query(
+      `UPDATE users SET referred_by_user_id = $2, updated_at = $3 WHERE tg_user_id = $1 AND referred_by_user_id IS NULL`,
+      [params.inviteeTgUserId, referrerUserId, now],
+    );
+
+    await client.query(
+      `INSERT INTO referrals (invitee_user_id, referrer_user_id, created_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (invitee_user_id) DO NOTHING`,
+      [params.inviteeTgUserId, referrerUserId, now],
+    );
+
+    await client.query('COMMIT');
+    return { claimed: true, referrerUserId };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function grantReferralBonusForFirstCompletedMatch(inviteeTgUserId: string): Promise<{ awarded: boolean; referrerUserId: string | null }> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const refRes = await client.query<{ referrer_user_id: string; reward_granted_at: number | null }>(
+      `SELECT referrer_user_id, reward_granted_at FROM referrals WHERE invitee_user_id = $1 LIMIT 1 FOR UPDATE`,
+      [inviteeTgUserId],
+    );
+
+    const row = refRes.rows[0];
+    if (!row?.referrer_user_id) {
+      await client.query('COMMIT');
+      return { awarded: false, referrerUserId: null };
+    }
+
+    const referrerUserId = String(row.referrer_user_id);
+    if (row.reward_granted_at) {
+      await client.query('COMMIT');
+      return { awarded: false, referrerUserId };
+    }
+
+    await client.query(`INSERT INTO wallets (tg_user_id, stars, crystals, plasma) VALUES ($1, 0, 0, 0) ON CONFLICT (tg_user_id) DO NOTHING`, [referrerUserId]);
+    await client.query(`UPDATE wallets SET plasma = plasma + $2 WHERE tg_user_id = $1`, [referrerUserId, REFERRAL_REWARD_REFERRER]);
+    await client.query(`UPDATE referrals SET reward_granted_at = $2 WHERE invitee_user_id = $1`, [inviteeTgUserId, Date.now()]);
+
+    await client.query('COMMIT');
+    return { awarded: true, referrerUserId };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
 
 export async function getReferralStats(tgUserId: string): Promise<{ plasmaEarned: number; invitedCount: number }> {
-  const [countRes] = await Promise.all([
+  const [countRes, rewardedRes] = await Promise.all([
     pgQuery<{ count: number }>(`SELECT COUNT(*)::int AS count FROM referrals WHERE referrer_user_id = $1`, [tgUserId]),
+    pgQuery<{ count: number }>(`SELECT COUNT(*)::int AS count FROM referrals WHERE referrer_user_id = $1 AND reward_granted_at IS NOT NULL`, [tgUserId]),
   ]);
 
   const invitedCount = Number(countRes.rows[0]?.count ?? 0);
-  const plasmaEarned = invitedCount * REFERRAL_REWARD_REFERRER;
+  const rewardedCount = Number(rewardedRes.rows[0]?.count ?? 0);
+  const plasmaEarned = rewardedCount * REFERRAL_REWARD_REFERRER;
   return { plasmaEarned, invitedCount };
 }
 
@@ -2060,9 +2216,14 @@ export async function redeemReferral(params: { inviteeTgUserId: string; code: st
   }
 
   let referrerUserId = normalizedCode;
-  const byGameUserId = await pgQuery<{ tg_user_id: string }>(`SELECT tg_user_id FROM users WHERE game_user_id = $1 LIMIT 1`, [normalizedCode]);
-  if (byGameUserId.rows[0]?.tg_user_id) {
-    referrerUserId = String(byGameUserId.rows[0].tg_user_id);
+  const byReferralCode = await pgQuery<{ tg_user_id: string }>(`SELECT tg_user_id FROM users WHERE referral_code = $1 LIMIT 1`, [normalizedCode.toUpperCase()]);
+  if (byReferralCode.rows[0]?.tg_user_id) {
+    referrerUserId = String(byReferralCode.rows[0].tg_user_id);
+  } else {
+    const byGameUserId = await pgQuery<{ tg_user_id: string }>(`SELECT tg_user_id FROM users WHERE game_user_id = $1 LIMIT 1`, [normalizedCode]);
+    if (byGameUserId.rows[0]?.tg_user_id) {
+      referrerUserId = String(byGameUserId.rows[0].tg_user_id);
+    }
   }
 
   if (referrerUserId === params.inviteeTgUserId) {
@@ -2100,10 +2261,8 @@ export async function redeemReferral(params: { inviteeTgUserId: string; code: st
     await client.query(`INSERT INTO wallets (tg_user_id, stars, crystals, plasma) VALUES ($1, 0, 0, 0) ON CONFLICT (tg_user_id) DO NOTHING`, [params.inviteeTgUserId]);
 
     await client.query(`UPDATE wallets SET plasma = plasma + $2 WHERE tg_user_id = $1`, [referrerUserId, REFERRAL_REWARD_REFERRER]);
-    await client.query(`UPDATE wallets SET plasma = plasma + $2 WHERE tg_user_id = $1`, [params.inviteeTgUserId, REFERRAL_REWARD_INVITEE]);
-
-    await client.query('COMMIT');
-    return { referrer: REFERRAL_REWARD_REFERRER, invitee: REFERRAL_REWARD_INVITEE };
+        await client.query('COMMIT');
+    return { referrer: REFERRAL_REWARD_REFERRER, invitee: 0 };
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;

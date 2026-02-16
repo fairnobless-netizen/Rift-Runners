@@ -30,6 +30,7 @@ import {
 import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../game/types';
 import {
   buyShopSku,
+  claimReferral,
   closeRoom,
   createRoom,
   fetchFriends,
@@ -1365,28 +1366,23 @@ export default function GameView(): JSX.Element {
     if (!token) return;
 
     const telegramStartParam = (window as Window & { Telegram?: { WebApp?: { initDataUnsafe?: { start_param?: string } } } }).Telegram?.WebApp?.initDataUnsafe?.start_param;
-    const startParam = telegramStartParam;
-    if (startParam?.startsWith('room_')) {
-      const deepLinkRoomCode = startParam.replace('room_', '').trim().toUpperCase();
-      if (!deepLinkRoomCode) return;
-
-      setDeepLinkJoinCode(deepLinkRoomCode);
-      setMultiplayerUiOpen(true);
-      return undefined;
-    }
-
     const search = new URLSearchParams(window.location.search);
     const startappRaw = search.get('startapp') ?? '';
-    if (!startappRaw.startsWith('room_')) return;
+    const startParam = telegramStartParam || startappRaw;
 
-    const deepLinkRoomCode = startappRaw.slice(5).trim().toUpperCase();
+    if (startParam?.startsWith('ref_')) {
+      void claimReferral(startParam);
+      return;
+    }
+
+    if (!startParam?.startsWith('room_')) return;
+
+    const deepLinkRoomCode = startParam.replace('room_', '').trim().toUpperCase();
     if (!deepLinkRoomCode) return;
 
     setDeepLinkJoinCode(deepLinkRoomCode);
     setMultiplayerUiOpen(true);
-
-    return undefined;
-  }, [joinRoomByCode, token]);
+  }, [token]);
 
   const onBuy = async (sku: string): Promise<void> => {
     if (purchaseBusySku) return;
