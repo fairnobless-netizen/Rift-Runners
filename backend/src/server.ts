@@ -74,6 +74,8 @@ async function main(): Promise<void> {
       nodeEnv: process.env.NODE_ENV ?? 'development',
       wsEnabled: wsServer ? 'yes' : 'no',
     });
+    // eslint-disable-next-line no-console
+    console.log('[boot] TG_BOT_TOKEN present:', Boolean(process.env.TG_BOT_TOKEN), 'length:', (process.env.TG_BOT_TOKEN ?? '').length);
   });
 }
 

@@ -1533,7 +1533,7 @@ export default function GameView(): JSX.Element {
     const timeoutId = window.setTimeout(() => {
       setNicknameCheckState('checking');
 
-      const endpoint = `/api/profile/nickname-check?nick=${encodeURIComponent(nicknameInput)}`;
+      const endpoint = apiUrl(`/api/profile/nickname-check?nick=${encodeURIComponent(nicknameInput)}`);
 
       void fetch(endpoint, {
         headers: {
