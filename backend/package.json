@@ -8,7 +8,8 @@
     "dev:4101": "PORT=4101 npm run dev",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "dev:reset-user": "node scripts/devResetUser.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
