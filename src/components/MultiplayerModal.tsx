@@ -298,8 +298,8 @@ export function MultiplayerModal({
   if (!open) return null;
 
   return (
-    <div className="settings-overlay rr-mp-overlay" role="dialog" aria-modal="true" aria-label="Multiplayer">
-      <div className="settings-modal rr-mp-modal">
+    <div className="settings-overlay rr-mp-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Multiplayer">
+      <div className="settings-modal rr-mp-modal rr-overlay-modal">
         <div className="settings-header">
           <strong>MULTIPLAYER</strong>
           <button type="button" onClick={onClose}>Close</button>
