@@ -1843,8 +1843,8 @@ export default function GameView(): JSX.Element {
         </div>
       )}
       {registrationOpen && (
-        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Create your player">
-          <form className="settings-modal" onSubmit={(event) => { void onSubmitNickname(event); }}>
+        <div className="settings-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Create your player">
+          <form className="settings-modal rr-overlay-modal" onSubmit={(event) => { void onSubmitNickname(event); }}>
             <div className="settings-header">
               <strong>Create your player</strong>
             </div>
@@ -2107,8 +2107,8 @@ export default function GameView(): JSX.Element {
 
 
       {leaderboardOpen && (
-        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Leaderboard">
-          <div className="settings-modal">
+        <div className="settings-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Leaderboard">
+          <div className="settings-modal rr-overlay-modal">
             <div className="settings-header">
               <strong>Leaderboard</strong>
               <button type="button" onClick={() => setLeaderboardOpen(false)}>Close</button>
@@ -2157,8 +2157,8 @@ export default function GameView(): JSX.Element {
       )}
 
       {isStoreOpen && (
-        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Store">
-          <div className="settings-modal">
+        <div className="settings-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Store">
+          <div className="settings-modal rr-overlay-modal">
             <div className="settings-header">
               <strong>Store</strong>
               <button type="button" onClick={() => setIsStoreOpen(false)}>Close</button>
@@ -2211,8 +2211,8 @@ export default function GameView(): JSX.Element {
       )}
 
       {multiplayerOpen && (
-        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Multiplayer">
-          <div className="settings-modal">
+        <div className="settings-overlay rr-mp-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Multiplayer">
+          <div className="settings-modal rr-mp-modal rr-overlay-modal">
             <div className="settings-header">
               <strong>Multiplayer</strong>
               <button type="button" onClick={() => setMultiplayerOpen(false)}>Close</button>
@@ -2390,8 +2390,8 @@ export default function GameView(): JSX.Element {
       />
 
       {settingsOpen && (
-        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
-          <div className="settings-modal">
+        <div className="settings-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Settings">
+          <div className="settings-modal rr-overlay-modal">
             <div className="settings-header">
               <strong>Settings</strong>
               <button type="button" onClick={() => setSettingsOpen(false)}>Close</button>
