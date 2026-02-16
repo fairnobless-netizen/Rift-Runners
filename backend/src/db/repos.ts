@@ -624,7 +624,7 @@ export async function listLeaderboardTop(mode: string, limit: number): Promise<L
     SELECT
       ROW_NUMBER() OVER (ORDER BY ls.best_score DESC, ls.updated_at ASC, ls.tg_user_id ASC) AS rank,
       ls.tg_user_id,
-      u.display_name,
+      COALESCE(u.game_nickname, u.display_name) AS display_name,
       ls.best_score
     FROM leaderboard_scores ls
     JOIN users u ON u.tg_user_id = ls.tg_user_id
