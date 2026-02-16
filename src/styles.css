@@ -1229,12 +1229,30 @@ html[data-orient="landscape"] .right-panel {
 
 .rr-mp-overlay {
   z-index: 52;
-  align-items: flex-start;
-  padding-top: max(0.6rem, var(--safe-top));
+
+  /* IMPORTANT: settings-overlay is display:grid; align-items does nothing here.
+     We must override grid placement to avoid TG header overlap. */
+  place-items: start center;
+
+  /* Safe spacing from Telegram header + iOS safe area */
+  padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top) + 14px);
+  padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom) + 14px);
 }
 
 .rr-mp-modal {
-  width: min(96vw, 780px);
+  /* More compact, consistent with other overlays */
+  width: min(92vw, 620px);
+
+  /* Keep inside visible Telegram viewport */
+  max-height: calc(
+    var(--tg-viewport-stable-h)
+    - var(--safe-top)
+    - var(--safe-bottom)
+    - var(--tg-content-top, 0px)
+    - var(--tg-content-bottom, 0px)
+    - 24px
+  );
+
   border: 1px solid #3a5aa0;
   background: linear-gradient(165deg, rgba(8, 16, 38, 0.94), rgba(7, 14, 31, 0.95));
   backdrop-filter: blur(10px);
