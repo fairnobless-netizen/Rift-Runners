@@ -33,7 +33,6 @@ import {
   closeRoom,
   createRoom,
   fetchFriends,
-  fetchLeaderboard,
   fetchMyRooms,
   fetchRoom,
   fetchShopCatalog,
@@ -527,7 +526,7 @@ export default function GameView(): JSX.Element {
     if (!token) return;
 
     await fetch(apiUrl('/api/settings/me'), {
-      method: 'PATCH',
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -1056,16 +1055,9 @@ export default function GameView(): JSX.Element {
     setLeaderboardLoading(true);
     setLeaderboardError(null);
     try {
-      const response = await fetchLeaderboard(mode);
-      if (response) {
-        setLeaderboardTop(response.top);
-        setLeaderboardMe(response.me);
-        return;
-      }
-
-      const localResponse = fetchLocalLeaderboard(mode, localTgUserId ?? 'local');
-      setLeaderboardTop(localResponse.top);
-      setLeaderboardMe(localResponse.me);
+      const response = fetchLocalLeaderboard(mode, localTgUserId ?? 'local');
+      setLeaderboardTop(response.top);
+      setLeaderboardMe(response.me);
     } catch {
       setLeaderboardError('Failed to load leaderboard');
       setLeaderboardTop([]);
@@ -1596,10 +1588,10 @@ export default function GameView(): JSX.Element {
     setNicknameSubmitting(true);
 
     try {
-      const endpoint = apiUrl('/api/me/nickname');
+      const endpoint = apiUrl('/api/profile/nickname');
       const payload = { nickname };
       const response = await fetch(endpoint, {
-        method: 'PATCH',
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -1615,7 +1607,7 @@ export default function GameView(): JSX.Element {
       }
       if (!response.ok || !json?.ok) {
         if (!response.ok) {
-          debugNicknameFailure({ endpoint, method: 'PATCH', payload, response, responseBody: json });
+          debugNicknameFailure({ endpoint, method: 'POST', payload, response, responseBody: json });
         }
         if (response.status === 409 || json?.available === false) {
           setNicknameCheckState('taken');
@@ -1627,35 +1619,27 @@ export default function GameView(): JSX.Element {
           setNicknameSubmitError('Invalid nickname format');
           return;
         }
-        if (response.status === 429) {
-          setNicknameCheckState('server_error');
-          setNicknameSubmitError('No changes left today');
-          setAccountInfo((prev) => (prev ? { ...prev, nameChangeRemaining: 0 } : prev));
-          return;
-        }
-        debugNicknameFailure({ endpoint, method: 'PATCH', payload, response, responseBody: json });
+        debugNicknameFailure({ endpoint, method: 'POST', payload, response, responseBody: json });
         setNicknameCheckState('server_error');
         setNicknameSubmitError('Server error. Please try again.');
         return;
       }
 
-      const nextNickname = String(json.user?.gameNickname ?? json.gameNickname ?? nickname);
+      const nextNickname = String(json.gameNickname ?? nickname);
 
       setAccountInfo((prev) => (prev ? {
         ...prev,
         // GDX: keep identity update centralized here so social layer hooks can subscribe later.
         gameNickname: nextNickname,
-        gameUserId: String(json.user?.gameUserId ?? json.gameUserId ?? prev.gameUserId),
-        nameChangeRemaining: Number(json.remainingNicknameChanges ?? json.remaining ?? prev.nameChangeRemaining),
+        gameUserId: String(json.gameUserId ?? prev.gameUserId),
       } : prev));
 
       // Keep UI name in sync (solo HUD + local leaderboard participant name)
       setProfileName(nextNickname);
 
       setRegistrationOpen(false);
-      void loadLeaderboard(leaderboardMode);
     } catch (error) {
-      debugNicknameFailure({ endpoint: '/api/me/nickname', method: 'PATCH', payload: { nickname }, error });
+      debugNicknameFailure({ endpoint: '/api/profile/nickname', method: 'POST', payload: { nickname }, error });
       setNicknameCheckState('server_error');
       setNicknameSubmitError('Server error. Please try again.');
     } finally {
