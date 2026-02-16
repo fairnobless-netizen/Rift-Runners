@@ -8,7 +8,7 @@ import {
   getReferralStats,
   isNicknameAvailable,
   redeemReferral,
-  setNicknameWithLimit,
+  setNickname,
   updateDisplayNameWithLimit,
   upsertUserSettings,
 } from '../db/repos';
@@ -100,56 +100,14 @@ profileRouter.get('/profile/nickname-check', async (req, res) => {
   }
 });
 
-profileRouter.patch('/me/nickname', async (req, res) => {
-  const s = await resolveSessionFromRequest(req as any);
-  if (!s) return res.status(401).json({ ok: false, error: 'unauthorized' });
-
-  const nickname = String(req.body?.nickname ?? '');
-  try {
-    const result = await setNicknameWithLimit({ tgUserId: s.tgUserId, nickname });
-    if (!result.ok) {
-      return res.status(429).json({ ok: false, error: 'limit_reached', remaining: 0 });
-    }
-
-    const uw = await getUserAndWallet(s.tgUserId);
-    if (!uw) {
-      return res.status(404).json({ ok: false, error: 'user_not_found' });
-    }
-
-    return res.status(200).json({
-      ok: true,
-      user: {
-        ...uw.user,
-        gameUserId: uw.user.gameUserId ?? result.gameUserId,
-        gameNickname: result.gameNickname,
-      },
-      remainingNicknameChanges: result.remaining,
-    });
-  } catch (error: any) {
-    if (error?.code === 'INVALID_NICKNAME') return res.status(400).json({ ok: false, error: 'invalid_nickname' });
-    if (error?.code === 'NICK_TAKEN') return res.status(409).json({ ok: false, error: 'nickname_taken' });
-    if (error?.code === 'USER_NOT_FOUND') return res.status(404).json({ ok: false, error: 'user_not_found' });
-    return res.status(500).json({ ok: false, error: 'internal_error' });
-  }
-});
-
 profileRouter.post('/profile/nickname', async (req, res) => {
   const s = await resolveSessionFromRequest(req as any);
   if (!s) return res.status(401).json({ ok: false, error: 'unauthorized' });
 
   const nickname = String(req.body?.nickname ?? '');
   try {
-    const result = await setNicknameWithLimit({ tgUserId: s.tgUserId, nickname });
-    if (!result.ok) {
-      return res.status(429).json({ ok: false, error: 'limit_reached', remaining: 0 });
-    }
-
-    return res.status(200).json({
-      ok: true,
-      gameNickname: result.gameNickname,
-      gameUserId: result.gameUserId,
-      remaining: result.remaining,
-    });
+    const result = await setNickname(s.tgUserId, nickname);
+    return res.status(200).json({ ok: true, gameNickname: result.gameNickname, gameUserId: result.gameUserId });
   } catch (error: any) {
     if (error?.code === 'INVALID_NICKNAME') return res.status(400).json({ ok: false, error: 'invalid_nickname' });
     if (error?.code === 'NICK_TAKEN') return res.status(409).json({ ok: false, error: 'nickname_taken' });
