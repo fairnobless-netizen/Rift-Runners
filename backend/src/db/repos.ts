@@ -1054,7 +1054,7 @@ export async function createRoomTx(ownerTgUserId: string, capacity: number): Pro
     }
 
     await client.query(
-      `INSERT INTO room_members (room_code, tg_user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      `INSERT INTO room_members (room_code, tg_user_id, ready) VALUES ($1, $2, TRUE) ON CONFLICT DO NOTHING`,
       [roomCode, ownerTgUserId],
     );
 
@@ -1397,7 +1397,12 @@ export async function startRoomTx(params: {
       throw error;
     }
 
-    const allReady = membersRes.rows.every((row) => Boolean(row.ready ?? false));
+    const ownerTgUserId = String(roomRow.owner_tg_user_id);
+    const allReady = membersRes.rows.every((row) => (
+      String(row.tg_user_id) === ownerTgUserId
+        ? true
+        : Boolean(row.ready ?? false)
+    ));
     if (!allReady) {
       const error = new Error('not_all_ready');
       (error as any).code = 'NOT_ALL_READY';
@@ -1879,7 +1884,7 @@ export async function createRoomPublic(params: { tgUserId: string; name: string;
     );
 
     await client.query(
-      `INSERT INTO room_members (room_code, tg_user_id, joined_at, ready) VALUES ($1, $2, now(), FALSE) ON CONFLICT DO NOTHING`,
+      `INSERT INTO room_members (room_code, tg_user_id, joined_at, ready) VALUES ($1, $2, now(), TRUE) ON CONFLICT DO NOTHING`,
       [code, params.tgUserId],
     );
 
@@ -1928,7 +1933,12 @@ export async function listPublicRooms(query?: string): Promise<RoomModel[]> {
     LEFT JOIN room_members rm ON rm.room_code = r.room_code
     WHERE r.status = 'OPEN'
       AND r.is_public = TRUE
-      AND ($1 = '' OR LOWER(COALESCE(r.name, '')) LIKE $2)
+      AND (
+        $1 = ''
+        OR LOWER(COALESCE(r.name, '')) LIKE $2
+        OR LOWER(r.room_code) LIKE $2
+        OR LOWER(COALESCE(u.display_name, '')) LIKE $2
+      )
     GROUP BY r.room_code, r.name, r.capacity, r.has_password, r.owner_tg_user_id, u.tg_username, u.display_name
     ORDER BY r.created_at DESC
     LIMIT 100

@@ -4,6 +4,7 @@ import type {
   IncomingFriendRequest,
   MyRoomEntry,
   OutgoingFriendRequest,
+  PublicRoomEntry,
   RoomMember,
   RoomState,
 } from '../game/wallet';
@@ -22,6 +23,7 @@ type Props = {
   roomsLoading: boolean;
   roomsError: string | null;
   myRooms: MyRoomEntry[];
+  publicRooms: PublicRoomEntry[];
   currentRoom: RoomState | null;
   currentRoomMembers: RoomMember[];
   joiningRoomCode: string | null;
@@ -29,6 +31,7 @@ type Props = {
   startingRoom: boolean;
   onCreateRoom: (capacity: 2 | 3 | 4) => Promise<void>;
   onJoinRoomByCode: (code: string) => Promise<void>;
+  onSearchPublicRooms: (query?: string) => Promise<void>;
   onLeaveRoom: () => Promise<void>;
   onCloseRoom: () => Promise<void>;
   onStartRoom: () => Promise<void>;
@@ -50,11 +53,6 @@ type Props = {
 
 const SLOT_POSITIONS: readonly SlotPosition[] = ['nw', 'ne', 'sw', 'se'];
 
-function isRoomProtected(room: MyRoomEntry): boolean {
-  const status = room.status.toLowerCase();
-  return status.includes('protected') || status.includes('password');
-}
-
 export function MultiplayerModal({
   open,
   onClose,
@@ -65,6 +63,7 @@ export function MultiplayerModal({
   roomsLoading,
   roomsError,
   myRooms,
+  publicRooms,
   currentRoom,
   currentRoomMembers,
   joiningRoomCode,
@@ -72,6 +71,7 @@ export function MultiplayerModal({
   startingRoom,
   onCreateRoom,
   onJoinRoomByCode,
+  onSearchPublicRooms,
   onLeaveRoom,
   onCloseRoom,
   onStartRoom,
@@ -168,13 +168,23 @@ export function MultiplayerModal({
     && nonHostMembers.every((member) => member.ready ?? false);
 
   const filteredRooms = useMemo(() => {
+    const roomsSource: PublicRoomEntry[] = publicRooms.length > 0
+      ? publicRooms
+      : myRooms.map((room) => ({
+        roomCode: room.roomCode,
+        name: `Room ${room.roomCode}`,
+        hostDisplayName: 'Host',
+        players: room.memberCount,
+        capacity: room.capacity,
+        hasPassword: false,
+      }));
     const query = roomSearchDraft.trim().toLowerCase();
-    if (!query) return myRooms;
-    return myRooms.filter((room) => {
-      const composite = `${room.roomCode} ${room.status} ${room.phase ?? ''}`.toLowerCase();
+    if (!query) return roomsSource;
+    return roomsSource.filter((room) => {
+      const composite = `${room.roomCode} ${room.name} ${room.hostDisplayName}`.toLowerCase();
       return composite.includes(query);
     });
-  }, [myRooms, roomSearchDraft]);
+  }, [myRooms, publicRooms, roomSearchDraft]);
 
   const lobbyMembersBySlot = useMemo(() => {
     const members: Array<RoomMember | null> = [null, null, null, null];
@@ -187,6 +197,16 @@ export function MultiplayerModal({
 
     return members;
   }, [currentRoomMembers, hostMember]);
+
+  useEffect(() => {
+    if (!open || activeMainTab !== 'room' || roomScreen !== 'join') return;
+
+    const timeout = setTimeout(() => {
+      void onSearchPublicRooms(roomSearchDraft);
+    }, 150);
+
+    return () => clearTimeout(timeout);
+  }, [activeMainTab, onSearchPublicRooms, open, roomScreen, roomSearchDraft]);
 
   const handleCreate = async (): Promise<void> => {
     if (roomNameError) return;
@@ -386,7 +406,7 @@ export function MultiplayerModal({
                         className="rr-room-list-item"
                         disabled={Boolean(joiningRoomCode)}
                         onClick={() => {
-                          if (isRoomProtected(room)) {
+                          if (room.hasPassword) {
                             setPasswordPromptRoomCode(room.roomCode);
                             setPasswordPromptDraft('');
                             setPasswordPromptError(null);
@@ -395,9 +415,9 @@ export function MultiplayerModal({
                           void handleJoinByCode(room.roomCode);
                         }}
                       >
-                        <span>{room.roomCode} — Host</span>
-                        <span>{room.memberCount}/{room.capacity}</span>
-                        <span>{room.status}</span>
+                        <span>{room.roomCode} — {room.name}</span>
+                        <span>Host: {room.hostDisplayName}</span>
+                        <span>{room.players}/{room.capacity} {room.hasPassword ? '🔒' : '🔓'}</span>
                       </button>
                     ))}
                   </div>
@@ -467,16 +487,17 @@ export function MultiplayerModal({
                   <div className="rr-room-corner-board lobby">
                     {SLOT_POSITIONS.map((position, index) => {
                       const member = lobbyMembersBySlot[index];
+                      const slotDisabled = index >= Number(currentRoom?.capacity ?? 4);
                       const isSlotHost = member?.tgUserId != null && member.tgUserId === hostMember?.tgUserId;
                       const isReady = member?.ready ?? false;
 
                       return (
                         <div
                           key={position}
-                          className={`rr-room-slot-preview ${position} ${member ? 'occupied' : 'waiting'} ${isReady ? 'ready' : ''} ${isSlotHost ? 'host' : ''}`}
+                          className={`rr-room-slot-preview ${position} ${member ? 'occupied' : 'waiting'} ${isReady ? 'ready' : ''} ${isSlotHost ? 'host' : ''} ${slotDisabled ? 'disabled' : ''}`}
                         >
-                          <strong>{member?.displayName ?? 'Waiting for player'}</strong>
-                          <span>{isSlotHost ? 'Host' : (member ? (isReady ? 'Ready' : 'Not ready') : 'Open slot')}</span>
+                          <strong>{slotDisabled ? 'Reserved slot' : (member?.displayName ?? 'Waiting for player')}</strong>
+                          <span>{slotDisabled ? 'Not used for this room size' : (isSlotHost ? 'Host' : (member ? (isReady ? 'Ready' : 'Not ready') : 'Open slot'))}</span>
                           {isHost && member && !isSlotHost ? (
                             <button
                               type="button"
