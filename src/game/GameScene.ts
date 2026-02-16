@@ -479,8 +479,9 @@ export class GameScene extends Phaser.Scene {
   private setupCamera(): void {
     const { worldWidth, worldHeight } = this.getWorldDimensions();
     const { maxZoom } = GAME_CONFIG;
+    const viewportWidth = Math.max(1, this.scale.width);
     const viewportHeight = Math.max(1, this.scale.height);
-    const minZoom = viewportHeight / worldHeight;
+    const minZoom = Math.min(viewportWidth / worldWidth, viewportHeight / worldHeight);
     this.minZoom = minZoom;
     this.maxZoom = maxZoom;
     this.cameraFollowThresholdZoom = minZoom * 1.05;
@@ -488,6 +489,7 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.roundPixels = true;
     this.cameras.main.setDeadzone(this.scale.width * 0.26, this.scale.height * 0.26);
     this.applyZoom(minZoom, false);
+    this.cameras.main.centerOn(worldWidth / 2, worldHeight / 2);
     this.emitReady();
   }
 
@@ -506,16 +508,22 @@ export class GameScene extends Phaser.Scene {
       setZoom: (zoom: number) => {
         this.applyZoom(zoom, false);
       },
-      resetZoom: () => this.applyZoom(this.minZoom, false),
+      resetZoom: () => {
+        const { worldWidth, worldHeight } = this.getWorldDimensions();
+        this.applyZoom(this.minZoom, false);
+        this.cameras.main.centerOn(worldWidth / 2, worldHeight / 2);
+      },
     });
   }
 
   private onScaleResize(): void {
     const camera = this.cameras.main;
     const { worldWidth, worldHeight } = this.getWorldDimensions();
+    const viewportWidth = Math.max(1, this.scale.width);
     const viewportHeight = Math.max(1, this.scale.height);
+
     const oldMinZoom = this.minZoom;
-    const newMinZoom = viewportHeight / worldHeight;
+    const newMinZoom = Math.min(viewportWidth / worldWidth, viewportHeight / worldHeight);
     const wasAtMin = camera.zoom <= oldMinZoom * 1.01;
 
     this.minZoom = newMinZoom;
@@ -525,6 +533,7 @@ export class GameScene extends Phaser.Scene {
 
     if (wasAtMin) {
       this.applyZoom(newMinZoom, true);
+      this.cameras.main.centerOn(worldWidth / 2, worldHeight / 2);
     } else {
       this.applyZoom(camera.zoom, true);
     }
