@@ -2164,6 +2164,8 @@ export default function GameView(): JSX.Element {
         onSendFriendRequest={onSendFriendRequest}
         onRespondFriendRequest={onRespondFriendRequest}
         onInviteFriend={onInviteFriend}
+        referralLink={accountInfo?.referralLink ?? ''}
+        onCopyReferralLink={onCopyReferral}
         localTgUserId={localTgUserId}
         onConsumeInitialJoinCode={() => setDeepLinkJoinCode(null)}
       />

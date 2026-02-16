@@ -42,6 +42,8 @@ type Props = {
   onSendFriendRequest: (tgUserId: string) => Promise<void>;
   onRespondFriendRequest: (fromTgUserId: string, action: 'accept' | 'decline') => Promise<void>;
   onInviteFriend: (tgUserId: string) => Promise<void>;
+  referralLink: string;
+  onCopyReferralLink: () => Promise<void>;
   localTgUserId?: string;
   onConsumeInitialJoinCode?: () => void;
 };
@@ -83,6 +85,8 @@ export function MultiplayerModal({
   onSendFriendRequest,
   onRespondFriendRequest,
   onInviteFriend,
+  referralLink,
+  onCopyReferralLink,
   localTgUserId,
   onConsumeInitialJoinCode,
 }: Props): JSX.Element | null {
@@ -212,6 +216,24 @@ export function MultiplayerModal({
     setRoomScreen('home');
   };
 
+  const parsedFriendTarget = useMemo(() => {
+    const normalized = friendTargetDraft.trim();
+    if (!normalized) return null;
+
+    if (normalized.startsWith('@')) {
+      const usernameWithoutAt = normalized.slice(1).trim();
+      return usernameWithoutAt || null;
+    }
+
+    return normalized;
+  }, [friendTargetDraft]);
+
+  const onSendFriendTarget = (): void => {
+    if (!parsedFriendTarget) return;
+    void onSendFriendRequest(parsedFriendTarget);
+    setFriendTargetDraft('');
+  };
+
   if (!open) return null;
 
   return (
@@ -233,29 +255,6 @@ export function MultiplayerModal({
         <div className="settings-panel rr-mp-panel">
           {activeMainTab === 'friends' ? (
             <>
-              <section className="rr-mp-section">
-                <h4>Find friend by tg_user_id</h4>
-                <div className="rr-mp-row">
-                  <input
-                    type="text"
-                    value={friendTargetDraft}
-                    onChange={(event) => setFriendTargetDraft(event.target.value)}
-                    placeholder="tg_user_id"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const id = friendTargetDraft.trim();
-                      if (!id) return;
-                      void onSendFriendRequest(id);
-                      setFriendTargetDraft('');
-                    }}
-                  >
-                    Send
-                  </button>
-                </div>
-              </section>
-
               {friendsError ? <p className="rr-mp-error">{friendsError}</p> : null}
               {friendsLoading ? <p className="rr-mp-empty">Loading friends...</p> : null}
 
@@ -514,9 +513,36 @@ export function MultiplayerModal({
             </section>
           ) : null}
 
-          {activeMainTab === 'find' ? <section className="rr-mp-section"><h4>Find</h4><p className="rr-mp-empty">Coming soon</p></section> : null}
+          {activeMainTab === 'find' ? (
+            <section className="rr-mp-section">
+              <h4>Find a friend</h4>
+              <div className="rr-mp-row">
+                <input
+                  type="text"
+                  value={friendTargetDraft}
+                  onChange={(event) => setFriendTargetDraft(event.target.value)}
+                  placeholder="tg_user_id, nickname, or @username"
+                />
+                <button type="button" disabled={!parsedFriendTarget} onClick={onSendFriendTarget}>
+                  Send
+                </button>
+              </div>
+            </section>
+          ) : null}
           {activeMainTab === 'browse' ? <section className="rr-mp-section"><h4>Browse</h4><p className="rr-mp-empty">Coming soon</p></section> : null}
-          {activeMainTab === 'referral' ? <section className="rr-mp-section"><h4>Referral</h4><p className="rr-mp-empty">Coming soon</p></section> : null}
+          {activeMainTab === 'referral' ? (
+            <section className="rr-mp-section">
+              <h4>Referral</h4>
+              {referralLink ? (
+                <div className="rr-mp-row">
+                  <input type="text" readOnly value={referralLink} />
+                  <button type="button" onClick={() => { void onCopyReferralLink(); }}>Copy</button>
+                </div>
+              ) : (
+                <p className="rr-mp-empty">Referral link is not available yet.</p>
+              )}
+            </section>
+          ) : null}
         </div>
       </div>
     </div>
