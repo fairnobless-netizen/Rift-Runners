@@ -1,8 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type Props = {
   open: boolean;
   onClose: () => void;
+  autoJoin?: boolean;
+  initialJoinCode?: string | null;
+  joiningRoomCode?: string | null;
+  currentRoom?: {
+    roomCode: string;
+  } | null;
+  myRooms?: Array<{
+    roomCode: string;
+  }>;
+  onJoinRoomByCode?: (code: string) => Promise<void> | void;
+  onConsumeInitialJoinCode?: () => void;
+  onSendFriendRequest?: (targetId: string) => Promise<void> | void;
   hostDisplayName?: string | null;
   gameNickname?: string | null;
   account?: {
@@ -30,8 +42,46 @@ const emptyIncomingRequests: FriendRequest[] = [];
 export function MultiplayerModal({
   open,
   onClose,
+  autoJoin = false,
+  initialJoinCode,
+  joiningRoomCode,
+  currentRoom,
+  myRooms,
+  onJoinRoomByCode,
+  onConsumeInitialJoinCode,
+  onSendFriendRequest,
 }: Props): JSX.Element | null {
   const [tab, setTab] = useState<MainTab>('friends');
+  const [friendTargetDraft, setFriendTargetDraft] = useState('');
+  const [joinCodeDraft, setJoinCodeDraft] = useState('');
+  const autoJoinRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !autoJoin || !initialJoinCode || !onJoinRoomByCode) return;
+
+    const code = initialJoinCode.trim().toUpperCase();
+    if (!code) return;
+
+    if (autoJoinRef.current === code) return;
+    if (joiningRoomCode === code) return;
+
+    if (currentRoom?.roomCode === code) {
+      autoJoinRef.current = code;
+      onConsumeInitialJoinCode?.();
+      return;
+    }
+
+    autoJoinRef.current = code;
+    void onJoinRoomByCode(code);
+  }, [
+    autoJoin,
+    currentRoom?.roomCode,
+    initialJoinCode,
+    joiningRoomCode,
+    onConsumeInitialJoinCode,
+    onJoinRoomByCode,
+    open,
+  ]);
 
   if (!open) return null;
 
@@ -66,7 +116,25 @@ export function MultiplayerModal({
 
               <section className="rr-mp-section">
                 <h4>Outgoing Requests</h4>
-                <p className="rr-mp-empty">Coming soon</p>
+                <div className="rr-mp-inline-actions">
+                  <input
+                    type="text"
+                    value={friendTargetDraft}
+                    onChange={(event) => setFriendTargetDraft(event.target.value)}
+                    placeholder="Telegram user id"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = friendTargetDraft.trim();
+                      if (!id || !onSendFriendRequest) return;
+                      void onSendFriendRequest(id);
+                      setFriendTargetDraft('');
+                    }}
+                  >
+                    Send
+                  </button>
+                </div>
               </section>
             </>
           ) : null}
@@ -81,7 +149,39 @@ export function MultiplayerModal({
           {tab === 'room' ? (
             <section className="rr-mp-section rr-room-section">
               <h4>Room</h4>
-              <p className="rr-mp-empty">Coming soon</p>
+              <div className="rr-mp-inline-actions">
+                <input
+                  type="text"
+                  value={joinCodeDraft}
+                  onChange={(event) => setJoinCodeDraft(event.target.value)}
+                  placeholder="Room code"
+                />
+                <button
+                  type="button"
+                  disabled={Boolean(joiningRoomCode)}
+                  onClick={() => {
+                    const code = joinCodeDraft.trim().toUpperCase();
+                    if (!code || !onJoinRoomByCode) return;
+                    void onJoinRoomByCode(code);
+                  }}
+                >
+                  {joiningRoomCode ? 'Joining...' : 'Join'}
+                </button>
+              </div>
+              <div className="rr-mp-inline-actions">
+                {(myRooms ?? []).map((room) => (
+                  <button
+                    key={room.roomCode}
+                    type="button"
+                    onClick={() => {
+                      if (!onJoinRoomByCode) return;
+                      void onJoinRoomByCode(room.roomCode.trim().toUpperCase());
+                    }}
+                  >
+                    {room.roomCode}
+                  </button>
+                ))}
+              </div>
             </section>
           ) : null}
 
