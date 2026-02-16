@@ -128,7 +128,7 @@ const drawPanelSeams = (g: Phaser.GameObjects.Graphics, size: number, base: numb
   // Small cross seam
   if (rand() > 0.35) {
     const mid = size / 2;
-    g.lineStyle(Math.max(1, Math.floor(size * 0.03)), seam, 0.14);
+    g.lineStyle(Math.max(1, Math.floor(size * 0.03)), seam, 0.2);
     g.lineBetween(inset, mid, size - inset, mid);
     g.lineBetween(mid, inset, mid, size - inset);
   }
@@ -138,14 +138,14 @@ const drawPanelSeams = (g: Phaser.GameObjects.Graphics, size: number, base: numb
   for (let i = 0; i < bolts; i += 1) {
     const x = inset + rand() * (size - inset * 2);
     const y = inset + rand() * (size - inset * 2);
-    g.fillStyle(accent, 0.12 + rand() * 0.08);
+    g.fillStyle(accent, 0.18 + rand() * 0.09);
     g.fillCircle(x, y, Math.max(1, Math.floor(size * 0.035)));
   }
 
-  // Tiny noise
-  const noiseCount = 18 + Math.floor(rand() * 18);
+  // Tiny noise (restrained: keep floor mostly panel-like)
+  const noiseCount = 6 + Math.floor(rand() * 6);
   for (let i = 0; i < noiseCount; i += 1) {
-    g.fillStyle(varyColor(base, Math.floor(rand() * 18) - 9), 0.03 + rand() * 0.05);
+    g.fillStyle(varyColor(base, Math.floor(rand() * 14) - 7), 0.03 + rand() * 0.03);
     g.fillRect(Math.floor(rand() * size), Math.floor(rand() * size), 1, 1);
   }
 };
@@ -161,9 +161,16 @@ const drawFloorTile = (g: Phaser.GameObjects.Graphics, size: number, theme: Them
   // A couple of “plates”
   const plates = 1 + Math.floor(rand() * 2);
   for (let i = 0; i < plates; i += 1) {
-    const inset = Math.max(2, Math.floor(size * (0.12 + rand() * 0.08)));
-    g.lineStyle(Math.max(1, Math.floor(size * 0.025)), theme.floorPanel, 0.18);
-    g.strokeRect(inset, inset, size - inset * 2, size - inset * 2);
+    const plateW = Math.floor(size * (0.38 + rand() * 0.24));
+    const plateH = Math.floor(size * (0.22 + rand() * 0.16));
+    const x = Math.floor(size * 0.08 + rand() * (size - plateW - size * 0.16));
+    const y = Math.floor(size * 0.08 + rand() * (size - plateH - size * 0.16));
+    g.fillStyle(varyColor(theme.floorPanel, Math.floor(rand() * 10) - 5), 0.3);
+    g.fillRect(x, y, plateW, plateH);
+    g.lineStyle(Math.max(1, Math.floor(size * 0.03)), theme.floorPanel, 0.3);
+    g.strokeRect(x, y, plateW, plateH);
+    g.lineStyle(Math.max(1, Math.floor(size * 0.02)), theme.floorPanelAccent, 0.28);
+    g.strokeRect(x + 1, y + 1, Math.max(1, plateW - 2), Math.max(1, plateH - 2));
   }
 };
 
@@ -182,29 +189,54 @@ const drawPillarTile = (g: Phaser.GameObjects.Graphics, size: number, theme: The
     g.fillRect(x, y, w, h);
   }
 
-  g.lineStyle(Math.max(1, Math.floor(size * 0.05)), theme.pillarLine, 0.55);
+  const seamX = Math.floor(size * (0.35 + rand() * 0.3));
+  g.lineStyle(Math.max(1, Math.floor(size * 0.03)), theme.pillarLine, 0.5);
+  g.lineBetween(seamX, 2, seamX, size - 2);
+  g.lineStyle(Math.max(1, Math.floor(size * 0.02)), varyColor(theme.pillarBaseB, 16), 0.28);
+  g.lineBetween(seamX + 1, 2, seamX + 1, size - 2);
+
+  g.lineStyle(Math.max(2, Math.floor(size * 0.07)), theme.pillarLine, 0.72);
   g.strokeRect(1, 1, size - 2, size - 2);
 };
 
 const drawBreakableTile = (g: Phaser.GameObjects.Graphics, size: number, theme: ThemePalette, rand: () => number): void => {
-  const base = rand() > 0.5 ? theme.breakBaseA : theme.breakBaseB;
+  const base = varyColor(rand() > 0.5 ? theme.breakBaseA : theme.breakBaseB, -8);
   g.fillStyle(base, 1);
   g.fillRect(0, 0, size, size);
 
-  const chunks = 6 + Math.floor(rand() * 5);
+  const chunks = 3 + Math.floor(rand() * 2);
   for (let i = 0; i < chunks; i += 1) {
-    const rx = size * (0.08 + rand() * 0.1);
-    const ry = size * (0.08 + rand() * 0.1);
-    const cx = rx + rand() * (size - rx * 2);
-    const cy = ry + rand() * (size - ry * 2);
-    g.fillStyle(varyColor(base, Math.floor(rand() * 26) - 13), 0.95);
-    g.fillEllipse(cx, cy, rx * 2, ry * 2);
-    g.fillStyle(theme.breakHighlight, 0.22 + rand() * 0.18);
-    g.fillEllipse(cx - rx * 0.25, cy - ry * 0.25, rx * 0.9, ry * 0.65);
+    const w = size * (0.18 + rand() * 0.16);
+    const h = size * (0.14 + rand() * 0.12);
+    const x = rand() * (size - w);
+    const y = rand() * (size - h);
+    g.fillStyle(varyColor(base, Math.floor(rand() * 22) - 11), 0.9);
+    g.fillRect(x, y, w, h);
+    g.lineStyle(Math.max(1, Math.floor(size * 0.02)), theme.breakHighlight, 0.24);
+    g.strokeRect(x + 1, y + 1, Math.max(1, w - 2), Math.max(1, h - 2));
   }
 
+  // Central container/crystal for readability
+  const cx = size * 0.5;
+  const cy = size * 0.5;
+  const halfW = size * (0.16 + rand() * 0.05);
+  const halfH = size * (0.2 + rand() * 0.05);
+  g.fillStyle(varyColor(theme.breakHighlight, 18), 0.35);
+  g.beginPath();
+  g.moveTo(cx, cy - halfH);
+  g.lineTo(cx + halfW, cy);
+  g.lineTo(cx, cy + halfH);
+  g.lineTo(cx - halfW, cy);
+  g.closePath();
+  g.fillPath();
+  g.lineStyle(Math.max(1, Math.floor(size * 0.035)), theme.breakHighlight, 0.72);
+  g.strokePath();
+  g.lineStyle(Math.max(1, Math.floor(size * 0.02)), varyColor(theme.breakHighlight, 30), 0.45);
+  g.lineBetween(cx - halfW * 0.55, cy, cx + halfW * 0.55, cy);
+  g.lineBetween(cx, cy - halfH * 0.55, cx, cy + halfH * 0.55);
+
   // Mild outline
-  g.lineStyle(Math.max(1, Math.floor(size * 0.03)), 0x2a1a0c, 0.28);
+  g.lineStyle(Math.max(1, Math.floor(size * 0.04)), 0x2a1a0c, 0.45);
   g.strokeRect(1, 1, size - 2, size - 2);
 };
 
@@ -214,7 +246,7 @@ const drawBorderTile = (g: Phaser.GameObjects.Graphics, size: number, theme: The
   g.fillRect(0, 0, size, size);
 
   // Shards/noise
-  const shards = 18 + Math.floor(rand() * 18);
+  const shards = 10 + Math.floor(rand() * 10);
   for (let i = 0; i < shards; i += 1) {
     g.fillStyle(varyColor(base, Math.floor(rand() * 16) - 8), 0.25 + rand() * 0.25);
     if (rand() > 0.5) g.fillRect(rand() * size, rand() * size, 1 + rand() * 3, 1 + rand() * 3);
@@ -222,12 +254,12 @@ const drawBorderTile = (g: Phaser.GameObjects.Graphics, size: number, theme: The
   }
 
   // Veins / glow lines
-  const veins = 2 + Math.floor(rand() * 3);
+  const veins = 1 + Math.floor(rand() * 2);
   for (let i = 0; i < veins; i += 1) {
-    const points = 3 + Math.floor(rand() * 3);
+    const points = 3 + Math.floor(rand() * 2);
     let px = rand() * size;
     let py = rand() * size;
-    g.lineStyle(Math.max(1, Math.floor(size * 0.08)), theme.borderGlow, 0.10);
+    g.lineStyle(Math.max(1, Math.floor(size * 0.08)), theme.borderGlow, 0.08);
     for (let p = 0; p < points; p += 1) {
       const nx = Phaser.Math.Clamp(px + rand() * (size * 0.3) - size * 0.15, 0, size);
       const ny = Phaser.Math.Clamp(py + rand() * (size * 0.3) - size * 0.15, 0, size);
@@ -237,7 +269,7 @@ const drawBorderTile = (g: Phaser.GameObjects.Graphics, size: number, theme: The
     }
     px = rand() * size;
     py = rand() * size;
-    g.lineStyle(Math.max(1, Math.floor(size * 0.04)), theme.borderGlow, 0.35);
+    g.lineStyle(Math.max(1, Math.floor(size * 0.04)), theme.borderGlow, 0.32);
     for (let p = 0; p < points; p += 1) {
       const nx = Phaser.Math.Clamp(px + rand() * (size * 0.3) - size * 0.15, 0, size);
       const ny = Phaser.Math.Clamp(py + rand() * (size * 0.3) - size * 0.15, 0, size);
@@ -245,6 +277,48 @@ const drawBorderTile = (g: Phaser.GameObjects.Graphics, size: number, theme: The
       px = nx;
       py = ny;
     }
+  }
+
+  const glowSegments = 1 + Math.floor(rand() * 2);
+  const insetA = Math.max(2, Math.floor(size * 0.12));
+  const insetB = Math.max(insetA + 1, Math.floor(size * 0.2));
+  for (let i = 0; i < glowSegments; i += 1) {
+    const side = Math.floor(rand() * 4);
+    const len = size * (0.24 + rand() * 0.24);
+    const start = size * (0.12 + rand() * 0.52);
+    g.lineStyle(Math.max(1, Math.floor(size * 0.04)), theme.borderGlow, 0.36);
+    g.beginPath();
+    if (side === 0) {
+      g.moveTo(start, insetA);
+      g.lineTo(Math.min(size - insetA, start + len), insetA);
+    } else if (side === 1) {
+      g.moveTo(size - insetA, start);
+      g.lineTo(size - insetA, Math.min(size - insetA, start + len));
+    } else if (side === 2) {
+      g.moveTo(start, size - insetA);
+      g.lineTo(Math.min(size - insetA, start + len), size - insetA);
+    } else {
+      g.moveTo(insetA, start);
+      g.lineTo(insetA, Math.min(size - insetA, start + len));
+    }
+    g.strokePath();
+
+    g.lineStyle(Math.max(1, Math.floor(size * 0.02)), varyColor(theme.borderGlow, 36), 0.42);
+    g.beginPath();
+    if (side === 0) {
+      g.moveTo(start, insetB);
+      g.lineTo(Math.min(size - insetB, start + len * 0.85), insetB);
+    } else if (side === 1) {
+      g.moveTo(size - insetB, start);
+      g.lineTo(size - insetB, Math.min(size - insetB, start + len * 0.85));
+    } else if (side === 2) {
+      g.moveTo(start, size - insetB);
+      g.lineTo(Math.min(size - insetB, start + len * 0.85), size - insetB);
+    } else {
+      g.moveTo(insetB, start);
+      g.lineTo(insetB, Math.min(size - insetB, start + len * 0.85));
+    }
+    g.strokePath();
   }
 
   g.lineStyle(Math.max(1, Math.floor(size * 0.06)), 0x0a0606, 0.7);
