@@ -1227,6 +1227,59 @@ html[data-orient="landscape"] .right-panel {
   color: #b9c0d8;
 }
 
+/* ===========================
+   RR Unified Overlay Template
+   =========================== */
+
+.rr-overlay {
+  /* same stacking as other overlays */
+  z-index: 52;
+
+  /* IMPORTANT: base overlay uses grid; control placement here */
+  place-items: start center;
+
+  /* Safe spacing from Telegram header + iOS safe area */
+  padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top) + 14px);
+  padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom) + 14px);
+}
+
+.rr-overlay-modal {
+  /* Unified compact size like Multiplayer */
+  width: min(92vw, 620px);
+
+  /* Keep inside visible Telegram viewport */
+  max-height: calc(
+    var(--tg-viewport-stable-h)
+    - var(--safe-top)
+    - var(--safe-bottom)
+    - var(--tg-content-top, 0px)
+    - var(--tg-content-bottom, 0px)
+    - 24px
+  );
+
+  overflow: auto;
+
+  /* Unified frame look */
+  border: 1px solid #3a5aa0;
+  background: linear-gradient(165deg, rgba(8, 16, 38, 0.94), rgba(7, 14, 31, 0.95));
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 28px rgba(64, 111, 220, 0.24), inset 0 0 0 1px rgba(130, 170, 255, 0.12);
+}
+
+.rr-overlay .tab-row,
+.rr-overlay .settings-tabs,
+.rr-overlay .leaderboard-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rr-overlay button,
+.rr-overlay .tab-btn {
+  min-height: 36px;
+  border-radius: 12px;
+}
+
 .rr-mp-overlay {
   z-index: 52;
 
