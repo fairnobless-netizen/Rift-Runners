@@ -35,6 +35,7 @@ import {
   fetchFriends,
   fetchMyRooms,
   fetchRoom,
+  fetchLeaderboard,
   fetchShopCatalog,
   fetchShopOwned,
   fetchLedger,
@@ -45,6 +46,7 @@ import {
   setRoomReady,
   startRoom,
   respondFriend,
+  submitLeaderboard,
   type FriendEntry,
   type IncomingFriendRequest,
   type LeaderboardMeEntry,
@@ -57,7 +59,6 @@ import {
   type ShopCatalogItem,
   type WalletLedgerEntry,
 } from '../game/wallet';
-import { fetchLocalLeaderboard, submitLocalLeaderboard } from '../game/localLeaderboard';
 import { WsDebugOverlay } from './WsDebugOverlay';
 import { useWsClient } from '../ws/useWsClient';
 import { resolveDevIdentity } from '../utils/devIdentity';
@@ -282,7 +283,7 @@ export default function GameView(): JSX.Element {
   const [nicknameSubmitting, setNicknameSubmitting] = useState(false);
   const [gameUserIdCopied, setGameUserIdCopied] = useState(false);
   const [registrationOpen, setRegistrationOpen] = useState<boolean>(() => !(localStorage.getItem(DISPLAY_NAME_KEY) ?? '').trim());
-  const leaderboardSubmittedRef = useRef<string>('');
+  const lastSubmitKeyRef = useRef<string>('');
   const [gameFlowPhase, setGameFlowPhase] = useState<GameFlowPhase>('intro');
   const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
   const [tutorialActive, setTutorialActive] = useState(false);
@@ -1051,17 +1052,21 @@ export default function GameView(): JSX.Element {
     setLeaderboardLoading(true);
     setLeaderboardError(null);
     try {
-      const response = fetchLocalLeaderboard(mode, localTgUserId ?? 'local');
-      setLeaderboardTop(response.top);
-      setLeaderboardMe(response.me);
+      const response = await fetchLeaderboard(mode);
+      if (response?.ok) {
+        setLeaderboardTop(response.top);
+        setLeaderboardMe(response.me);
+      } else {
+        setLeaderboardTop([]);
+        setLeaderboardMe(null);
+      }
     } catch {
-      setLeaderboardError('Failed to load leaderboard');
       setLeaderboardTop([]);
       setLeaderboardMe(null);
     } finally {
       setLeaderboardLoading(false);
     }
-  }, [localTgUserId]);
+  }, []);
 
   const loadRooms = useCallback(async (): Promise<void> => {
     setRoomsLoading(true);
@@ -1338,25 +1343,24 @@ export default function GameView(): JSX.Element {
   }, [activeLeaderboardMode, leaderboardOpen]);
 
   useEffect(() => {
-    if (!lifeState.gameOver) return;
+    if (!lifeState.gameOver) {
+      lastSubmitKeyRef.current = '';
+      return;
+    }
+
     const participantIds = isMultiplayerMode
       ? currentRoomMembers.map((member) => member.tgUserId)
       : [localTgUserId ?? 'local'];
-    const participantNames = isMultiplayerMode
-      ? currentRoomMembers.map((member) => member.displayName)
-      : [profileName];
     const submitKey = `${activeLeaderboardMode}:${participantIds.slice().sort().join('|')}:${stats.score}`;
-    if (leaderboardSubmittedRef.current === submitKey) return;
-    leaderboardSubmittedRef.current = submitKey;
-    const me = submitLocalLeaderboard({
-      mode: activeLeaderboardMode,
-      score: stats.score,
-      ids: participantIds,
-      names: participantNames,
-      localPlayerId: localTgUserId ?? 'local',
-    });
-    setLeaderboardMe(me);
-  }, [activeLeaderboardMode, currentRoomMembers, isMultiplayerMode, lifeState.gameOver, localTgUserId, profileName, stats.score]);
+    if (lastSubmitKeyRef.current === submitKey) return;
+    lastSubmitKeyRef.current = submitKey;
+
+    void (async () => {
+      const submitResult = await submitLeaderboard(activeLeaderboardMode, stats.score);
+      if (!submitResult) return;
+      await loadLeaderboard(activeLeaderboardMode);
+    })();
+  }, [activeLeaderboardMode, currentRoomMembers, isMultiplayerMode, lifeState.gameOver, localTgUserId, loadLeaderboard, stats.score]);
 
   useEffect(() => {
     if (!multiplayerOpen) return;
