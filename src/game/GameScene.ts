@@ -98,6 +98,7 @@ interface FlameBeamModel {
 const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
 const LEVELS_PER_ZONE = BOSS_CONFIG.zonesPerStage;
 const MOVEMENT_SPEED_SCALE = 0.66;
+const TURN_BUFFER_MS = 220;
 const INITIAL_LIVES = 3;
 const MAX_LIVES = 6;
 const EXTRA_LIFE_STEP_SCORE = 1000;
@@ -225,7 +226,9 @@ export class GameScene extends Phaser.Scene {
   private detonateKey?: Phaser.Input.Keyboard.Key;
   private heldSince: Partial<Record<Direction, number>> = {};
   private nextRepeatAt: Partial<Record<Direction, number>> = {};
-  private pendingDirection: Direction | null = null;
+  private desiredDirection: Direction | null = null;
+  private queuedDirection: Direction | null = null;
+  private queuedDirectionUntilMs = 0;
   private placeBombUntil = 0;
   private audioSettings: SceneAudioSettings = { musicEnabled: true, sfxEnabled: true };
   private minZoom: number = GAME_CONFIG.minZoom;
@@ -486,7 +489,8 @@ export class GameScene extends Phaser.Scene {
     this.maxZoom = maxZoom;
     this.cameraFollowThresholdZoom = minZoom * 1.05;
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight, true);
-    this.cameras.main.roundPixels = true;
+    // Keep sub-pixel rendering for smoother interpolation between tile centers.
+    this.cameras.main.roundPixels = false;
     this.cameras.main.setDeadzone(this.scale.width * 0.26, this.scale.height * 0.26);
     this.applyZoom(minZoom, false);
     this.cameras.main.centerOn(worldWidth / 2, worldHeight / 2);
@@ -757,6 +761,9 @@ export class GameScene extends Phaser.Scene {
     this.controls.right = false;
     this.controls.placeBombRequested = false;
     this.controls.detonateRequested = false;
+    this.desiredDirection = null;
+    this.queuedDirection = null;
+    this.queuedDirectionUntilMs = 0;
   }
 
   private emitLifeState(): void {
@@ -1083,6 +1090,7 @@ export class GameScene extends Phaser.Scene {
 
     if (shouldFollow) {
       if (!this.isCameraFollowingPlayer) {
+        camera.centerOn(this.playerSprite.x, this.playerSprite.y);
         camera.startFollow(this.playerSprite, true, 0.14, 0.14);
         this.isCameraFollowingPlayer = true;
       }
@@ -1163,19 +1171,67 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.tryPickupItem(this.player.gridX, this.player.gridY);
+
+    // Simulation remains tile-based; this only chains buffered input so render
+    // interpolation does not pause/jitter at tile boundaries.
+    this.tryStartBufferedMove(time);
   }
 
   private consumeMovementIntent(time: number): void {
-    const intent = this.pendingDirection ?? this.getDirectionIntent(time)?.dir;
-    this.pendingDirection = null;
-    if (!intent) return;
+    const inputIntent = this.getDirectionIntent(time);
+    if (inputIntent) {
+      this.desiredDirection = inputIntent.dir;
+      this.queueDirection(inputIntent.dir, time);
+    } else if (!this.hasHeldDirection()) {
+      this.desiredDirection = null;
+    }
 
-    if (this.player.targetX !== null) {
-      this.pendingDirection = intent;
+    if (this.player.targetX !== null || this.player.targetY !== null) {
       return;
     }
 
-    this.startMove(intent, time);
+    this.tryStartBufferedMove(time);
+  }
+
+  private tryStartBufferedMove(time: number): void {
+    const candidate = this.getBufferedDirection(time) ?? this.desiredDirection;
+    if (!candidate) return;
+    if (!this.canStartPlayerMove(candidate)) return;
+
+    this.startMove(candidate, time);
+
+    if (this.queuedDirection === candidate) {
+      this.queuedDirection = null;
+      this.queuedDirectionUntilMs = 0;
+    }
+  }
+
+  // Keep the latest intent for a short time so slightly-early turns are applied
+  // on the first available tile decision point.
+  private queueDirection(direction: Direction, time: number): void {
+    this.queuedDirection = direction;
+    this.queuedDirectionUntilMs = time + this.scaleMovementDuration(TURN_BUFFER_MS);
+  }
+
+  private getBufferedDirection(time: number): Direction | null {
+    if (!this.queuedDirection) return null;
+    if (time > this.queuedDirectionUntilMs) {
+      this.queuedDirection = null;
+      this.queuedDirectionUntilMs = 0;
+      return null;
+    }
+    return this.queuedDirection;
+  }
+
+  private hasHeldDirection(): boolean {
+    return DIRECTIONS.some((direction) => this.isDirectionHeld(direction));
+  }
+
+  private canStartPlayerMove(direction: Direction): boolean {
+    const { dx, dy } = this.toDelta(direction);
+    const nx = this.player.gridX + dx;
+    const ny = this.player.gridY + dy;
+    return isInsideArena(this.arena, nx, ny) && canOccupyCell(this.arena, nx, ny);
   }
 
   private getDirectionIntent(time: number): TimedDirection | null {
