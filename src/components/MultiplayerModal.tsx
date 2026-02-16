@@ -9,7 +9,7 @@ import type {
 } from '../game/wallet';
 
 type MainTab = 'friends' | 'find' | 'room' | 'browse' | 'referral';
-type RoomTab = 'create' | 'join';
+type RoomScreen = 'create' | 'join';
 
 type Props = {
   open: boolean;
@@ -79,15 +79,17 @@ export function MultiplayerModal({
   onConsumeInitialJoinCode,
 }: Props): JSX.Element | null {
   const [tab, setTab] = useState<MainTab>(initialTab ?? 'room');
-  const [roomTab, setRoomTab] = useState<RoomTab>(initialRoomTab ?? 'join');
+  const [roomScreen, setRoomScreen] = useState<RoomScreen>(initialRoomTab ?? 'join');
   const [joinCodeDraft, setJoinCodeDraft] = useState(initialJoinCode ?? '');
   const [friendTargetDraft, setFriendTargetDraft] = useState('');
   const autoJoinRef = useRef<string | null>(null);
+  const isCreateScreen = roomScreen === 'create';
+  const isJoinScreen = roomScreen === 'join';
 
   useEffect(() => {
     if (!open) return;
     if (initialTab) setTab(initialTab);
-    if (initialRoomTab) setRoomTab(initialRoomTab);
+    if (initialRoomTab) setRoomScreen(initialRoomTab);
     if (initialJoinCode) setJoinCodeDraft(initialJoinCode);
   }, [initialJoinCode, initialRoomTab, initialTab, open]);
 
@@ -209,11 +211,11 @@ export function MultiplayerModal({
           {tab === 'room' ? (
             <>
               <div className="rr-room-subtabs">
-                <button type="button" className={roomTab === 'create' ? 'active' : ''} onClick={() => setRoomTab('create')}>Create</button>
-                <button type="button" className={roomTab === 'join' ? 'active' : ''} onClick={() => setRoomTab('join')}>Join</button>
+                <button type="button" className={isCreateScreen ? 'active' : ''} onClick={() => setRoomScreen('create')}>Create</button>
+                <button type="button" className={isJoinScreen ? 'active' : ''} onClick={() => setRoomScreen('join')}>Join</button>
               </div>
 
-              {roomTab === 'create' ? (
+              {isCreateScreen ? (
                 <section className="rr-mp-section rr-room-section">
                   <h4>Create room</h4>
                   <div className="rr-arena-grid">
@@ -224,7 +226,7 @@ export function MultiplayerModal({
                 </section>
               ) : null}
 
-              {roomTab === 'join' ? (
+              {isJoinScreen ? (
                 <section className="rr-mp-section rr-room-section">
                   <h4>Join room</h4>
                   <div className="rr-mp-row">
