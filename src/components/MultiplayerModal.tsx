@@ -10,6 +10,7 @@ import type {
 
 type MainTab = 'friends' | 'find' | 'room' | 'browse' | 'referral';
 type RoomTab = 'create' | 'join';
+type ArenaPosition = 'nw' | 'ne' | 'sw' | 'se';
 
 type Props = {
   open: boolean;
@@ -80,14 +81,21 @@ export function MultiplayerModal({
 }: Props): JSX.Element | null {
   const [tab, setTab] = useState<MainTab>(initialTab ?? 'room');
   const [roomTab, setRoomTab] = useState<RoomTab>(initialRoomTab ?? 'join');
+  const [roomFlowStarted, setRoomFlowStarted] = useState(Boolean(initialRoomTab));
   const [joinCodeDraft, setJoinCodeDraft] = useState(initialJoinCode ?? '');
   const [friendTargetDraft, setFriendTargetDraft] = useState('');
+  const [createRoomNameDraft, setCreateRoomNameDraft] = useState('');
+  const [createRoomPasswordDraft, setCreateRoomPasswordDraft] = useState('');
+  const [selectedCreateSlots, setSelectedCreateSlots] = useState<Array<ArenaPosition>>(['ne']);
   const autoJoinRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     if (initialTab) setTab(initialTab);
-    if (initialRoomTab) setRoomTab(initialRoomTab);
+    if (initialRoomTab) {
+      setRoomTab(initialRoomTab);
+      setRoomFlowStarted(true);
+    }
     if (initialJoinCode) setJoinCodeDraft(initialJoinCode);
   }, [initialJoinCode, initialRoomTab, initialTab, open]);
 
@@ -118,6 +126,31 @@ export function MultiplayerModal({
     () => currentRoomMembers.find((member) => member.tgUserId === localTgUserId)?.ready ?? false,
     [currentRoomMembers, localTgUserId],
   );
+
+  const isHost = currentRoom?.ownerTgUserId === localTgUserId;
+  const canStartRoom = Boolean(
+    currentRoom
+      && isHost
+      && !startingRoom
+      && currentRoomMembers.length >= 2
+      && currentRoomMembers.every((member) => member.ready ?? false)
+      && (currentRoom.phase ?? 'LOBBY') !== 'STARTED',
+  );
+
+  const createCapacity = (selectedCreateSlots.length + 1) as 2 | 3 | 4;
+  const arenaPositions: ArenaPosition[] = ['nw', 'ne', 'sw', 'se'];
+
+  const orderedLobbyMembers = useMemo(() => {
+    if (!currentRoom) return [] as RoomMember[];
+    const hostMember = currentRoomMembers.find((member) => member.tgUserId === currentRoom.ownerTgUserId) ?? {
+      tgUserId: currentRoom.ownerTgUserId,
+      displayName: 'Host',
+      ready: true,
+      joinedAt: '',
+    };
+    const nonHostMembers = currentRoomMembers.filter((member) => member.tgUserId !== currentRoom.ownerTgUserId);
+    return [hostMember, ...nonHostMembers].slice(0, 4);
+  }, [currentRoom, currentRoomMembers]);
 
   if (!open) return null;
 
@@ -208,25 +241,83 @@ export function MultiplayerModal({
 
           {tab === 'room' ? (
             <>
-              <div className="rr-room-subtabs">
-                <button type="button" className={roomTab === 'create' ? 'active' : ''} onClick={() => setRoomTab('create')}>Create</button>
-                <button type="button" className={roomTab === 'join' ? 'active' : ''} onClick={() => setRoomTab('join')}>Join</button>
-              </div>
+              {!currentRoom && !roomFlowStarted ? (
+                <section className="rr-mp-section rr-room-home-actions">
+                  <button type="button" onClick={() => { setRoomTab('create'); setRoomFlowStarted(true); }}>Create</button>
+                  <button type="button" onClick={() => { setRoomTab('join'); setRoomFlowStarted(true); }}>Join</button>
+                </section>
+              ) : null}
 
-              {roomTab === 'create' ? (
+              {!currentRoom && roomFlowStarted && roomTab === 'create' ? (
                 <section className="rr-mp-section rr-room-section">
-                  <h4>Create room</h4>
-                  <div className="rr-arena-grid">
-                    <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(2); }}>2 players</button>
-                    <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(3); }}>3 players</button>
-                    <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onCreateRoom(4); }}>4 players</button>
+                  <div className="rr-room-subtabs">
+                    <button type="button" className={roomTab === 'create' ? 'active' : ''} onClick={() => setRoomTab('create')}>Create</button>
+                    <button type="button" className={roomTab === 'join' ? 'active' : ''} onClick={() => setRoomTab('join')}>Join</button>
+                  </div>
+                  <div className="rr-mp-row rr-room-create-inputs">
+                    <input
+                      type="text"
+                      value={createRoomNameDraft}
+                      onChange={(event) => setCreateRoomNameDraft(event.target.value)}
+                      placeholder="Room name (optional)"
+                    />
+                    <input
+                      type="text"
+                      value={createRoomPasswordDraft}
+                      onChange={(event) => setCreateRoomPasswordDraft(event.target.value)}
+                      placeholder="Password (optional)"
+                    />
+                  </div>
+
+                  <div className="rr-arena-container">
+                    <div className="rr-arena-slot host nw">
+                      <strong>Host</strong>
+                      <span>{localTgUserId ?? 'You'}</span>
+                    </div>
+                    {(['ne', 'sw', 'se'] as const).map((position) => {
+                      const active = selectedCreateSlots.includes(position);
+                      return (
+                        <button
+                          key={position}
+                          type="button"
+                          className={`rr-arena-slot ${position} ${active ? 'active' : 'inactive'}`}
+                          onClick={() => {
+                            setSelectedCreateSlots((previous) => {
+                              if (active) {
+                                return previous.filter((slot) => slot !== position);
+                              }
+                              if (previous.length >= 3) return previous;
+                              return [...previous, position];
+                            });
+                          }}
+                        >
+                          <strong>{active ? 'Player slot selected' : 'Add player'}</strong>
+                          <span>{active ? 'Included in capacity' : 'Tap to include slot'}</span>
+                        </button>
+                      );
+                    })}
+                    <div className="rr-arena-center-action">
+                      <button
+                        type="button"
+                        disabled={Boolean(joiningRoomCode)}
+                        onClick={() => {
+                          void onCreateRoom(createCapacity);
+                        }}
+                      >
+                        Create
+                      </button>
+                      <span>{`Capacity: ${createCapacity}`}</span>
+                    </div>
                   </div>
                 </section>
               ) : null}
 
-              {roomTab === 'join' ? (
+              {!currentRoom && roomFlowStarted && roomTab === 'join' ? (
                 <section className="rr-mp-section rr-room-section">
-                  <h4>Join room</h4>
+                  <div className="rr-room-subtabs">
+                    <button type="button" className={roomTab === 'create' ? 'active' : ''} onClick={() => setRoomTab('create')}>Create</button>
+                    <button type="button" className={roomTab === 'join' ? 'active' : ''} onClick={() => setRoomTab('join')}>Join</button>
+                  </div>
                   <div className="rr-mp-row">
                     <input
                       type="text"
@@ -267,47 +358,55 @@ export function MultiplayerModal({
                       </button>
                     ))}
                   </section>
+                </section>
+              ) : null}
 
-                  <section className="rr-mp-section">
-                    <h4>Current room</h4>
-                    {!currentRoom ? (
-                      <p className="rr-mp-empty">Not in a room.</p>
+              {currentRoom ? (
+                <section className="rr-mp-section rr-room-section">
+                  <div className="rr-room-lobby-head">
+                    <strong>{createRoomNameDraft.trim() ? `Room: ${createRoomNameDraft.trim()}` : `Room ${currentRoom.roomCode}`}</strong>
+                    <span>{`Code: ${currentRoom.roomCode} · Phase: ${currentRoom.phase ?? 'LOBBY'}`}</span>
+                  </div>
+
+                  <div className="rr-arena-container rr-arena-container-lobby">
+                    {arenaPositions.map((position, index) => {
+                      const member = orderedLobbyMembers[index] ?? null;
+                      return (
+                        <div
+                          key={position}
+                          className={`rr-arena-slot ${position} ${position === 'nw' ? 'host' : ''} ${member?.ready ? 'ready' : ''}`}
+                        >
+                          <strong>{member?.displayName ?? (position === 'nw' ? 'Host' : 'Waiting for player')}</strong>
+                          <span>
+                            {member
+                              ? (member.ready ? 'Ready' : 'Not ready')
+                              : 'Waiting for player'}
+                          </span>
+                        </div>
+                      );
+                    })}
+
+                    <div className="rr-arena-center-action">
+                      {isHost ? (
+                        <button type="button" disabled={!canStartRoom} onClick={() => { void onStartRoom(); }}>
+                          {startingRoom ? 'Starting...' : 'Start'}
+                        </button>
+                      ) : (
+                        <button type="button" className={meReady ? 'rr-ready-button-on' : ''} disabled={settingReady} onClick={() => { void onToggleReady(); }}>
+                          {settingReady ? 'Saving...' : (meReady ? 'Ready ✓' : 'Ready')}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rr-mp-inline-actions rr-room-meta-actions">
+                    <button type="button" onClick={() => { void onCopyInviteLink(); }}>Copy invite</button>
+                    {isHost ? (
+                      <button type="button" className="ghost" onClick={() => { void onCloseRoom(); }}>Close room</button>
                     ) : (
-                      <>
-                        <div className="settings-kv"><span>Code</span><strong>{currentRoom.roomCode}</strong></div>
-                        <div className="settings-kv"><span>Status</span><strong>{currentRoom.status}</strong></div>
-                        <div className="settings-kv"><span>Phase</span><strong>{currentRoom.phase ?? 'LOBBY'}</strong></div>
-                        <div className="rr-mp-inline-actions">
-                          <button type="button" onClick={() => { void onCopyInviteLink(); }}>Copy invite</button>
-                          {currentRoom.ownerTgUserId === localTgUserId ? (
-                            <button type="button" className="ghost" onClick={() => { void onCloseRoom(); }}>Close room</button>
-                          ) : (
-                            <button type="button" className="ghost" onClick={() => { void onLeaveRoom(); }}>Leave</button>
-                          )}
-                        </div>
-                        <div className="rr-mp-inline-actions">
-                          <button type="button" disabled={settingReady} onClick={() => { void onToggleReady(); }}>
-                            {settingReady ? 'Saving...' : (meReady ? 'Ready ✓' : 'Set Ready')}
-                          </button>
-                          {currentRoom.ownerTgUserId === localTgUserId ? (
-                            <button
-                              type="button"
-                              disabled={startingRoom || currentRoomMembers.length < 2 || currentRoomMembers.some((member) => !(member.ready ?? false)) || (currentRoom.phase ?? 'LOBBY') === 'STARTED'}
-                              onClick={() => { void onStartRoom(); }}
-                            >
-                              {startingRoom ? 'Starting...' : 'Start'}
-                            </button>
-                          ) : null}
-                        </div>
-                        {currentRoomMembers.map((member) => (
-                          <div key={member.tgUserId} className="settings-kv">
-                            <span>{member.displayName}</span>
-                            <strong>{member.ready ? 'Ready' : 'Not ready'}</strong>
-                          </div>
-                        ))}
-                      </>
+                      <button type="button" className="ghost" onClick={() => { void onLeaveRoom(); }}>Leave</button>
                     )}
-                  </section>
+                  </div>
                 </section>
               ) : null}
             </>
