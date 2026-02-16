@@ -55,8 +55,8 @@ export function verifyTelegramInitData(
   }
 
   const map = parseInitData(initData);
-  const hash = map.get('hash');
-  if (!hash) {
+  const providedHash = map.get('hash');
+  if (!providedHash) {
     return { ok: false, error: 'hash_missing', message: 'Missing hash in initData' };
   }
 
@@ -89,13 +89,18 @@ export function verifyTelegramInitData(
   pairs.sort();
   const dataCheckString = pairs.join('\n');
 
-  const secretKey = crypto.createHmac('sha256', botToken).update('WebAppData').digest();
+  const secretKey = crypto
+    .createHmac('sha256', 'WebAppData')
+    .update(botToken, 'utf8')
+    .digest();
   const hmacHex = crypto
     .createHmac('sha256', secretKey)
-    .update(dataCheckString)
+    .update(dataCheckString, 'utf8')
     .digest('hex');
 
-  if (!safeEqualHex(hmacHex, hash)) {
+  console.log('[tg-verify] initDataLen:', initData.length, 'hashLen:', (providedHash ?? '').length, 'botTokenLen:', botToken.length);
+
+  if (!safeEqualHex(hmacHex, providedHash)) {
     logVerifyDiagnostic(map, dataCheckString.length);
     return {
       ok: false,
