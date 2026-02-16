@@ -276,7 +276,6 @@ export default function GameView(): JSX.Element {
   const [outgoingRequests, setOutgoingRequests] = useState<OutgoingFriendRequest[]>([]);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>({ musicEnabled: true, sfxEnabled: true });
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
-  const [displayNameDraft, setDisplayNameDraft] = useState('');
   const [nicknameDraft, setNicknameDraft] = useState('');
   const [nicknameCheckState, setNicknameCheckState] = useState<NicknameCheckState>('idle');
   const [nicknameSubmitError, setNicknameSubmitError] = useState<string | null>(null);
@@ -503,8 +502,6 @@ export default function GameView(): JSX.Element {
         };
         setAccountInfo(account);
 
-        // Display name (TG-style) stays editable in settings
-        setDisplayNameDraft(account.displayName || (localStorage.getItem(DISPLAY_NAME_KEY) ?? ''));
         if (account.displayName) {
           localStorage.setItem(DISPLAY_NAME_KEY, account.displayName);
         }
@@ -854,7 +851,6 @@ export default function GameView(): JSX.Element {
     const localName = (localStorage.getItem(DISPLAY_NAME_KEY) ?? '').trim();
     if (!localName) return;
     setProfileName((prev) => (prev === '—' || prev === 'Dev Player' ? localName : prev));
-    setDisplayNameDraft((prev) => prev || localName);
   }, []);
 
   const isMultiplayerMode = Boolean(currentRoom && currentRoomMembers.length >= 2);
@@ -1637,6 +1633,10 @@ export default function GameView(): JSX.Element {
       // Keep UI name in sync (solo HUD + local leaderboard participant name)
       setProfileName(nextNickname);
 
+      if (leaderboardOpen) {
+        void loadLeaderboard(leaderboardMode);
+      }
+
       setRegistrationOpen(false);
     } catch (error) {
       debugNicknameFailure({ endpoint: '/api/profile/nickname', method: 'POST', payload: { nickname }, error });
@@ -1668,38 +1668,6 @@ export default function GameView(): JSX.Element {
     && nicknameCheckState === 'available'
     && !nicknameSubmitting,
   );
-
-  const onSubmitDisplayName = async (event?: FormEvent): Promise<void> => {
-    event?.preventDefault();
-    const trimmed = displayNameDraft.trim();
-    const normalized = Array.from(trimmed).slice(0, 24).join('');
-    if (normalized.length < 2) return;
-
-    localStorage.setItem(DISPLAY_NAME_KEY, normalized);
-    setProfileName(normalized);
-    setRegistrationOpen(false);
-
-    if (!token) return;
-
-    const response = await fetch(apiUrl('/api/profile/name'), {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ displayName: normalized }),
-    });
-
-    const json = await response.json().catch(() => null);
-    if (response.ok && json?.ok) {
-      setAccountInfo((prev) => (prev ? { ...prev, displayName: normalized, nameChangeRemaining: Number(json.remaining ?? prev.nameChangeRemaining) } : prev));
-      return;
-    }
-
-    if (response.status === 429) {
-      setAccountInfo((prev) => (prev ? { ...prev, nameChangeRemaining: 0 } : prev));
-    }
-  };
 
   useEffect(() => {
     if (!showBootSplash) return;
@@ -2425,16 +2393,11 @@ export default function GameView(): JSX.Element {
                 </label>
               </div>
             ) : (
-              <form
-                className="settings-panel"
-                onSubmit={(event) => {
-                  void onSubmitDisplayName(event);
-                }}
-              >
+              <div className="settings-panel">
                 <div className="settings-kv"><span>User ID</span><strong>{accountInfo?.gameUserId || accountInfo?.id || '—'}</strong></div>
                 <div className="settings-kv"><span>Telegram</span><strong>{localTgUserId ?? 'Not connected'}</strong></div>
                 <div className="settings-kv"><span>Game nickname</span><strong>{accountInfo?.gameNickname ?? '—'}</strong></div>
-                <div className="settings-kv"><span>Remaining</span><strong>{accountInfo?.nameChangeRemaining ?? 3}</strong></div>
+                <div className="settings-kv"><span>Nickname changes remaining</span><strong>{accountInfo?.nameChangeRemaining ?? 3}</strong></div>
                 <div className="settings-ref">
                   <input type="text" readOnly value={accountInfo?.referralLink ?? ''} />
                   <button type="button" onClick={() => { void onCopyReferral(); }}>Copy</button>
@@ -2453,15 +2416,7 @@ export default function GameView(): JSX.Element {
                 >
                   Change nickname
                 </button>
-                <input
-                  type="text"
-                  maxLength={24}
-                  value={displayNameDraft}
-                  onChange={(event) => setDisplayNameDraft(event.target.value)}
-                  placeholder="Display name (Telegram)"
-                />
-                <button type="submit">Save</button>
-              </form>
+              </div>
             )}
           </div>
         </div>
