@@ -3,6 +3,7 @@ import { resolveSessionFromRequest } from '../auth/session';
 import {
   computeNameChangeRemaining,
   ensureGameUserId,
+  ensureReferralCode,
   getUserAndWallet,
   getUserSettings,
   getReferralStats,
@@ -65,10 +66,11 @@ profileRouter.get('/profile/account', async (req, res) => {
   if (!uw) return res.status(404).json({ ok: false, error: 'User not found' });
 
   const gameUserId = await ensureGameUserId(s.tgUserId);
+  const referralCode = await ensureReferralCode(s.tgUserId);
   const tgBotUsername = String(process.env.TG_BOT_USERNAME ?? '').trim();
   const referralLink = tgBotUsername
-    ? `https://t.me/${tgBotUsername}?startapp=ref_${encodeURIComponent(gameUserId)}`
-    : `https://t.me/share/url?url=${encodeURIComponent(gameUserId)}`;
+    ? `https://t.me/${tgBotUsername}?startapp=ref_${encodeURIComponent(referralCode)}`
+    : `https://t.me/share/url?url=${encodeURIComponent(referralCode)}`;
 
   const nameChangeRemaining = await computeNameChangeRemaining(s.tgUserId);
 
@@ -144,11 +146,11 @@ profileRouter.get('/profile/referral', async (req, res) => {
   const s = await resolveSessionFromRequest(req as any);
   if (!s) return res.status(401).json({ ok: false, error: 'unauthorized' });
 
-  const gameUserId = await ensureGameUserId(s.tgUserId);
+  const referralCode = await ensureReferralCode(s.tgUserId);
   const tgBotUsername = String(process.env.TG_BOT_USERNAME ?? '').trim();
   const link = tgBotUsername
-    ? `https://t.me/${tgBotUsername}?startapp=ref_${encodeURIComponent(gameUserId)}`
-    : `https://t.me/share/url?url=${encodeURIComponent(gameUserId)}`;
+    ? `https://t.me/${tgBotUsername}?startapp=ref_${encodeURIComponent(referralCode)}`
+    : `https://t.me/share/url?url=${encodeURIComponent(referralCode)}`;
 
   const stats = await getReferralStats(s.tgUserId);
   return res.status(200).json({ link, plasmaEarned: stats.plasmaEarned, invitedCount: stats.invitedCount });

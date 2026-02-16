@@ -20,6 +20,12 @@ ALTER TABLE users
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS game_nickname_lower TEXT UNIQUE;
 
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS referral_code TEXT UNIQUE;
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS referred_by_user_id TEXT NULL REFERENCES users(tg_user_id) ON DELETE SET NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_game_nickname_lower
   ON users (game_nickname_lower);
 
@@ -270,8 +276,12 @@ CREATE INDEX IF NOT EXISTS idx_friend_requests_from_status_created
 CREATE TABLE IF NOT EXISTS referrals (
   invitee_user_id TEXT PRIMARY KEY REFERENCES users(tg_user_id) ON DELETE CASCADE,
   referrer_user_id TEXT NOT NULL REFERENCES users(tg_user_id) ON DELETE CASCADE,
-  created_at BIGINT NOT NULL
+  created_at BIGINT NOT NULL,
+  reward_granted_at BIGINT NULL
 );
+
+ALTER TABLE referrals
+  ADD COLUMN IF NOT EXISTS reward_granted_at BIGINT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_referrals_referrer
   ON referrals (referrer_user_id, created_at DESC);

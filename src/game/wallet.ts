@@ -249,6 +249,29 @@ export async function confirmPurchase(intentId: string): Promise<{ wallet: Walle
   }
 }
 
+
+export async function claimReferral(refCode: string): Promise<boolean> {
+  const token = getToken();
+  if (!token) return false;
+
+  try {
+    const res = await fetch(apiUrl('/api/referrals/claim'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ refCode }),
+    });
+
+    if (!res.ok) return false;
+    const json = await res.json();
+    return Boolean(json?.ok);
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchLeaderboard(mode: LeaderboardMode): Promise<LeaderboardResponse | null> {
   const token = getToken();
 

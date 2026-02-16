@@ -3,6 +3,7 @@ import { resolveSessionFromRequest } from '../auth/session';
 import {
   checkAndTouchLeaderboardSubmitLimit,
   getMyLeaderboardEntry,
+  grantReferralBonusForFirstCompletedMatch,
   listLeaderboardTop,
   submitLeaderboardScore,
 } from '../db/repos';
@@ -50,6 +51,7 @@ leaderboardRouter.post('/submit', async (req, res) => {
   }
 
   await submitLeaderboardScore(session.tgUserId, mode, score);
+  await grantReferralBonusForFirstCompletedMatch(session.tgUserId);
   const me = await getMyLeaderboardEntry(session.tgUserId, mode);
 
   return res.status(200).json({ ok: true, mode, me });
