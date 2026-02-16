@@ -24,9 +24,24 @@ friendsRouter.get('/', async (req, res) => {
   ]);
 
   return res.status(200).json({
-    confirmed: confirmedRaw.map((u) => ({ userId: u.userId, tgUsername: u.tgUsername, displayName: u.displayName })),
-    incoming: incomingRaw.map((r) => ({ requestId: r.requestId, from: { userId: r.user.userId, tgUsername: r.user.tgUsername, displayName: r.user.displayName }, createdAt: r.createdAt })),
-    outgoing: outgoingRaw.map((r) => ({ requestId: r.requestId, to: { userId: r.user.userId, tgUsername: r.user.tgUsername, displayName: r.user.displayName }, createdAt: r.createdAt })),
+    ok: true,
+    friends: confirmedRaw.map((u) => ({
+      tgUserId: u.userId,
+      displayName: u.displayName,
+    })),
+    incoming: incomingRaw.map((r) => ({
+      requestId: r.requestId,
+      fromTgUserId: r.user.userId,
+      displayName: r.user.displayName,
+      createdAt: r.createdAt,
+    })),
+    outgoing: outgoingRaw.map((r) => ({
+      requestId: r.requestId,
+      toTgUserId: r.user.userId,
+      displayName: r.user.displayName,
+      createdAt: r.createdAt,
+      status: 'PENDING',
+    })),
   });
 });
 
