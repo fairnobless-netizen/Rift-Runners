@@ -93,18 +93,25 @@ export function MultiplayerModal({
 
   useEffect(() => {
     if (!open || !autoJoin || !initialJoinCode) return;
-    if (autoJoinRef.current === initialJoinCode) return;
-    if (joiningRoomCode === initialJoinCode) return;
-    if (currentRoom?.roomCode === initialJoinCode) {
-      autoJoinRef.current = initialJoinCode;
+
+    const code = initialJoinCode.trim().toUpperCase();
+    if (!code) return;
+
+    // prevent repeated attempts for the same deep-link code
+    if (autoJoinRef.current === code) return;
+
+    // if join already in progress for this code, do nothing
+    if (joiningRoomCode === code) return;
+
+    // if we already joined this room, consume the code once
+    if (currentRoom?.roomCode === code) {
+      autoJoinRef.current = code;
       onConsumeInitialJoinCode?.();
       return;
     }
 
-    autoJoinRef.current = initialJoinCode;
-    void onJoinRoomByCode(initialJoinCode).finally(() => {
-      onConsumeInitialJoinCode?.();
-    });
+    autoJoinRef.current = code;
+    void onJoinRoomByCode(code);
   }, [autoJoin, currentRoom?.roomCode, initialJoinCode, joiningRoomCode, onConsumeInitialJoinCode, onJoinRoomByCode, open]);
 
   const meReady = useMemo(
@@ -145,7 +152,9 @@ export function MultiplayerModal({
                   <button
                     type="button"
                     onClick={() => {
-                      void onSendFriendRequest(friendTargetDraft);
+                      const id = friendTargetDraft.trim();
+                      if (!id) return;
+                      void onSendFriendRequest(id);
                       setFriendTargetDraft('');
                     }}
                   >
@@ -225,7 +234,15 @@ export function MultiplayerModal({
                       onChange={(event) => setJoinCodeDraft(event.target.value.toUpperCase())}
                       placeholder="Room code"
                     />
-                    <button type="button" disabled={Boolean(joiningRoomCode)} onClick={() => { void onJoinRoomByCode(joinCodeDraft); }}>
+                    <button
+                      type="button"
+                      disabled={Boolean(joiningRoomCode)}
+                      onClick={() => {
+                        const code = joinCodeDraft.trim().toUpperCase();
+                        if (!code) return;
+                        void onJoinRoomByCode(code);
+                      }}
+                    >
                       {joiningRoomCode ? 'Joining...' : 'Join'}
                     </button>
                   </div>
@@ -243,7 +260,7 @@ export function MultiplayerModal({
                         type="button"
                         className="rr-mp-row"
                         disabled={Boolean(joiningRoomCode)}
-                        onClick={() => { void onJoinRoomByCode(room.roomCode); }}
+                        onClick={() => { void onJoinRoomByCode(room.roomCode.trim().toUpperCase()); }}
                       >
                         <span>{room.roomCode}</span>
                         <span>{room.memberCount}/{room.capacity} · {room.status}</span>
