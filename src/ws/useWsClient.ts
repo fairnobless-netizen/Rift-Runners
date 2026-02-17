@@ -81,6 +81,8 @@ export function useWsClient(token?: string) {
 
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<WsServerMessage[]>([]);
+  const [urlUsed, setUrlUsed] = useState<string>('');
+  const [lastError, setLastError] = useState<string | null>(null);
 
   // M14.7 RTT (EMA + jitter EMA)
   const pingSeqRef = useRef(0);
@@ -111,11 +113,20 @@ export function useWsClient(token?: string) {
       }
     }
 
+    setUrlUsed(wsUrl);
+    setLastError(null);
+
     const client = new WsClient({
       url: wsUrl,
       token,
-      onOpen: () => setConnected(true),
+      onOpen: () => {
+        setConnected(true);
+        setLastError(null);
+      },
       onClose: () => setConnected(false),
+      onError: () => {
+        setLastError('WebSocket error');
+      },
       onMessage: (msg) => {
         // Handle pong without polluting messages
         if (msg.type === 'pong') {
@@ -139,6 +150,10 @@ export function useWsClient(token?: string) {
             setRttJitterMs(rttJitterEmaRef.current);
           }
           return;
+        }
+
+        if (msg.type === 'match:error') {
+          setLastError(msg.error);
         }
 
         const config = netSimConfigRef.current;
@@ -173,12 +188,15 @@ export function useWsClient(token?: string) {
       client.disconnect();
       clientRef.current = null;
       setConnected(false);
+      setUrlUsed('');
     };
   }, [token]);
 
   return {
     connected,
     messages,
+    urlUsed,
+    lastError,
     netSimConfig,
     netSimPresets: NET_SIM_PRESETS,
     rttMs,
