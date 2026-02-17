@@ -33,3 +33,12 @@ PORT=4101 npm --prefix backend run start
    - `ts: <iso timestamp>`
    - `version: <git sha or dev>`
 3. Probe workflow note: run Playwright probe E2E (`npm run test:e2e:probe`) to generate operational artifacts and verify the smoke path.
+
+## Vercel env quick memo
+
+Set these variables in the Vercel project for production frontend:
+
+- `VITE_API_BASE_URL=https://rift-runners-backend.onrender.com`
+- `VITE_WS_URL=wss://rift-runners-backend.onrender.com/ws`
+
+This routes REST + WS traffic to Render backend (instead of same-origin Vercel host).

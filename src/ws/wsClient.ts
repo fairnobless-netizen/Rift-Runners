@@ -5,7 +5,7 @@ export type WsClientOptions = {
   token: string;
   onMessage?: (msg: WsServerMessage) => void;
   onOpen?: () => void;
-  onClose?: () => void;
+  onClose?: (event: CloseEvent) => void;
   onError?: (error: Event) => void;
 };
 
@@ -34,9 +34,9 @@ export class WsClient {
       }
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       this.ws = undefined;
-      this.opts.onClose?.();
+      this.opts.onClose?.(event);
     };
 
     this.ws.onerror = (error) => {

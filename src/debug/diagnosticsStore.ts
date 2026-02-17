@@ -15,6 +15,8 @@ type WsDiagnosticsState = {
   lastError: string | null;
   lastOpenAt: string | null;
   lastCloseAt: string | null;
+  lastCloseCode: number | null;
+  lastCloseReason: string | null;
   lastMessageAt: string | null;
   retryCount: number | null;
 };
@@ -51,6 +53,8 @@ const state: DiagnosticsSnapshot = {
     lastError: null,
     lastOpenAt: null,
     lastCloseAt: null,
+    lastCloseCode: null,
+    lastCloseReason: null,
     lastMessageAt: null,
     retryCount: null,
   },
