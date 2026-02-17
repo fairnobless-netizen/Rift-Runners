@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GIT_SHA: ${{ github.sha }}
+      VITE_API_BASE_URL: http://127.0.0.1:4101
+      VITE_WS_URL: ws://127.0.0.1:4101
     timeout-minutes: 10
 
     steps:
