@@ -2364,6 +2364,8 @@ export default function GameView(): JSX.Element {
         </RROverlayModal>
       )}
 
+      {isMultiplayerDebugEnabled ? <div className="debug-on-badge">DBG ON</div> : null}
+
       <DiagnosticsOverlay enabled={isMultiplayerDebugEnabled} />
 
       <WsDebugOverlay

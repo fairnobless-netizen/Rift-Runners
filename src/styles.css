@@ -1938,3 +1938,19 @@ html[data-orient="landscape"] .right-panel {
   font-size: 0.72rem;
   color: #9bb2de;
 }
+
+.debug-on-badge {
+  position: fixed;
+  top: 0.55rem;
+  left: 0.55rem;
+  z-index: 3200;
+  pointer-events: none;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(136, 178, 255, 0.8);
+  background: rgba(6, 14, 36, 0.88);
+  color: #cde0ff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
