@@ -5,11 +5,14 @@ import './styles.css';
 
 function bootstrapDebugFlags() {
   const params = new URLSearchParams(window.location.search);
+  const tgWebAppStartParam = params.get('tgWebAppStartParam')?.toLowerCase() ?? '';
+  const hasTgWebAppStartParamDebug = tgWebAppStartParam.includes('debug') || tgWebAppStartParam === 'wsdebug/rr_debug/debug';
 
   const queryDebug =
     params.has('rr_debug') ||
     params.has('wsdebug') ||
-    params.has('debug');
+    params.has('debug') ||
+    hasTgWebAppStartParamDebug;
 
   let startParamDebug = false;
 
