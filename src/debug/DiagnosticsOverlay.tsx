@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { diagnosticsStore, type DiagnosticsCategory, type DiagnosticsSnapshot } from './diagnosticsStore';
 
 type CategoryFilter = 'ALL' | DiagnosticsCategory;
@@ -32,7 +33,7 @@ export function DiagnosticsOverlay({ enabled }: { enabled: boolean }) {
     });
   };
 
-  return (
+  const overlay = (
     <div className="rr-diag-overlay-root">
       <button type="button" className="rr-diag-pill" onClick={() => setExpanded((v) => !v)}>
         {expanded ? 'DBG ×' : 'DBG'}
@@ -76,4 +77,6 @@ export function DiagnosticsOverlay({ enabled }: { enabled: boolean }) {
       ) : null}
     </div>
   );
+
+  return createPortal(overlay, document.body);
 }

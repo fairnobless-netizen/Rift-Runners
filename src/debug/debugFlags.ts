@@ -1,29 +1,60 @@
-export function isDebugEnabled(search: string = window.location.search): boolean {
-  try {
-    const params = new URLSearchParams(search);
-    const tgWebAppStartParam = params.get('tgWebAppStartParam')?.toLowerCase() ?? '';
-    const fromQuery =
-      params.has('rr_debug') ||
-      params.get('rr_debug') === '1' ||
-      params.has('wsdebug') ||
-      params.get('wsdebug') === '1' ||
-      params.has('debug') ||
-      params.get('debug') === '1' ||
-      tgWebAppStartParam.includes('debug') ||
-      tgWebAppStartParam === 'wsdebug/rr_debug/debug';
-    const fromStorage = window.localStorage.getItem('rr_debug') === '1';
+type DebugState = {
+  fromQuery: boolean;
+  fromTgWebAppStartParam: boolean;
+  fromTelegramStartParam: boolean;
+  fromStorage: boolean;
+  fromMemory: boolean;
+  enabled: boolean;
+};
 
-    let fromInitDataStartParam = false;
-    try {
-      const tg = (window as any).Telegram?.WebApp;
-      const startParam = tg?.initDataUnsafe?.start_param;
-      fromInitDataStartParam = typeof startParam === 'string' && startParam.toLowerCase().includes('debug');
-    } catch {
-      // ignore safely
-    }
-
-    return fromStorage || fromQuery || fromInitDataStartParam;
-  } catch {
-    return false;
+declare global {
+  interface Window {
+    __RR_DEBUG__?: boolean;
   }
+}
+
+function hasDebugToken(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.toLowerCase().includes('debug');
+}
+
+export function getDebugState(search: string = window.location.search): DebugState {
+  const params = new URLSearchParams(search);
+  const queryFlags: Array<'rr_debug' | 'wsdebug' | 'debug'> = ['rr_debug', 'wsdebug', 'debug'];
+  const fromQuery = queryFlags.some((key) => params.get(key) === '1' || params.has(key));
+  const fromTgWebAppStartParam = hasDebugToken(params.get('tgWebAppStartParam'));
+
+  let fromTelegramStartParam = false;
+  try {
+    const tg = (window as any).Telegram?.WebApp;
+    fromTelegramStartParam = hasDebugToken(tg?.initDataUnsafe?.start_param);
+  } catch {
+    fromTelegramStartParam = false;
+  }
+
+  let fromStorage = false;
+  try {
+    fromStorage = window.localStorage.getItem('rr_debug') === '1';
+  } catch {
+    fromStorage = false;
+  }
+
+  const fromMemory = window.__RR_DEBUG__ === true;
+  const enabled = fromQuery || fromTgWebAppStartParam || fromTelegramStartParam || fromStorage || fromMemory;
+
+  if (enabled) {
+    window.__RR_DEBUG__ = true;
+  }
+
+  return {
+    fromQuery,
+    fromTgWebAppStartParam,
+    fromTelegramStartParam,
+    fromStorage,
+    fromMemory,
+    enabled,
+  };
+}
+
+export function isDebugEnabled(search: string = window.location.search): boolean {
+  return getDebugState(search).enabled;
 }

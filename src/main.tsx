@@ -1,34 +1,19 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { getDebugState } from './debug/debugFlags';
 import './styles.css';
 
 function bootstrapDebugFlags() {
-  const params = new URLSearchParams(window.location.search);
-  const tgWebAppStartParam = params.get('tgWebAppStartParam')?.toLowerCase() ?? '';
-  const hasTgWebAppStartParamDebug = tgWebAppStartParam.includes('debug') || tgWebAppStartParam === 'wsdebug/rr_debug/debug';
+  const debugState = getDebugState(window.location.search);
+  if (!debugState.enabled) return;
 
-  const queryDebug =
-    params.has('rr_debug') ||
-    params.has('wsdebug') ||
-    params.has('debug') ||
-    hasTgWebAppStartParamDebug;
-
-  let startParamDebug = false;
+  window.__RR_DEBUG__ = true;
 
   try {
-    const tg = (window as any).Telegram?.WebApp;
-    const startParam = tg?.initDataUnsafe?.start_param;
-
-    if (typeof startParam === 'string' && startParam.toLowerCase().includes('debug')) {
-      startParamDebug = true;
-    }
-  } catch (e) {
-    // ignore safely
-  }
-
-  if (queryDebug || startParamDebug) {
-    localStorage.setItem('rr_debug', '1');
+    window.localStorage.setItem('rr_debug', '1');
+  } catch {
+    // ignore storage write errors in restricted webviews
   }
 }
 
