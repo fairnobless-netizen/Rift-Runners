@@ -381,6 +381,23 @@ export default function GameView(): JSX.Element {
     });
   }, [isMultiplayerDebugEnabled, currentRoom?.roomCode, currentRoom?.phase, currentRoomMembers.length, isRoomOwner, roomCanStart]);
 
+  useEffect(() => {
+    const phase = currentRoom?.phase ?? 'LOBBY';
+    if (phase !== 'STARTED') return;
+
+    if (multiplayerUiOpen) {
+      setMultiplayerUiOpen(false);
+      setDeepLinkJoinCode(null);
+
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('UI', 'INFO', 'multiplayer:auto_close_on_started', {
+          roomCode: currentRoom?.roomCode ?? null,
+          phase,
+        });
+      }
+    }
+  }, [currentRoom?.phase, currentRoom?.roomCode, multiplayerUiOpen, isMultiplayerDebugEnabled]);
+
   const updateTgMetrics = useCallback((): void => {
     const tg = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
     const insets = tg?.contentSafeAreaInset ?? tg?.safeAreaInset;
@@ -969,8 +986,21 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
     if (!last?.snapshot) return;
+
     sceneRef.current?.applyMatchSnapshot(last.snapshot, localTgUserId);
-  }, [ws.messages, localTgUserId]);
+
+    // If WS snapshots are flowing, match is live → ensure lobby overlay is gone for everyone.
+    if (multiplayerUiOpen) {
+      setMultiplayerUiOpen(false);
+      setDeepLinkJoinCode(null);
+
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('UI', 'INFO', 'multiplayer:auto_close_on_snapshot', {
+          roomCode: currentRoom?.roomCode ?? null,
+        });
+      }
+    }
+  }, [ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode]);
 
   useEffect(() => {
     sceneRef.current?.setNetRtt(ws.rttMs ?? null, ws.rttJitterMs ?? 0);
