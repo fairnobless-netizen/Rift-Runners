@@ -2283,6 +2283,7 @@ export default function GameView(): JSX.Element {
       <WsDebugOverlay
         connected={ws.connected}
         messages={ws.messages}
+        debugEvents={ws.debugEvents}
         identity={{
           id: localTgUserId,
           clientId: devIdentity.clientId,

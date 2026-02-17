@@ -27,6 +27,40 @@ export type NetSimConfig = {
   dropRate: number;
 };
 
+export type WsDebugEvent = {
+  direction: 'in' | 'out';
+  type: string;
+  roomId?: string;
+  matchId?: string;
+  playersCount?: number;
+  error?: string;
+};
+
+function toDebugEvent(direction: 'in' | 'out', msg: WsClientMessage | WsServerMessage): WsDebugEvent {
+  if (msg.type === 'room:join') {
+    return { direction, type: msg.type, roomId: msg.roomId };
+  }
+
+  if (msg.type === 'match:started') {
+    return { direction, type: msg.type, matchId: msg.matchId };
+  }
+
+  if (msg.type === 'match:snapshot') {
+    return {
+      direction,
+      type: msg.type,
+      matchId: msg.snapshot.matchId,
+      playersCount: msg.snapshot.players.length,
+    };
+  }
+
+  if (msg.type === 'match:error') {
+    return { direction, type: msg.type, error: msg.error };
+  }
+
+  return { direction, type: msg.type };
+}
+
 function parseNumber(search: URLSearchParams, key: string): number | undefined {
   const raw = search.get(key);
   if (raw === null || raw.trim() === '') return undefined;
@@ -81,6 +115,7 @@ export function useWsClient(token?: string) {
 
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<WsServerMessage[]>([]);
+  const [debugEvents, setDebugEvents] = useState<WsDebugEvent[]>([]);
 
   // M14.7 RTT (EMA + jitter EMA)
   const pingSeqRef = useRef(0);
@@ -148,6 +183,7 @@ export function useWsClient(token?: string) {
         const delayMs = shouldSimulateSnapshot ? getNetDelayMs(config) : 0;
         window.setTimeout(() => {
           setMessages((prev) => [...prev.slice(-50), msg]);
+          setDebugEvents((prev) => [...prev.slice(-14), toDebugEvent('in', msg)]);
         }, delayMs);
       },
     });
@@ -179,6 +215,7 @@ export function useWsClient(token?: string) {
   return {
     connected,
     messages,
+    debugEvents,
     netSimConfig,
     netSimPresets: NET_SIM_PRESETS,
     rttMs,
@@ -205,6 +242,8 @@ export function useWsClient(token?: string) {
       const config = netSimConfigRef.current;
       const shouldSimulateInput = import.meta.env.DEV && msg.type === 'match:input' && config.enabled;
       if (shouldSimulateInput && shouldDrop(config)) return;
+
+      setDebugEvents((prev) => [...prev.slice(-14), toDebugEvent('out', msg)]);
 
       const delayMs = shouldSimulateInput ? getNetDelayMs(config) : 0;
       window.setTimeout(() => {
