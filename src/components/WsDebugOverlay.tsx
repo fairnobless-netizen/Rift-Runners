@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NetSimConfig, NetSimPresetId } from '../ws/useWsClient';
 import { triggerDebugDrift } from '../game/LocalPredictionController';
-import { isDebugEnabled } from '../debug/debugFlags';
 
 type PredictionStats = {
   correctionCount: number;
@@ -165,7 +164,11 @@ export function WsDebugOverlay({
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setIsExplicitDebugEnabled(isDebugEnabled(window.location.search));
+    try {
+      setIsExplicitDebugEnabled(window.localStorage.getItem('rr_debug') === '1');
+    } catch {
+      setIsExplicitDebugEnabled(false);
+    }
   }, []);
 
   const lastSnapshot = useMemo(() => {

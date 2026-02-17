@@ -68,9 +68,6 @@ import { resolveDevIdentity } from '../utils/devIdentity';
 import { API_BASE, apiUrl } from '../utils/apiBase';
 import { RROverlayModal } from './RROverlayModal';
 import { MultiplayerModal } from './MultiplayerModal';
-import { isDebugEnabled } from '../debug/debugFlags';
-import { diagnosticsStore } from '../debug/diagnosticsStore';
-import { DiagnosticsOverlay } from '../debug/DiagnosticsOverlay';
 
 
 const defaultStats: PlayerStats = {
@@ -304,7 +301,7 @@ export default function GameView(): JSX.Element {
     height: window.innerHeight,
   }));
   const ws = useWsClient(token || undefined);
-  const isMultiplayerDebugEnabled = isDebugEnabled(window.location.search);
+  const isMultiplayerDebugEnabled = new URLSearchParams(window.location.search).has('debug');
   const wsDiagnostics = {
     enabled: isMultiplayerDebugEnabled,
     status: ws.connected ? 'OPEN' : ws.lastError ? 'ERROR' : 'CONNECTING',
@@ -314,16 +311,6 @@ export default function GameView(): JSX.Element {
     members: currentRoomMembers.length,
     lastError: ws.lastError,
   } as const;
-
-  useEffect(() => {
-    if (!isMultiplayerDebugEnabled) return;
-    diagnosticsStore.setWsState({
-      wsUrlUsed: ws.urlUsed || null,
-      status: ws.connected ? 'OPEN' : ws.lastError ? 'ERROR' : 'CONNECTING',
-      lastError: ws.lastError ?? null,
-    });
-  }, [isMultiplayerDebugEnabled, ws.connected, ws.lastError, ws.urlUsed]);
-
 
   const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
   const baseHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
@@ -339,14 +326,6 @@ export default function GameView(): JSX.Element {
 
   const myRoomMember = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
   const isRoomOwner = Boolean(localTgUserId && currentRoom?.ownerTgUserId && localTgUserId === currentRoom.ownerTgUserId);
-  const roomCanStart = Boolean(
-    isRoomOwner
-    && (currentRoom?.phase ?? 'LOBBY') !== 'STARTED'
-    && currentRoomMembers.some((member) => member.tgUserId !== currentRoom?.ownerTgUserId)
-    && currentRoomMembers
-      .filter((member) => member.tgUserId !== currentRoom?.ownerTgUserId)
-      .every((member) => member.ready ?? false),
-  );
   const waitingForOtherPlayer = Boolean(
     multiplayerUiOpen
     && currentRoom
@@ -362,24 +341,6 @@ export default function GameView(): JSX.Element {
   const deathOverlayVisible = lifeState.awaitingContinue || lifeState.gameOver;
   const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay || deathOverlayVisible || lifeState.eliminated;
   const shellSizeRef = useRef<{ width: number; height: number }>({ width: window.innerWidth, height: window.innerHeight });
-
-  useEffect(() => {
-    if (!isMultiplayerDebugEnabled) return;
-    diagnosticsStore.setRoomState({
-      roomCode: currentRoom?.roomCode ?? null,
-      members: currentRoomMembers.length,
-      isHost: isRoomOwner,
-      canStart: roomCanStart,
-      phase: currentRoom?.phase ?? null,
-    });
-    diagnosticsStore.log('ROOM', 'INFO', 'room:update', {
-      roomCode: currentRoom?.roomCode ?? null,
-      members: currentRoomMembers.length,
-      isHost: isRoomOwner,
-      canStart: roomCanStart,
-      phase: currentRoom?.phase ?? null,
-    });
-  }, [isMultiplayerDebugEnabled, currentRoom?.roomCode, currentRoom?.phase, currentRoomMembers.length, isRoomOwner, roomCanStart]);
 
   const updateTgMetrics = useCallback((): void => {
     const tg = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
@@ -401,25 +362,6 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     const tg = (window as any)?.Telegram?.WebApp;
-
-    if (isMultiplayerDebugEnabled) {
-      const startParam = tg?.initDataUnsafe?.start_param;
-      const userId = tg?.initDataUnsafe?.user?.id;
-      const maskedUserId = userId == null ? null : `***${String(userId).slice(-4)}`;
-      diagnosticsStore.setAuthState({
-        telegramPresent: Boolean(tg),
-        startParamPresent: Boolean(startParam),
-        userIdMasked: maskedUserId,
-        nickname: profileName || null,
-        reasonIfNotTelegram: tg ? null : 'Telegram WebApp unavailable',
-      });
-      diagnosticsStore.log('AUTH', 'INFO', 'telegram:init', {
-        telegramPresent: Boolean(tg),
-        startParamPresent: Boolean(startParam),
-        userIdMasked: maskedUserId,
-        nickname: profileName || null,
-      });
-    }
 
     // Telegram WebApp init (Eggs&Dragons parity)
     try {
@@ -1204,45 +1146,38 @@ export default function GameView(): JSX.Element {
 
     setRoomsError(null);
     setJoiningRoomCode(roomCode);
-    if (isMultiplayerDebugEnabled) diagnosticsStore.log('UI', 'INFO', 'joinRoomByCode:start', { roomCode });
     try {
       const result = await joinRoom(roomCode);
       if (!result) {
         setRoomsError('Join failed');
-        if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'ERROR', 'joinRoomByCode:failed', { roomCode, reason: 'Join failed' });
         return;
       }
 
       if (result.error) {
         setRoomsError(mapRoomError(result.error));
-        if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'ERROR', 'joinRoomByCode:error', { roomCode, error: result.error });
         return;
       }
 
       setCurrentRoom(result.room);
       setCurrentRoomMembers(result.members);
-      if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'joinRoomByCode:success', { roomCode, members: result.members.length });
       const [rooms, availableRooms] = await Promise.all([fetchMyRooms(), fetchPublicRooms()]);
       setMyRooms(rooms);
       setPublicRooms(availableRooms);
     } finally {
       setJoiningRoomCode((prev) => (prev === roomCode ? null : prev));
     }
-  }, [currentRoom?.roomCode, isMultiplayerDebugEnabled, joiningRoomCode]);
+  }, [currentRoom?.roomCode, joiningRoomCode]);
 
   const onCreateRoom = useCallback(async (capacity: 2 | 3 | 4): Promise<void> => {
     setRoomsError(null);
-    if (isMultiplayerDebugEnabled) diagnosticsStore.log('UI', 'INFO', 'onCreateRoom:start', { capacity });
     const created = await createRoom(capacity);
     if (!created) {
       setRoomsError('Failed to create room');
-      if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'ERROR', 'onCreateRoom:failed');
       return;
     }
 
-    if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'onCreateRoom:success', { roomCode: created.roomCode, capacity });
     await joinRoomByCode(created.roomCode);
-  }, [isMultiplayerDebugEnabled, joinRoomByCode]);
+  }, [joinRoomByCode]);
 
   const onLeaveRoom = useCallback(async (): Promise<void> => {
     if (!currentRoom) return;
@@ -1297,53 +1232,45 @@ export default function GameView(): JSX.Element {
 
     setSettingReady(true);
     setRoomsError(null);
-    if (isMultiplayerDebugEnabled) diagnosticsStore.log('UI', 'INFO', 'onToggleReady:start', { roomCode: currentRoom.roomCode, nextReady });
     try {
       const result = await setRoomReady(currentRoom.roomCode, nextReady);
       if (!result) {
         setRoomsError('Ready update failed');
-        if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'ERROR', 'onToggleReady:failed', { roomCode: currentRoom.roomCode });
         return;
       }
       if (result.error) {
         setRoomsError(mapRoomError(result.error));
-        if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'ERROR', 'onToggleReady:error', { roomCode: currentRoom.roomCode, error: result.error });
         return;
       }
       setCurrentRoom(result.room);
       setCurrentRoomMembers(result.members);
-      if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'onToggleReady:success', { roomCode: result.room.roomCode, members: result.members.length });
     } finally {
       setSettingReady(false);
     }
-  }, [currentRoom?.roomCode, currentRoomMembers, isMultiplayerDebugEnabled, localTgUserId]);
+  }, [currentRoom?.roomCode, currentRoomMembers, localTgUserId]);
 
   const onStartRoom = useCallback(async (): Promise<void> => {
     if (!currentRoom?.roomCode) return;
 
     setStartingRoom(true);
     setRoomsError(null);
-    if (isMultiplayerDebugEnabled) diagnosticsStore.log('UI', 'INFO', 'onStartRoom:start', { roomCode: currentRoom.roomCode });
     try {
       const result = await startRoom(currentRoom.roomCode);
       if (!result) {
         setRoomsError('Start failed');
-        if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'ERROR', 'onStartRoom:failed', { roomCode: currentRoom.roomCode });
         return;
       }
       if (result.error) {
         setRoomsError(mapRoomError(result.error));
-        if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'ERROR', 'onStartRoom:error', { roomCode: currentRoom.roomCode, error: result.error });
         return;
       }
       setCurrentRoom(result.room);
       setCurrentRoomMembers(result.members);
       ws.send({ type: 'match:start' });
-      if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'onStartRoom:success', { roomCode: result.room.roomCode });
     } finally {
       setStartingRoom(false);
     }
-  }, [currentRoom?.roomCode, isMultiplayerDebugEnabled, ws]);
+  }, [currentRoom?.roomCode, ws]);
 
   const onCopyInviteLink = useCallback(async (): Promise<void> => {
     if (!currentRoom?.roomCode) return;
@@ -2363,8 +2290,6 @@ export default function GameView(): JSX.Element {
           )}
         </RROverlayModal>
       )}
-
-      <DiagnosticsOverlay enabled={isMultiplayerDebugEnabled} />
 
       <WsDebugOverlay
         connected={ws.connected}
