@@ -6,7 +6,7 @@ test('Probe 20 moves produces summary + artifacts', async ({ page }) => {
   const artifactsDir = path.resolve(process.cwd(), 'artifacts');
   fs.mkdirSync(artifactsDir, { recursive: true });
 
-  await page.goto('/?probe=1');
+  await page.goto('/probe');
 
   await page.getByTestId('probe-btn').click();
 
