@@ -14,7 +14,7 @@ export type WsClientMessage =
   | { type: 'ping'; id: number; t: number }
   | { type: 'lobby:list' }
   | { type: 'room:create' }
-  | { type: 'room:join'; roomId: string }
+  | { type: 'room:join'; roomId: string; tgUserId?: string }
   | { type: 'room:leave' }
   | { type: 'match:start' }
   | { type: 'match:input'; seq: number; payload: MatchInputPayload };
@@ -26,4 +26,5 @@ export type WsServerMessage =
   | { type: 'room:left' }
   | { type: 'match:started'; matchId: string }
   | { type: 'match:snapshot'; snapshot: MatchSnapshotV1 }
+  | { type: 'match:error'; error: string }
   | { type: 'error'; error: string };

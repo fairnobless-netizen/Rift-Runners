@@ -80,6 +80,14 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
   }
 
   const room = getOrCreateRoom(roomId);
+
+  for (const [tgUserId, socket] of room.players.entries()) {
+    if (socket === ctx.socket && tgUserId !== ctx.tgUserId) {
+      room.players.delete(tgUserId);
+      break;
+    }
+  }
+
   room.players.set(ctx.tgUserId, ctx.socket);
 
   const roomMatch = getMatchByRoom(roomId);
@@ -159,12 +167,20 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       }
 
       const players = Array.from(room.players.keys());
+      if (players.length < 2) {
+        return send(ctx.socket, { type: 'match:error', error: 'not_enough_ws_players' });
+      }
+
       const match = createMatch(room.roomId, players);
       room.matchId = match.matchId;
 
       for (const client of clients) {
         if (client.roomId === room.roomId) {
           client.matchId = match.matchId;
+          send(client.socket, {
+            type: 'match:started',
+            matchId: match.matchId,
+          });
         }
       }
 
@@ -175,10 +191,7 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         });
       });
 
-      return send(ctx.socket, {
-        type: 'match:started',
-        matchId: match.matchId,
-      });
+      return;
     }
 
     case 'match:input': {

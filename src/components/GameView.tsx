@@ -269,6 +269,7 @@ export default function GameView(): JSX.Element {
   const [publicRooms, setPublicRooms] = useState<PublicRoomEntry[]>([]);
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
+  const wsJoinedRoomCodeRef = useRef<string | null>(null);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
@@ -844,6 +845,41 @@ export default function GameView(): JSX.Element {
     setProfileName((prev) => (prev === '—' || prev === 'Dev Player' ? localName : prev));
   }, []);
 
+
+  useEffect(() => {
+    if (!ws.connected || !currentRoom?.roomCode || !localTgUserId) return;
+
+    const roomId = currentRoom.roomCode;
+    const joinKey = `${roomId}:${localTgUserId}`;
+    if (wsJoinedRoomCodeRef.current === joinKey) return;
+
+    ws.send({ type: 'room:join', roomId, tgUserId: localTgUserId });
+    wsJoinedRoomCodeRef.current = joinKey;
+  }, [currentRoom?.roomCode, localTgUserId, ws.connected, ws]);
+
+  useEffect(() => {
+    if (currentRoom?.roomCode) return;
+    wsJoinedRoomCodeRef.current = null;
+  }, [currentRoom?.roomCode]);
+
+  useEffect(() => {
+    if (!ws.connected) {
+      wsJoinedRoomCodeRef.current = null;
+    }
+  }, [ws.connected]);
+
+  useEffect(() => {
+    const lastError = [...ws.messages].reverse().find((message) => message.type === 'match:error');
+    if (!lastError || lastError.type !== 'match:error') return;
+
+    if (lastError.error === 'not_enough_ws_players') {
+      setRoomsError('WS: второй игрок ещё не подключён к матчу. Попробуйте Start ещё раз.');
+      return;
+    }
+
+    setRoomsError(`WS: ${lastError.error}`);
+  }, [ws.messages]);
+
   const isMultiplayerMode = Boolean(currentRoom && currentRoomMembers.length >= 2);
   const activeLeaderboardMode: LeaderboardMode = !isMultiplayerMode
     ? 'solo'
@@ -1220,10 +1256,11 @@ export default function GameView(): JSX.Element {
       }
       setCurrentRoom(result.room);
       setCurrentRoomMembers(result.members);
+      ws.send({ type: 'match:start' });
     } finally {
       setStartingRoom(false);
     }
-  }, [currentRoom?.roomCode]);
+  }, [currentRoom?.roomCode, ws]);
 
   const onCopyInviteLink = useCallback(async (): Promise<void> => {
     if (!currentRoom?.roomCode) return;
