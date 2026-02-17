@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { diagnosticsStore } from '../debug/diagnosticsStore';
 import { WsClient } from './wsClient';
 import type { WsClientMessage, WsServerMessage } from './wsTypes';
 
@@ -115,6 +116,8 @@ export function useWsClient(token?: string) {
 
     setUrlUsed(wsUrl);
     setLastError(null);
+    diagnosticsStore.setWsState({ wsUrlUsed: wsUrl, status: 'CONNECTING', lastError: null });
+    diagnosticsStore.log('WS', 'INFO', 'connect:starting', { wsUrlUsed: wsUrl });
 
     const client = new WsClient({
       url: wsUrl,
@@ -122,10 +125,20 @@ export function useWsClient(token?: string) {
       onOpen: () => {
         setConnected(true);
         setLastError(null);
+        const now = new Date().toISOString();
+        diagnosticsStore.setWsState({ status: 'OPEN', lastError: null, lastOpenAt: now });
+        diagnosticsStore.log('WS', 'INFO', 'connect:open');
       },
-      onClose: () => setConnected(false),
+      onClose: () => {
+        setConnected(false);
+        const now = new Date().toISOString();
+        diagnosticsStore.setWsState({ status: 'CLOSED', lastCloseAt: now });
+        diagnosticsStore.log('WS', 'WARN', 'connect:close');
+      },
       onError: () => {
         setLastError('WebSocket error');
+        diagnosticsStore.setWsState({ status: 'ERROR', lastError: 'WebSocket error' });
+        diagnosticsStore.log('WS', 'ERROR', 'connect:error', { error: 'WebSocket error' });
       },
       onMessage: (msg) => {
         // Handle pong without polluting messages
@@ -154,7 +167,15 @@ export function useWsClient(token?: string) {
 
         if (msg.type === 'match:error') {
           setLastError(msg.error);
+          diagnosticsStore.setWsState({ status: 'ERROR', lastError: msg.error });
+          diagnosticsStore.log('WS', 'ERROR', 'recv:match:error', { error: msg.error });
         }
+
+        diagnosticsStore.setWsState({ lastMessageAt: new Date().toISOString() });
+        diagnosticsStore.log('WS', 'INFO', `recv:${msg.type}`, {
+          type: msg.type,
+          preview: JSON.stringify(msg).slice(0, 1000),
+        });
 
         const config = netSimConfigRef.current;
         const shouldSimulateSnapshot = import.meta.env.DEV && msg.type === 'match:snapshot' && config.enabled;
@@ -189,6 +210,7 @@ export function useWsClient(token?: string) {
       clientRef.current = null;
       setConnected(false);
       setUrlUsed('');
+      diagnosticsStore.setWsState({ status: 'CLOSED' });
     };
   }, [token]);
 
@@ -220,6 +242,10 @@ export function useWsClient(token?: string) {
       }));
     },
     send: (msg: WsClientMessage) => {
+      diagnosticsStore.log('WS', 'INFO', `send:${msg.type}`, {
+        type: msg.type,
+        preview: JSON.stringify(msg).slice(0, 1000),
+      });
       const config = netSimConfigRef.current;
       const shouldSimulateInput = import.meta.env.DEV && msg.type === 'match:input' && config.enabled;
       if (shouldSimulateInput && shouldDrop(config)) return;
