@@ -1392,6 +1392,47 @@ html[data-orient="landscape"] .right-panel {
   gap: 0.6rem;
 }
 
+
+.rr-mp-wsdiag {
+  border: 1px solid #2c3f71;
+  border-radius: 10px;
+  padding: 0.45rem;
+  background: rgba(8, 16, 38, 0.82);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.rr-mp-wsdiag--open {
+  border-color: #2f8f67;
+}
+
+.rr-mp-wsdiag--error {
+  border-color: #8f3f3f;
+}
+
+.rr-mp-wsdiag-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.rr-mp-wsdiag-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.45rem;
+  font-size: 0.72rem;
+}
+
+.rr-mp-wsdiag-grid span {
+  color: #a9bbdf;
+}
+
+.rr-mp-wsdiag-grid code {
+  overflow-wrap: anywhere;
+}
+
 .rr-mp-section {
   border: 1px solid rgba(70, 98, 162, 0.8);
   border-radius: 12px;

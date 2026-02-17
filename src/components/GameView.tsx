@@ -65,7 +65,7 @@ import {
 import { WsDebugOverlay } from './WsDebugOverlay';
 import { useWsClient } from '../ws/useWsClient';
 import { resolveDevIdentity } from '../utils/devIdentity';
-import { apiUrl } from '../utils/apiBase';
+import { API_BASE, apiUrl } from '../utils/apiBase';
 import { RROverlayModal } from './RROverlayModal';
 import { MultiplayerModal } from './MultiplayerModal';
 
@@ -301,6 +301,16 @@ export default function GameView(): JSX.Element {
     height: window.innerHeight,
   }));
   const ws = useWsClient(token || undefined);
+  const isMultiplayerDebugEnabled = new URLSearchParams(window.location.search).has('debug');
+  const wsDiagnostics = {
+    enabled: isMultiplayerDebugEnabled,
+    status: ws.connected ? 'OPEN' : ws.lastError ? 'ERROR' : 'CONNECTING',
+    apiBase: API_BASE || window.location.origin,
+    wsUrl: ws.urlUsed || 'n/a',
+    roomCode: currentRoom?.roomCode ?? null,
+    members: currentRoomMembers.length,
+    lastError: ws.lastError,
+  } as const;
 
   const baseWidth = GAME_CONFIG.gridWidth * GAME_CONFIG.tileSize;
   const baseHeight = GAME_CONFIG.gridHeight * GAME_CONFIG.tileSize;
@@ -2215,6 +2225,7 @@ export default function GameView(): JSX.Element {
         onCopyReferralLink={onCopyReferral}
         localTgUserId={localTgUserId}
         onConsumeInitialJoinCode={() => setDeepLinkJoinCode(null)}
+        wsDiagnostics={wsDiagnostics}
       />
 
       {settingsOpen && (

@@ -6,6 +6,7 @@ export type WsClientOptions = {
   onMessage?: (msg: WsServerMessage) => void;
   onOpen?: () => void;
   onClose?: () => void;
+  onError?: (error: Event) => void;
 };
 
 export class WsClient {
@@ -36,6 +37,10 @@ export class WsClient {
     this.ws.onclose = () => {
       this.ws = undefined;
       this.opts.onClose?.();
+    };
+
+    this.ws.onerror = (error) => {
+      this.opts.onError?.(error);
     };
   }
 
