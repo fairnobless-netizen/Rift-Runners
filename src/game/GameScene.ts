@@ -133,6 +133,7 @@ export class GameScene extends Phaser.Scene {
   private simulationTick = 0;
   private lastSnapshotTick = -1;
   private snapshotBuffer: MatchSnapshotV1[] = [];
+  private needsNetResync = false;
   private readonly SNAPSHOT_BUFFER_SIZE = 10;
   private arena: ArenaModel = createArena(0, this.rng);
   private levelIndex = 0;
@@ -797,6 +798,9 @@ export class GameScene extends Phaser.Scene {
 
   public setGameMode(mode: GameMode): void {
     this.gameMode = mode;
+    if (mode === 'multiplayer') {
+      this.needsNetResync = true;
+    }
     this.awaitingSoloContinue = false;
     this.soloGameOver = false;
     this.multiplayerEliminated = false;
@@ -2167,6 +2171,27 @@ export class GameScene extends Phaser.Scene {
 
     if (localTgUserId) {
       this.localTgUserId = localTgUserId;
+    }
+
+    const isFirstSnapshot = this.lastSnapshotTick < 0 || this.snapshotBuffer.length === 0;
+    const shouldResync = this.needsNetResync || isFirstSnapshot;
+
+    // If our local simulation tick is far ahead (e.g. from solo run), remote interpolation will stall.
+    // Resync on first multiplayer snapshot to align timebase.
+    if (shouldResync) {
+      this.needsNetResync = false;
+
+      this.simulationTick = snapshot.tick;
+      this.accumulator = 0;
+
+      this.localInputQueue = [];
+      this.inputSeq = 0;
+
+      this.lastSnapshotTick = -1;
+      this.snapshotBuffer = [];
+
+      this.prediction.reset?.();
+      this.remotePlayers?.resetNetState?.();
     }
 
     this.lastSnapshotTick = snapshot.tick;

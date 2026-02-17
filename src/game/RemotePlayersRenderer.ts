@@ -104,6 +104,31 @@ export class RemotePlayersRenderer {
     this.offsetY = params.offsetY;
   }
 
+  resetNetState() {
+    this.renderTick = -1;
+    this.bufferSize = 0;
+
+    this.extrapolatingTicks = 0;
+    this.stalled = false;
+
+    this.underrunCount = 0;
+    this.lateSnapshotCount = 0;
+    this.lateSnapshotEma = 0;
+    this.stallCount = 0;
+    this.extrapCount = 0;
+
+    this.windowUnderrunEvents = [];
+    this.windowStallEvents = [];
+    this.windowExtrapEvents = [];
+    this.windowUnderrunSum = 0;
+    this.windowStallSum = 0;
+    this.windowExtrapSum = 0;
+
+    this.velocities.clear();
+    this.lastRenderedGridPos.clear();
+    this.interpState.clear();
+  }
+
   setNetworkRtt(rttMs: number | null, rttJitterMs: number, tickMs: number): void {
     this.rttMs = rttMs;
     this.rttJitterMs = rttJitterMs;

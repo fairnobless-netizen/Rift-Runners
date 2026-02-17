@@ -175,6 +175,28 @@ export class LocalPredictionController {
     return { x: this.biasX, y: this.biasY };
   }
 
+  reset() {
+    this.pending = [];
+    this.lastAckSeq = 0;
+
+    this.correctionCount = 0;
+    this.softCorrectionCount = 0;
+    this.droppedInputCount = 0;
+
+    this.drift = 0;
+    this.biasX = 0;
+    this.biasY = 0;
+    this.inSoftCorrection = false;
+    this.inHardCorrection = false;
+    this.lastHardCorrectionTime = 0;
+
+    this.history.clear();
+    this.predictionError = 0;
+    this.predictionErrorEma = 0;
+    this.missingHistoryCount = 0;
+    this.reconcileReason = 'none';
+  }
+
   getStats() {
     return {
       correctionCount: this.correctionCount,
