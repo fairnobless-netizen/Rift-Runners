@@ -151,9 +151,15 @@ export function WsDebugOverlay({
   getLocalPlayerPosition?: () => { x: number; y: number } | null;
 }) {
   const debugUiFlag = String(import.meta.env.VITE_DEBUG_UI ?? '').trim().toLowerCase();
+  const probeModeFlag = String(import.meta.env.VITE_PROBE_MODE ?? '').trim().toLowerCase();
   const [isExplicitDebugEnabled, setIsExplicitDebugEnabled] = useState(false);
   const showDebugUi = debugUiFlag === '1' || debugUiFlag === 'true' || import.meta.env.DEV || isExplicitDebugEnabled;
-  const showProbeUi = import.meta.env.DEV || window.localStorage.getItem('rr_debug') === '1';
+  const isProbeRoute = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('probe') === '1' || window.location.pathname === '/__probe';
+  }, []);
+  const showProbeUi = probeModeFlag === 'true' && isProbeRoute;
 
 
   useEffect(() => {
