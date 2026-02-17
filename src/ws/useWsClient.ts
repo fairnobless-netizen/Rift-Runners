@@ -20,6 +20,56 @@ const NET_SIM_PRESETS: NetSimPreset[] = [
   { id: 'train', label: 'Train', latencyMs: 220, jitterMs: 120, dropRate: 0.16 },
 ];
 
+const DEFAULT_BACKEND_HOST = 'rift-runners-backend.onrender.com';
+
+function normalizeWsUrl(candidate: string): string | null {
+  const trimmed = candidate.trim();
+  if (!trimmed) return null;
+
+  try {
+    const normalized = new URL(trimmed);
+    if (normalized.protocol !== 'ws:' && normalized.protocol !== 'wss:') return null;
+    if (normalized.pathname === '/' || normalized.pathname === '') {
+      normalized.pathname = '/ws';
+    }
+    return normalized.toString();
+  } catch {
+    return null;
+  }
+}
+
+function inferDevBackendWsUrl(): string | null {
+  if (!import.meta.env.DEV) return null;
+
+  try {
+    const current = new URL(window.location.href);
+    const guessed = new URL(current.href);
+    guessed.protocol = current.protocol === 'https:' ? 'wss:' : 'ws:';
+    guessed.pathname = '/ws';
+    guessed.search = '';
+    guessed.hash = '';
+
+    const hostLooksLikeVite = current.port === '5173' || current.port === '5174' || current.hostname === 'localhost' || current.hostname === '127.0.0.1';
+    if (hostLooksLikeVite) {
+      guessed.host = `${current.hostname}:4101`;
+    }
+
+    return guessed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function resolveWsUrl(): string {
+  const configuredWsUrl = normalizeWsUrl(import.meta.env.VITE_WS_URL?.trim() ?? '');
+  if (configuredWsUrl) return configuredWsUrl;
+
+  const inferredDevWsUrl = inferDevBackendWsUrl();
+  if (inferredDevWsUrl) return inferredDevWsUrl;
+
+  return `wss://${DEFAULT_BACKEND_HOST}/ws`;
+}
+
 export type NetSimConfig = {
   presetId: NetSimPresetId;
   enabled: boolean;
@@ -97,22 +147,7 @@ export function useWsClient(token?: string) {
   useEffect(() => {
     if (!token) return;
 
-    const defaultWsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
-    const defaultWsUrl = `${defaultWsProtocol}://${location.host}/ws`;
-    const configuredWsUrl = import.meta.env.VITE_WS_URL?.trim();
-    let wsUrl = defaultWsUrl;
-
-    if (configuredWsUrl) {
-      try {
-        const normalized = new URL(configuredWsUrl);
-        if (normalized.pathname === '/' || normalized.pathname === '') {
-          normalized.pathname = '/ws';
-        }
-        wsUrl = normalized.toString();
-      } catch {
-        wsUrl = defaultWsUrl;
-      }
-    }
+    const wsUrl = resolveWsUrl();
 
     setUrlUsed(wsUrl);
     setLastError(null);
@@ -129,11 +164,16 @@ export function useWsClient(token?: string) {
         diagnosticsStore.setWsState({ status: 'OPEN', lastError: null, lastOpenAt: now });
         diagnosticsStore.log('WS', 'INFO', 'connect:open');
       },
-      onClose: () => {
+      onClose: (event) => {
         setConnected(false);
         const now = new Date().toISOString();
-        diagnosticsStore.setWsState({ status: 'CLOSED', lastCloseAt: now });
-        diagnosticsStore.log('WS', 'WARN', 'connect:close');
+        diagnosticsStore.setWsState({
+          status: 'CLOSED',
+          lastCloseAt: now,
+          lastCloseCode: event.code,
+          lastCloseReason: event.reason || null,
+        });
+        diagnosticsStore.log('WS', 'WARN', 'connect:close', { code: event.code, reason: event.reason || null });
       },
       onError: () => {
         setLastError('WebSocket error');

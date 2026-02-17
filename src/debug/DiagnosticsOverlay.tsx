@@ -50,8 +50,9 @@ export function DiagnosticsOverlay({ enabled }: { enabled: boolean }) {
           </div>
 
           <div className="rr-diag-kv">
-            <span>WS</span><code>{snapshot.ws.status}</code>
+            <span>WS</span><code>{snapshot.ws.status === 'OPEN' ? 'ONLINE' : 'OFFLINE'}</code>
             <span>URL</span><code>{snapshot.ws.wsUrlUsed ?? '—'}</code>
+            <span>Close</span><code>{snapshot.ws.lastCloseCode ?? '—'} · {snapshot.ws.lastCloseReason ?? '—'}</code>
             <span>Last error</span><code>{snapshot.ws.lastError ?? '—'}</code>
             <span>Room</span><code>{snapshot.room.roomCode ?? '—'} · members={snapshot.room.members} · phase={snapshot.room.phase ?? '—'}</code>
             <span>Auth</span><code>{snapshot.auth.telegramPresent ? 'telegram' : snapshot.auth.reasonIfNotTelegram ?? 'unknown'} · {snapshot.auth.userIdMasked ?? '—'} · {snapshot.auth.nickname ?? '—'}</code>
