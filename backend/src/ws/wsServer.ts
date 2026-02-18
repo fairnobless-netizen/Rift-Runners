@@ -6,7 +6,7 @@ import { startMatch } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 
 // ✅ add DB cleanup
-import { closeRoomTx, getRoomByCode, leaveRoomV2 } from '../db/repos';
+import { closeRoomTx, getRoomByCode, leaveRoomV2, listRoomMembers } from '../db/repos';
 
 type ClientCtx = {
   socket: WebSocket;
@@ -181,7 +181,7 @@ function parseMessage(raw: RawData): ClientMessage | null {
   }
 }
 
-function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
+async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
   switch (msg.type) {
     case 'ping': {
       const id = Number((msg as any).id);
@@ -218,63 +218,133 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return send(ctx.socket, { type: 'match:error', error: 'not_in_room' });
       }
 
-      const room = getRoom(ctx.roomId);
-      if (!room) {
+      const roomCode = ctx.roomId;
+      const wsRoom = getRoom(roomCode);
+      if (!wsRoom) {
         return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
       }
 
-      const players = Array.from(room.players.keys());
-      if (players.length < 2) {
-        return send(ctx.socket, { type: 'match:error', error: 'not_enough_ws_players' });
-      }
-
-      const match = createMatch(room.roomId, players);
-      room.matchId = match.matchId;
-
-      for (const client of clients) {
-        if (client.roomId === room.roomId) {
-          client.matchId = match.matchId;
-          send(client.socket, {
-            type: 'match:started',
-            matchId: match.matchId,
-          });
+      try {
+        const dbRoom = await getRoomByCode(roomCode);
+        if (!dbRoom) {
+          console.info(JSON.stringify({ type: 'mp.match_start', roomCode, tgUserId: ctx.tgUserId, allowed: false, reason: 'room_not_found' }));
+          return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
         }
-      }
 
-      broadcastToRoom(room.roomId, {
-        type: 'match:world_init',
-        roomCode: room.roomId,
-        matchId: match.matchId,
-        world: {
+        if (dbRoom.status !== 'OPEN') {
+          console.info(JSON.stringify({ type: 'mp.match_start', roomCode, tgUserId: ctx.tgUserId, allowed: false, reason: 'room_closed', status: dbRoom.status, phase: dbRoom.phase }));
+          return send(ctx.socket, { type: 'match:error', error: 'room_closed' });
+        }
+
+        if (dbRoom.phase !== 'STARTED') {
+          console.info(JSON.stringify({ type: 'mp.match_start', roomCode, tgUserId: ctx.tgUserId, allowed: false, reason: 'room_not_started', status: dbRoom.status, phase: dbRoom.phase }));
+          return send(ctx.socket, { type: 'match:error', error: 'room_not_started' });
+        }
+
+        if (dbRoom.ownerTgUserId !== ctx.tgUserId) {
+          console.info(JSON.stringify({ type: 'mp.match_start', roomCode, tgUserId: ctx.tgUserId, allowed: false, reason: 'start_forbidden', ownerTgUserId: dbRoom.ownerTgUserId, status: dbRoom.status, phase: dbRoom.phase }));
+          return send(ctx.socket, { type: 'match:error', error: 'start_forbidden' });
+        }
+
+        const members = await listRoomMembers(roomCode);
+        const memberIds = members.map((m) => m.tgUserId);
+        const memberCount = members.length;
+
+        if (memberCount < 2) {
+          console.info(JSON.stringify({ type: 'mp.match_start', roomCode, tgUserId: ctx.tgUserId, allowed: false, reason: 'not_enough_players', phase: dbRoom.phase, status: dbRoom.status, capacity: dbRoom.capacity, memberIds }));
+          return send(ctx.socket, { type: 'match:error', error: 'not_enough_players' });
+        }
+
+        if (memberCount !== dbRoom.capacity) {
+          console.info(JSON.stringify({ type: 'mp.match_start', roomCode, tgUserId: ctx.tgUserId, allowed: false, reason: 'room_not_full', phase: dbRoom.phase, status: dbRoom.status, capacity: dbRoom.capacity, memberIds }));
+          return send(ctx.socket, { type: 'match:error', error: 'room_not_full' });
+        }
+
+        const allReady = members.every((m) => (m.tgUserId === dbRoom.ownerTgUserId ? true : Boolean(m.ready)));
+        if (!allReady) {
+          console.info(JSON.stringify({ type: 'mp.match_start', roomCode, tgUserId: ctx.tgUserId, allowed: false, reason: 'not_all_ready', phase: dbRoom.phase, status: dbRoom.status, capacity: dbRoom.capacity, memberIds }));
+          return send(ctx.socket, { type: 'match:error', error: 'not_all_ready' });
+        }
+
+        const wsConnectedIds = memberIds.filter((memberId) => {
+          const socket = wsRoom.players.get(memberId);
+          return socket?.readyState === WebSocket.OPEN;
+        });
+
+        if (wsConnectedIds.length !== memberIds.length) {
+          console.info(JSON.stringify({ type: 'mp.match_start', roomCode, tgUserId: ctx.tgUserId, allowed: false, reason: 'not_all_ws_connected', phase: dbRoom.phase, status: dbRoom.status, capacity: dbRoom.capacity, memberIds, wsConnectedIds }));
+          return send(ctx.socket, { type: 'match:error', error: 'not_all_ws_connected' });
+        }
+
+        const match = createMatch(roomCode, members.map((m) => ({ tgUserId: m.tgUserId, displayName: m.displayName })));
+        wsRoom.matchId = match.matchId;
+
+        for (const client of clients) {
+          if (client.roomId === wsRoom.roomId) {
+            client.matchId = match.matchId;
+            send(client.socket, {
+              type: 'match:started',
+              matchId: match.matchId,
+            });
+          }
+        }
+
+        broadcastToRoom(wsRoom.roomId, {
+          type: 'match:world_init',
+          roomCode: wsRoom.roomId,
+          matchId: match.matchId,
+          levelIndex: match.levelIndex,
+          world: {
+            gridW: match.world.gridW,
+            gridH: match.world.gridH,
+            tiles: [...match.world.tiles],
+            worldHash: match.world.worldHash,
+          },
+        });
+
+        console.info(JSON.stringify({
+          type: 'mp.match_start',
+          roomCode,
+          tgUserId: ctx.tgUserId,
+          allowed: true,
+          reason: 'ok',
+          phase: dbRoom.phase,
+          status: dbRoom.status,
+          capacity: dbRoom.capacity,
+          memberIds,
+          wsConnectedIds,
+          matchId: match.matchId,
           gridW: match.world.gridW,
           gridH: match.world.gridH,
-          tiles: [...match.world.tiles],
-          worldHash: match.world.worldHash,
-        },
-      });
+          levelIndex: match.levelIndex,
+        }));
 
-      startMatch(match, (snapshot) => {
-        const activeRoom = rooms.get(room.roomId);
-        if (!activeRoom) {
-          endMatch(match.matchId);
-          return;
-        }
+        startMatch(match, (snapshot) => {
+          const activeRoom = rooms.get(wsRoom.roomId);
+          if (!activeRoom) {
+            endMatch(match.matchId);
+            return;
+          }
 
-        if (activeRoom.matchId !== snapshot.matchId) {
-          return;
-        }
+          if (activeRoom.matchId !== snapshot.matchId) {
+            return;
+          }
 
-        if (snapshot.roomCode !== activeRoom.roomId) {
-          return;
-        }
+          if (snapshot.roomCode !== activeRoom.roomId) {
+            return;
+          }
 
-        broadcastToRoom(activeRoom.roomId, {
-          type: 'match:snapshot',
-          snapshot,
+          broadcastToRoom(activeRoom.roomId, {
+            type: 'match:snapshot',
+            snapshot,
+          });
         });
-      });
 
-      return;
+        return;
+      } catch (error) {
+        console.error('match:start failed', error);
+        return send(ctx.socket, { type: 'match:error', error: 'start_failed' });
+      }
     }
 
     case 'match:input': {
@@ -338,7 +408,7 @@ export function registerWsHandlers(wss: WebSocketServer) {
         return;
       }
       ctx.lastSeenMs = Date.now();
-      handleMessage(ctx, msg);
+      void handleMessage(ctx, msg);
     });
 
     socket.on('close', () => {

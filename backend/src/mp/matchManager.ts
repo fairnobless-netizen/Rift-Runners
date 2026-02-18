@@ -3,6 +3,11 @@ import crypto from 'crypto';
 import { stopMatch } from './match';
 import { MatchState, PlayerState } from './types';
 
+type MatchPlayerSeed = {
+  tgUserId: string;
+  displayName: string;
+};
+
 const matches = new Map<string, MatchState>();
 const roomToMatch = new Map<string, string>();
 
@@ -18,7 +23,16 @@ function buildWorldTiles(gridW: number, gridH: number): number[] {
         continue;
       }
 
-      const spawnSafe = (x <= 2 && y <= 2);
+      const cornerSpawns = [
+        { x: 1, y: 1 },
+        { x: gridW - 2, y: 1 },
+        { x: 1, y: gridH - 2 },
+        { x: gridW - 2, y: gridH - 2 },
+      ];
+
+      const spawnSafe = cornerSpawns.some((spawn) => (
+        Math.abs(x - spawn.x) <= 1 && Math.abs(y - spawn.y) <= 1
+      ));
       if (spawnSafe) {
         tiles.push(0);
         continue;
@@ -45,7 +59,7 @@ function newMatchId(): string {
   return `match_${crypto.randomBytes(6).toString('hex')}`;
 }
 
-export function createMatch(roomId: string, players: string[]): MatchState {
+export function createMatch(roomId: string, players: MatchPlayerSeed[]): MatchState {
   const existingId = roomToMatch.get(roomId);
   if (existingId) {
     endMatch(existingId);
@@ -53,8 +67,8 @@ export function createMatch(roomId: string, players: string[]): MatchState {
 
   const matchId = newMatchId();
 
-  const gridW = 15;
-  const gridH = 15;
+  const gridW = 27;
+  const gridH = 14;
 
   const worldTiles = buildWorldTiles(gridW, gridH);
   const worldHash = hashWorldTiles(worldTiles);
@@ -63,26 +77,36 @@ export function createMatch(roomId: string, players: string[]): MatchState {
     matchId,
     roomId,
     tick: 0,
+    levelIndex: 1,
     world: { gridW, gridH, tiles: worldTiles, worldHash },
     players: new Map<string, PlayerState>(),
     inputQueue: [],
   };
 
-  // Deterministic spawns by join order: spread along top row
-  players.forEach((tgUserId, idx) => {
-    const x = Math.min(gridW - 1, 1 + idx * 2);
-    const y = 1;
+  const spawnCells = [
+    { x: 1, y: 1 },
+    { x: gridW - 2, y: 1 },
+    { x: 1, y: gridH - 2 },
+    { x: gridW - 2, y: gridH - 2 },
+  ];
 
-    state.players.set(tgUserId, {
-      tgUserId,
-      displayName: tgUserId,
+  players.forEach((player, idx) => {
+    const spawn = spawnCells[Math.min(idx, spawnCells.length - 1)]!;
+
+    state.players.set(player.tgUserId, {
+      tgUserId: player.tgUserId,
+      displayName: player.displayName,
       colorId: idx % 4,
       skinId: 'default',
       lastInputSeq: 0,
-      x,
-      y,
+      x: spawn.x,
+      y: spawn.y,
     });
   });
+
+  if (worldTiles.length !== gridW * gridH) {
+    throw new Error(`invalid_world_tiles_length:${worldTiles.length}`);
+  }
 
   matches.set(matchId, state);
   roomToMatch.set(roomId, matchId);

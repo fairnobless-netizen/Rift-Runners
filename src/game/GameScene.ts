@@ -121,6 +121,7 @@ export class GameScene extends Phaser.Scene {
   private worldReady = false;
   private worldHashServer: string | null = null;
   private worldHashClient: string | null = null;
+  private currentLevelIndex: number | null = null;
   private controls: ControlsState;
   private gameMode: GameMode = 'solo';
   private partySize = 1;
@@ -139,6 +140,7 @@ export class GameScene extends Phaser.Scene {
   private currentRoomCode: string | null = null;
   private currentMatchId: string | null = null;
   private droppedWrongRoom = 0;
+  private droppedWrongLevel = 0;
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
   private needsNetResync = false;
@@ -2205,6 +2207,7 @@ export class GameScene extends Phaser.Scene {
     this.worldReady = false;
     this.worldHashServer = null;
     this.worldHashClient = null;
+    this.currentLevelIndex = null;
   }
 
   public pushMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
@@ -2219,6 +2222,11 @@ export class GameScene extends Phaser.Scene {
 
     if (this.currentMatchId && snapshot.matchId !== this.currentMatchId) {
       this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    if (snapshot.levelIndex !== this.currentLevelIndex) {
+      this.droppedWrongLevel += 1;
       return false;
     }
 
@@ -2318,7 +2326,7 @@ export class GameScene extends Phaser.Scene {
     return `fnv1a_${(hash >>> 0).toString(16).padStart(8, '0')}`;
   }
 
-  public applyMatchWorldInit(payload: { roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }): boolean {
+  public applyMatchWorldInit(payload: { roomCode: string; matchId: string; levelIndex: number; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }): boolean {
     if (this.currentRoomCode && payload.roomCode !== this.currentRoomCode) {
       this.droppedWrongRoom += 1;
       return false;
@@ -2326,6 +2334,10 @@ export class GameScene extends Phaser.Scene {
 
     if (this.currentMatchId && payload.matchId !== this.currentMatchId) {
       this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    if (!Number.isInteger(payload.levelIndex) || payload.levelIndex < 1) {
       return false;
     }
 
@@ -2359,8 +2371,10 @@ export class GameScene extends Phaser.Scene {
     const clientTiles = this.arena.tiles.flatMap((row) => row.map((tile) => this.encodeWorldTile(tile)));
     this.worldHashServer = payload.world.worldHash || null;
     this.worldHashClient = this.computeWorldHash(clientTiles);
+    this.currentLevelIndex = payload.levelIndex;
     this.worldReady = true;
     this.invalidPosDrops = 0;
+    this.droppedWrongLevel = 0;
 
     return true;
   }
@@ -2391,6 +2405,7 @@ export class GameScene extends Phaser.Scene {
 
   public getSnapshotRoutingStats(): {
     droppedWrongRoom: number;
+    droppedWrongLevel: number;
     invalidPosDrops: number;
     lastSnapshotRoom: string | null;
     currentRoomCode: string | null;
@@ -2398,9 +2413,13 @@ export class GameScene extends Phaser.Scene {
     worldReady: boolean;
     worldHashServer: string | null;
     worldHashClient: string | null;
+    currentLevelIndex: number | null;
+    gridW: number;
+    gridH: number;
   } {
     return {
       droppedWrongRoom: this.droppedWrongRoom,
+      droppedWrongLevel: this.droppedWrongLevel,
       invalidPosDrops: this.invalidPosDrops,
       lastSnapshotRoom: this.lastSnapshotRoom,
       currentRoomCode: this.currentRoomCode,
@@ -2408,6 +2427,9 @@ export class GameScene extends Phaser.Scene {
       worldReady: this.worldReady,
       worldHashServer: this.worldHashServer,
       worldHashClient: this.worldHashClient,
+      currentLevelIndex: this.currentLevelIndex,
+      gridW: this.matchGridW,
+      gridH: this.matchGridH,
     };
   }
 

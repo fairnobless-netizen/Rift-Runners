@@ -35,6 +35,7 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot) => void) {
     matchId: match.matchId,
     tick: match.tick,
     serverTime: Date.now(),
+    levelIndex: match.levelIndex,
     world: {
       gridW: match.world.gridW,
       gridH: match.world.gridH,

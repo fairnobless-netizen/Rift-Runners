@@ -14,6 +14,7 @@ export type MatchState = {
   matchId: string;
   roomId: string;
   tick: number;
+  levelIndex: number;
 
   world: {
     gridW: number;

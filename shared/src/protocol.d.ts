@@ -20,6 +20,7 @@ export type MatchWorldInit = {
   type: 'match:world_init';
   roomCode: string;
   matchId: string;
+  levelIndex: number;
   world: MatchWorldState;
 };
 
@@ -29,6 +30,7 @@ export type MatchSnapshot = {
   matchId: string;
   tick: number;
   serverTime: number;
+  levelIndex: number;
   world: {
     gridW: number;
     gridH: number;

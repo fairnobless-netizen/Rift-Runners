@@ -25,7 +25,7 @@ export type WsServerMessage =
   | { type: 'room:joined'; room: unknown }
   | { type: 'room:left' }
   | { type: 'match:started'; matchId: string }
-  | { type: 'match:world_init'; roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }
+  | { type: 'match:world_init'; roomCode: string; matchId: string; levelIndex: number; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }
   | { type: 'match:snapshot'; snapshot: MatchSnapshotV1 }
   | { type: 'match:error'; error: string }
   | { type: 'error'; error: string };

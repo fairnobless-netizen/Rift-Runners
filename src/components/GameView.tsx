@@ -161,11 +161,15 @@ type TickDebugStats = {
     cadenceMax: number;
   };
   droppedWrongRoom: number;
+  droppedWrongLevel: number;
   invalidPosDrops: number;
   lastSnapshotRoom: string | null;
   worldReady: boolean;
   worldHashServer: string | null;
   worldHashClient: string | null;
+  currentLevelIndex: number | null;
+  gridW: number;
+  gridH: number;
 };
 
 function mapRoomError(error?: string): string {

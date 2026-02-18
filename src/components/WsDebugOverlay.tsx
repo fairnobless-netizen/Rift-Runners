@@ -62,11 +62,15 @@ type TickDebugStats = {
     cadenceMax: number;
   };
   droppedWrongRoom: number;
+  droppedWrongLevel: number;
   invalidPosDrops: number;
   lastSnapshotRoom: string | null;
   worldReady: boolean;
   worldHashServer: string | null;
   worldHashClient: string | null;
+  currentLevelIndex: number | null;
+  gridW: number;
+  gridH: number;
 };
 
 type TelemetrySnapshotSummary = {
@@ -677,10 +681,10 @@ export function WsDebugOverlay({
           </div>
 
           <div style={{ marginTop: 4 }}>
-            droppedWrongRoom: {tickDebugStats?.droppedWrongRoom ?? 0} | invalidPosDrops: {tickDebugStats?.invalidPosDrops ?? 0} | lastSnapshotRoom: {tickDebugStats?.lastSnapshotRoom ?? '—'}
+            droppedWrongRoom: {tickDebugStats?.droppedWrongRoom ?? 0} | droppedWrongLevel: {tickDebugStats?.droppedWrongLevel ?? 0} | invalidPosDrops: {tickDebugStats?.invalidPosDrops ?? 0} | lastSnapshotRoom: {tickDebugStats?.lastSnapshotRoom ?? '—'}
           </div>
           <div>
-            worldReady: {tickDebugStats?.worldReady ? 'yes' : 'no'} | worldHashServer: {tickDebugStats?.worldHashServer ?? '—'} | worldHashClient: {tickDebugStats?.worldHashClient ?? '—'}
+            worldReady: {tickDebugStats?.worldReady ? 'yes' : 'no'} | grid: {tickDebugStats?.gridW ?? '—'}×{tickDebugStats?.gridH ?? '—'} | levelIndex: {tickDebugStats?.currentLevelIndex ?? '—'} | worldHashServer: {tickDebugStats?.worldHashServer ?? '—'} | worldHashClient: {tickDebugStats?.worldHashClient ?? '—'}
           </div>
 
           <div style={{ marginTop: 4 }}>
