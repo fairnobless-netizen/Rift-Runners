@@ -839,55 +839,63 @@ export default function GameView(): JSX.Element {
   }, []);
 
 
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const scene = sceneRef.current;
-      const nextStats = scene?.getPredictionStats?.() ?? null;
-      setPredictionStats(nextStats);
-      setTickDebugStats(() => {
-        if (!scene) return null;
-        const netInterpStats = scene.getNetInterpStats();
-        const routingStats = scene.getSnapshotRoutingStats();
-        return {
-          snapshotTick: scene.getLastSnapshotTick(),
-          simulationTick: scene.getSimulationTick(),
-          renderTick: netInterpStats.renderTick,
-          baseDelayTicks: netInterpStats.baseDelayTicks,
-          baseDelayTargetTicks: netInterpStats.baseDelayTargetTicks,
-          baseDelayStepCooldownMs: netInterpStats.baseDelayStepCooldownMs,
-          baseDelayStepCooldownTicks: netInterpStats.baseDelayStepCooldownTicks,
-          delayTicks: netInterpStats.delayTicks,
-          minDelayTicks: netInterpStats.minDelayTicks,
-          maxDelayTicks: netInterpStats.maxDelayTicks,
-          bufferSize: netInterpStats.bufferSize,
-          underrunRate: netInterpStats.underrunRate,
-          underrunCount: netInterpStats.underrunCount,
-          lateSnapshotCount: netInterpStats.lateSnapshotCount,
-          lateSnapshotEma: netInterpStats.lateSnapshotEma,
-          stallCount: netInterpStats.stallCount,
-          extrapCount: netInterpStats.extrapCount,
-          extrapolatingTicks: netInterpStats.extrapolatingTicks,
-          stalled: netInterpStats.stalled,
-          rttMs: netInterpStats.rttMs,
-          rttJitterMs: netInterpStats.rttJitterMs,
-          targetBufferPairs: netInterpStats.targetBufferPairs,
-          targetBufferTargetPairs: netInterpStats.targetBufferTargetPairs,
-          adaptiveEveryTicks: netInterpStats.adaptiveEveryTicks,
-          adaptiveEveryTargetTicks: netInterpStats.adaptiveEveryTargetTicks,
-          bufferHasReserve: netInterpStats.bufferHasReserve,
-          tuning: netInterpStats.tuning,
-          droppedWrongRoom: routingStats.droppedWrongRoom,
-          invalidPosDrops: routingStats.invalidPosDrops,
-          lastSnapshotRoom: routingStats.lastSnapshotRoom,
-          worldReady: routingStats.worldReady,
-          worldHashServer: routingStats.worldHashServer,
-          worldHashClient: routingStats.worldHashClient,
-        };
-      });
-    }, 350);
+ useEffect(() => {
+  const id = window.setInterval(() => {
+    const scene = sceneRef.current;
 
-    return () => window.clearInterval(id);
-  }, []);
+    const nextStats = scene?.getPredictionStats?.() ?? null;
+    setPredictionStats(nextStats);
+
+    if (!scene) {
+      setTickDebugStats(null);
+      return;
+    }
+
+    const netInterpStats = scene.getNetInterpStats();
+    const routingStats = scene.getSnapshotRoutingStats();
+
+    setTickDebugStats({
+      snapshotTick: scene.getLastSnapshotTick(),
+      simulationTick: scene.getSimulationTick(),
+
+      renderTick: netInterpStats.renderTick,
+      baseDelayTicks: netInterpStats.baseDelayTicks,
+      baseDelayTargetTicks: netInterpStats.baseDelayTargetTicks,
+      baseDelayStepCooldownMs: netInterpStats.baseDelayStepCooldownMs,
+      baseDelayStepCooldownTicks: netInterpStats.baseDelayStepCooldownTicks,
+      delayTicks: netInterpStats.delayTicks,
+      minDelayTicks: netInterpStats.minDelayTicks,
+      maxDelayTicks: netInterpStats.maxDelayTicks,
+      bufferSize: netInterpStats.bufferSize,
+      underrunRate: netInterpStats.underrunRate,
+      underrunCount: netInterpStats.underrunCount,
+      lateSnapshotCount: netInterpStats.lateSnapshotCount,
+      lateSnapshotEma: netInterpStats.lateSnapshotEma,
+      stallCount: netInterpStats.stallCount,
+      extrapCount: netInterpStats.extrapCount,
+      extrapolatingTicks: netInterpStats.extrapolatingTicks,
+      stalled: netInterpStats.stalled,
+      rttMs: netInterpStats.rttMs,
+      rttJitterMs: netInterpStats.rttJitterMs,
+      targetBufferPairs: netInterpStats.targetBufferPairs,
+      targetBufferTargetPairs: netInterpStats.targetBufferTargetPairs,
+      adaptiveEveryTicks: netInterpStats.adaptiveEveryTicks,
+      adaptiveEveryTargetTicks: netInterpStats.adaptiveEveryTargetTicks,
+      bufferHasReserve: netInterpStats.bufferHasReserve,
+      tuning: netInterpStats.tuning,
+
+      droppedWrongRoom: routingStats.droppedWrongRoom,
+      invalidPosDrops: routingStats.invalidPosDrops,
+      lastSnapshotRoom: routingStats.lastSnapshotRoom,
+      worldReady: routingStats.worldReady,
+      worldHashServer: routingStats.worldHashServer,
+      worldHashClient: routingStats.worldHashClient,
+    });
+  }, 350);
+
+  return () => window.clearInterval(id);
+}, []);
+
 
   useEffect(() => {
     const onStats = (nextStats: PlayerStats): void => {
