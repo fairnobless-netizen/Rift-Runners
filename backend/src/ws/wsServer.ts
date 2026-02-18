@@ -5,11 +5,15 @@ import type { MatchClientMessage, MatchServerMessage } from '../mp/protocol';
 import { startMatch } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 
+// ✅ add DB cleanup
+import { closeRoomTx, getRoomByCode, leaveRoomV2 } from '../db/repos';
+
 type ClientCtx = {
   socket: WebSocket;
   tgUserId: string;
-  roomId: string | null;
+  roomId: string | null; // (roomCode)
   matchId: string | null;
+  lastSeenMs: number; // ✅ for idle timeout
 };
 
 type RoomState = {
@@ -35,6 +39,17 @@ type ServerMessage =
 
 const rooms = new Map<string, RoomState>();
 const clients = new Set<ClientCtx>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const c of clients) {
+    if (now - c.lastSeenMs > 60_000) {
+      try {
+        c.socket.terminate();
+      } catch {}
+    }
+  }
+}, 10_000);
 
 function send(socket: WebSocket, msg: ServerMessage) {
   if (socket.readyState !== WebSocket.OPEN) {
@@ -76,7 +91,14 @@ function broadcastToRoom(roomId: string, msg: MatchServerMessage) {
 
 function attachClientToRoom(ctx: ClientCtx, roomId: string) {
   if (ctx.roomId) {
+    const prevRoomCode = ctx.roomId;
+    const tgUserId = ctx.tgUserId;
+
     detachClientFromRoom(ctx);
+
+    if (prevRoomCode) {
+      void detachClientFromRoomDb(prevRoomCode, tgUserId);
+    }
   }
 
   const room = getOrCreateRoom(roomId);
@@ -95,6 +117,24 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
 
   ctx.roomId = roomId;
   ctx.matchId = room.matchId;
+}
+
+async function detachClientFromRoomDb(roomCode: string, tgUserId: string) {
+  try {
+    const room = await getRoomByCode(roomCode);
+    if (!room) return;
+
+    // If owner leaves -> close room & kick everyone (DB + clients will get match loop stopped)
+    if (String(room.ownerTgUserId) === String(tgUserId)) {
+      await closeRoomTx(String(tgUserId), roomCode);
+      return;
+    }
+
+    // Normal member leaves; deletes room if remaining==0
+    await leaveRoomV2({ tgUserId: String(tgUserId), roomCode });
+  } catch {
+    // swallow: release-safe (avoid crashing ws handler)
+  }
 }
 
 function detachClientFromRoom(ctx: ClientCtx) {
@@ -238,6 +278,7 @@ export function registerWsHandlers(wss: WebSocketServer) {
       tgUserId,
       roomId: null,
       matchId: null,
+      lastSeenMs: Date.now(),
     };
     clients.add(ctx);
 
@@ -253,12 +294,20 @@ export function registerWsHandlers(wss: WebSocketServer) {
         send(socket, { type: 'match:error', error: 'invalid_message' });
         return;
       }
+      ctx.lastSeenMs = Date.now();
       handleMessage(ctx, msg);
     });
 
     socket.on('close', () => {
+      const roomCode = ctx.roomId;
+      const tgUserId = ctx.tgUserId;
+
       detachClientFromRoom(ctx);
       clients.delete(ctx);
+
+      if (roomCode) {
+        void detachClientFromRoomDb(roomCode, tgUserId);
+      }
     });
   });
 }
