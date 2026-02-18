@@ -31,6 +31,7 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot) => void) {
 
   const snapshot: MatchSnapshot = {
     version: 'match_v1',
+    roomCode: match.roomId,
     matchId: match.matchId,
     tick: match.tick,
     serverTime: Date.now(),

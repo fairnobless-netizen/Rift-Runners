@@ -133,6 +133,11 @@ export class GameScene extends Phaser.Scene {
   private simulationTick = 0;
   private lastSnapshotTick = -1;
   private snapshotBuffer: MatchSnapshotV1[] = [];
+  private currentRoomCode: string | null = null;
+  private currentMatchId: string | null = null;
+  private droppedWrongRoom = 0;
+  private invalidPosDrops = 0;
+  private lastSnapshotRoom: string | null = null;
   private needsNetResync = false;
   private readonly SNAPSHOT_BUFFER_SIZE = 10;
   private arena: ArenaModel = createArena(0, this.rng);
@@ -2171,8 +2176,46 @@ export class GameScene extends Phaser.Scene {
     this.placeLocalPlayerSpriteAt(x, y);
   }
 
+
+  public setActiveMultiplayerSession(roomCode: string | null, matchId: string | null): void {
+    const normalizedRoom = roomCode?.trim() ? roomCode : null;
+    const normalizedMatch = matchId?.trim() ? matchId : null;
+
+    const hasChanged = this.currentRoomCode !== normalizedRoom || this.currentMatchId !== normalizedMatch;
+    this.currentRoomCode = normalizedRoom;
+    this.currentMatchId = normalizedMatch;
+
+    if (hasChanged) {
+      this.resetMultiplayerNetState();
+    }
+  }
+
+  public resetMultiplayerNetState(): void {
+    this.needsNetResync = true;
+    this.lastSnapshotTick = -1;
+    this.snapshotBuffer = [];
+    this.localInputQueue = [];
+    this.inputSeq = 0;
+    this.accumulator = 0;
+    this.prediction.reset?.();
+    this.remotePlayers?.resetNetState?.();
+  }
+
   public pushMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
     if (snapshot?.version !== 'match_v1') return false;
+
+    this.lastSnapshotRoom = snapshot.roomCode ?? null;
+
+    if (this.currentRoomCode && snapshot.roomCode !== this.currentRoomCode) {
+      this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    if (this.currentMatchId && snapshot.matchId !== this.currentMatchId) {
+      this.droppedWrongRoom += 1;
+      return false;
+    }
+
     if (snapshot.tick <= this.lastSnapshotTick) return false;
 
     if (localTgUserId) {
@@ -2224,6 +2267,11 @@ export class GameScene extends Phaser.Scene {
     const me = snapshot.players?.find((p) => p.tgUserId === effectiveLocalId);
     if (!me) return;
 
+    if (!isInsideArena(this.arena, me.x, me.y) || !canOccupyCell(this.arena, me.x, me.y)) {
+      this.invalidPosDrops += 1;
+      return;
+    }
+
     this.prediction.reconcile({
       serverX: me.x,
       serverY: me.y,
@@ -2257,6 +2305,23 @@ export class GameScene extends Phaser.Scene {
 
   public getLastSnapshotTick(): number {
     return this.lastSnapshotTick;
+  }
+
+
+  public getSnapshotRoutingStats(): {
+    droppedWrongRoom: number;
+    invalidPosDrops: number;
+    lastSnapshotRoom: string | null;
+    currentRoomCode: string | null;
+    currentMatchId: string | null;
+  } {
+    return {
+      droppedWrongRoom: this.droppedWrongRoom,
+      invalidPosDrops: this.invalidPosDrops,
+      lastSnapshotRoom: this.lastSnapshotRoom,
+      currentRoomCode: this.currentRoomCode,
+      currentMatchId: this.currentMatchId,
+    };
   }
 
   public getNetInterpStats(): {

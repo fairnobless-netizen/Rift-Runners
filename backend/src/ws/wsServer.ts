@@ -30,7 +30,9 @@ type RoomJoinMessage = {
 
 type PingMessage = { type: 'ping'; id: number; t: number };
 
-type ClientMessage = MatchClientMessage | RoomJoinMessage | PingMessage;
+type RoomLeaveMessage = { type: 'room:leave' };
+
+type ClientMessage = MatchClientMessage | RoomJoinMessage | RoomLeaveMessage | PingMessage;
 
 type ServerMessage =
   | MatchServerMessage
@@ -84,8 +86,17 @@ function broadcastToRoom(roomId: string, msg: MatchServerMessage) {
     return;
   }
 
-  for (const socket of room.players.values()) {
-    send(socket, msg);
+  for (const client of clients) {
+    if (client.roomId !== roomId) {
+      continue;
+    }
+
+    const attachedSocket = room.players.get(client.tgUserId);
+    if (attachedSocket !== client.socket) {
+      continue;
+    }
+
+    send(client.socket, msg);
   }
 }
 
@@ -196,6 +207,12 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       return;
     }
 
+
+    case 'room:leave': {
+      detachClientFromRoom(ctx);
+      return;
+    }
+
     case 'match:start': {
       if (!ctx.roomId) {
         return send(ctx.socket, { type: 'match:error', error: 'not_in_room' });
@@ -225,7 +242,21 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       }
 
       startMatch(match, (snapshot) => {
-        broadcastToRoom(room.roomId, {
+        const activeRoom = rooms.get(room.roomId);
+        if (!activeRoom) {
+          endMatch(match.matchId);
+          return;
+        }
+
+        if (activeRoom.matchId !== snapshot.matchId) {
+          return;
+        }
+
+        if (snapshot.roomCode !== activeRoom.roomId) {
+          return;
+        }
+
+        broadcastToRoom(activeRoom.roomId, {
           type: 'match:snapshot',
           snapshot,
         });
