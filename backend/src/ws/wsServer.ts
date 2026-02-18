@@ -80,19 +80,43 @@ function getOrCreateRoom(roomId: string): RoomState {
   return room;
 }
 
-function broadcastToRoom(roomId: string, msg: MatchServerMessage) {
+function logWsEvent(evt: string, payload: Record<string, unknown>) {
+  console.log(
+    JSON.stringify({
+      evt,
+      ...payload,
+      ts: Date.now(),
+    }),
+  );
+}
+
+function isSocketAttachedToRoom(ctx: ClientCtx, room: RoomState): boolean {
+  return room.players.get(ctx.tgUserId) === ctx.socket;
+}
+
+function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerMessage) {
   const room = rooms.get(roomId);
   if (!room) {
     return;
   }
 
+  if (room.matchId !== matchId) {
+    logWsEvent('ws_drop_outbound', {
+      reason: 'room_match_mismatch',
+      roomId,
+      roomMatchId: room.matchId,
+      targetMatchId: matchId,
+      msgType: msg.type,
+    });
+    return;
+  }
+
   for (const client of clients) {
-    if (client.roomId !== roomId) {
+    if (client.roomId !== roomId || client.matchId !== matchId) {
       continue;
     }
 
-    const attachedSocket = room.players.get(client.tgUserId);
-    if (attachedSocket !== client.socket) {
+    if (!isSocketAttachedToRoom(client, room)) {
       continue;
     }
 
@@ -128,6 +152,11 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
 
   ctx.roomId = roomId;
   ctx.matchId = room.matchId;
+
+  logWsEvent('ws_room_join', {
+    tgUserId: ctx.tgUserId,
+    roomId,
+  });
 }
 
 async function detachClientFromRoomDb(roomCode: string, tgUserId: string) {
@@ -153,7 +182,8 @@ function detachClientFromRoom(ctx: ClientCtx) {
     return;
   }
 
-  const room = rooms.get(ctx.roomId);
+  const roomId = ctx.roomId;
+  const room = rooms.get(roomId);
   if (room) {
     room.players.delete(ctx.tgUserId);
 
@@ -167,6 +197,11 @@ function detachClientFromRoom(ctx: ClientCtx) {
 
   ctx.roomId = null;
   ctx.matchId = null;
+
+  logWsEvent('ws_room_leave', {
+    tgUserId: ctx.tgUserId,
+    roomId,
+  });
 }
 
 function parseMessage(raw: RawData): ClientMessage | null {
@@ -181,8 +216,20 @@ function parseMessage(raw: RawData): ClientMessage | null {
   }
 }
 
-function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
-  switch (msg.type) {
+function logInboundDrop(ctx: ClientCtx, msg: ClientMessage, reason: string, room?: RoomState | null) {
+  logWsEvent('ws_drop_inbound', {
+    reason,
+    tgUserId: ctx.tgUserId,
+    roomId: ctx.roomId,
+    ctxMatchId: ctx.matchId,
+    roomMatchId: room?.matchId ?? null,
+    msgType: msg.type,
+  });
+}
+
+async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
+  try {
+    switch (msg.type) {
     case 'ping': {
       const id = Number((msg as any).id);
       const t = Number((msg as any).t);
@@ -218,6 +265,20 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return send(ctx.socket, { type: 'match:error', error: 'not_in_room' });
       }
 
+      logWsEvent('ws_match_start_requested', {
+        tgUserId: ctx.tgUserId,
+        roomId: ctx.roomId,
+      });
+
+      const dbRoom = await getRoomByCode(ctx.roomId);
+      if (!dbRoom) {
+        return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
+      }
+
+      if (String(dbRoom.ownerTgUserId) !== String(ctx.tgUserId)) {
+        return send(ctx.socket, { type: 'match:error', error: 'not_room_owner' });
+      }
+
       const room = getRoom(ctx.roomId);
       if (!room) {
         return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
@@ -232,16 +293,23 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       room.matchId = match.matchId;
 
       for (const client of clients) {
-        if (client.roomId === room.roomId) {
+        if (client.roomId === room.roomId && isSocketAttachedToRoom(client, room)) {
           client.matchId = match.matchId;
-          send(client.socket, {
-            type: 'match:started',
-            matchId: match.matchId,
-          });
         }
       }
 
-      broadcastToRoom(room.roomId, {
+      logWsEvent('ws_match_started', {
+        roomId: room.roomId,
+        matchId: match.matchId,
+        playersCount: players.length,
+      });
+
+      broadcastToRoomMatch(room.roomId, match.matchId, {
+        type: 'match:started',
+        matchId: match.matchId,
+      });
+
+      broadcastToRoomMatch(room.roomId, match.matchId, {
         type: 'match:world_init',
         roomCode: room.roomId,
         matchId: match.matchId,
@@ -268,7 +336,7 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
           return;
         }
 
-        broadcastToRoom(activeRoom.roomId, {
+        broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, {
           type: 'match:snapshot',
           snapshot,
         });
@@ -278,11 +346,44 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
     }
 
     case 'match:input': {
+      if (!ctx.roomId) {
+        logInboundDrop(ctx, msg, 'no_room');
+        return;
+      }
+
+      if (!ctx.matchId) {
+        logInboundDrop(ctx, msg, 'no_match');
+        return;
+      }
+
+      const room = rooms.get(ctx.roomId);
+      if (!room) {
+        logInboundDrop(ctx, msg, 'room_missing');
+        return;
+      }
+
+      if (!isSocketAttachedToRoom(ctx, room)) {
+        logInboundDrop(ctx, msg, 'socket_not_attached', room);
+        return;
+      }
+
+      if (room.matchId !== ctx.matchId) {
+        logInboundDrop(ctx, msg, 'match_mismatch', room);
+        return;
+      }
+
       const matchId = ctx.matchId;
-      if (!matchId) return;
 
       const match = getMatch(matchId);
-      if (!match) return;
+      if (!match) {
+        logInboundDrop(ctx, msg, 'match_not_found', room);
+        return;
+      }
+
+      if (match.roomId !== ctx.roomId) {
+        logInboundDrop(ctx, msg, 'match_room_mismatch', room);
+        return;
+      }
 
       const seq = Number((msg as any).seq);
       if (!Number.isSafeInteger(seq) || seq <= 0) return;
@@ -307,6 +408,9 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
     default:
       return;
+    }
+  } catch {
+    // release-safe: avoid crashing ws handler on malformed/unexpected message paths
   }
 }
 
@@ -338,7 +442,7 @@ export function registerWsHandlers(wss: WebSocketServer) {
         return;
       }
       ctx.lastSeenMs = Date.now();
-      handleMessage(ctx, msg);
+      void handleMessage(ctx, msg);
     });
 
     socket.on('close', () => {
