@@ -29,3 +29,45 @@ export type WsServerMessage =
   | { type: 'match:snapshot'; snapshot: MatchSnapshotV1 }
   | { type: 'match:error'; error: string }
   | { type: 'error'; error: string };
+
+export type WsDebugMetrics = {
+  snapshotTick: number;
+  simulationTick: number;
+  renderTick: number;
+  baseDelayTicks: number;
+  baseDelayTargetTicks: number;
+  baseDelayStepCooldownMs: number;
+  baseDelayStepCooldownTicks: number;
+  delayTicks: number;
+  minDelayTicks: number;
+  maxDelayTicks: number;
+  bufferSize: number;
+  underrunRate: number;
+  underrunCount: number;
+  lateSnapshotCount: number;
+  lateSnapshotEma: number;
+  stallCount: number;
+  extrapCount: number;
+  extrapolatingTicks: number;
+  stalled: boolean;
+  rttMs: number | null;
+  rttJitterMs: number;
+  targetBufferPairs: number;
+  targetBufferTargetPairs: number;
+  adaptiveEveryTicks: number;
+  adaptiveEveryTargetTicks: number;
+  bufferHasReserve: boolean;
+  tuning: {
+    baseDelayMax: number;
+    targetBufferMin: number;
+    targetBufferMax: number;
+    cadenceMin: number;
+    cadenceMax: number;
+  };
+  droppedWrongRoom: number;
+  invalidPosDrops: number;
+  lastSnapshotRoom: string | null;
+  worldReady: boolean;
+  worldHashServer: string | null;
+  worldHashClient: string | null;
+};

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NetSimConfig, NetSimPresetId } from '../ws/useWsClient';
+import type { WsDebugMetrics } from '../ws/wsTypes';
 import { triggerDebugDrift } from '../game/LocalPredictionController';
 import { isDebugEnabled } from '../debug/debugFlags';
 
@@ -27,47 +28,6 @@ function formatPredictionLine(localInputSeq: number, ps: PredictionStats): strin
   return `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${ps.lastAckSeq}, unacked=${ps.pendingCount}, predErr=${(ps.predictionError ?? 0).toFixed(3)}, predErrEma=${(ps.predictionErrorEma ?? 0).toFixed(3)}, hardT=(${(ps.predHardEnter ?? 0).toFixed(2)}/${(ps.predHardExit ?? 0).toFixed(2)}), hist=${ps.historySize ?? 0}, missHist=${ps.missingHistoryCount ?? 0}, reason=${ps.reconcileReason ?? 'none'}, hardSnaps=${ps.correctionCount}, softCorrections=${ps.softCorrectionCount}, drift=${ps.drift.toFixed(3)}, bias=(${ps.biasX.toFixed(3)}, ${ps.biasY.toFixed(3)}), dropped=${ps.droppedInputCount}`;
 }
 
-type TickDebugStats = {
-  snapshotTick: number;
-  simulationTick: number;
-  renderTick: number;
-  baseDelayTicks: number;
-  baseDelayTargetTicks: number;
-  baseDelayStepCooldownMs: number;
-  baseDelayStepCooldownTicks: number;
-  delayTicks: number;
-  minDelayTicks: number;
-  maxDelayTicks: number;
-  bufferSize: number;
-  underrunRate: number;
-  underrunCount: number;
-  lateSnapshotCount: number;
-  lateSnapshotEma: number;
-  stallCount: number;
-  extrapCount: number;
-  extrapolatingTicks: number;
-  stalled: boolean;
-  rttMs: number | null;
-  rttJitterMs: number;
-  targetBufferPairs: number;
-  targetBufferTargetPairs: number;
-  adaptiveEveryTicks: number;
-  adaptiveEveryTargetTicks: number;
-  bufferHasReserve: boolean;
-  tuning: {
-    baseDelayMax: number;
-    targetBufferMin: number;
-    targetBufferMax: number;
-    cadenceMin: number;
-    cadenceMax: number;
-  };
-  droppedWrongRoom: number;
-  invalidPosDrops: number;
-  lastSnapshotRoom: string | null;
-  worldReady: boolean;
-  worldHashServer: string | null;
-  worldHashClient: string | null;
-};
 
 type TelemetrySnapshotSummary = {
   avgDrift: number;
@@ -148,7 +108,7 @@ export function WsDebugOverlay({
   onSelectNetSimPreset: (presetId: NetSimPresetId) => void;
   onLobby: () => void;
   predictionStats: PredictionStats | null;
-  tickDebugStats: TickDebugStats | null;
+  tickDebugStats: WsDebugMetrics | null;
   rttMs: number | null;
   rttJitterMs: number;
   onCreateRoom: () => void;
@@ -362,7 +322,7 @@ export function WsDebugOverlay({
     triggerJsonDownload(run, filename);
   };
 
-  const latestStatsRef = useRef<{ predictionStats: PredictionStats | null; tickDebugStats: TickDebugStats | null }>({
+  const latestStatsRef = useRef<{ predictionStats: PredictionStats | null; tickDebugStats: WsDebugMetrics | null }>({
     predictionStats,
     tickDebugStats,
   });
