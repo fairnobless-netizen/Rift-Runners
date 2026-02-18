@@ -241,6 +241,18 @@ function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         }
       }
 
+      broadcastToRoom(room.roomId, {
+        type: 'match:world_init',
+        roomCode: room.roomId,
+        matchId: match.matchId,
+        world: {
+          gridW: match.world.gridW,
+          gridH: match.world.gridH,
+          tiles: [...match.world.tiles],
+          worldHash: match.world.worldHash,
+        },
+      });
+
       startMatch(match, (snapshot) => {
         const activeRoom = rooms.get(room.roomId);
         if (!activeRoom) {

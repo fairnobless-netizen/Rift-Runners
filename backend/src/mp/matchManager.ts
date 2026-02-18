@@ -6,6 +6,41 @@ import { MatchState, PlayerState } from './types';
 const matches = new Map<string, MatchState>();
 const roomToMatch = new Map<string, string>();
 
+
+function buildWorldTiles(gridW: number, gridH: number): number[] {
+  const tiles: number[] = [];
+  for (let y = 0; y < gridH; y += 1) {
+    for (let x = 0; x < gridW; x += 1) {
+      const edge = x === 0 || y === 0 || x === gridW - 1 || y === gridH - 1;
+      const pillar = x % 2 === 0 && y % 2 === 0;
+      if (edge || pillar) {
+        tiles.push(1); // hard wall
+        continue;
+      }
+
+      const spawnSafe = (x <= 2 && y <= 2);
+      if (spawnSafe) {
+        tiles.push(0);
+        continue;
+      }
+
+      // deterministic checker brick pattern for v1 sync
+      const isBrick = (x + y) % 3 === 0;
+      tiles.push(isBrick ? 2 : 0);
+    }
+  }
+  return tiles;
+}
+
+function hashWorldTiles(tiles: number[]): string {
+  let hash = 2166136261;
+  for (const tile of tiles) {
+    hash ^= tile & 0xff;
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a_${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 function newMatchId(): string {
   return `match_${crypto.randomBytes(6).toString('hex')}`;
 }
@@ -21,11 +56,14 @@ export function createMatch(roomId: string, players: string[]): MatchState {
   const gridW = 15;
   const gridH = 15;
 
+  const worldTiles = buildWorldTiles(gridW, gridH);
+  const worldHash = hashWorldTiles(worldTiles);
+
   const state: MatchState = {
     matchId,
     roomId,
     tick: 0,
-    world: { gridW, gridH },
+    world: { gridW, gridH, tiles: worldTiles, worldHash },
     players: new Map<string, PlayerState>(),
     inputQueue: [],
   };
