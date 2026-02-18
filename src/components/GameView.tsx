@@ -163,6 +163,9 @@ type TickDebugStats = {
   droppedWrongRoom: number;
   invalidPosDrops: number;
   lastSnapshotRoom: string | null;
+  worldReady: boolean;
+  worldHashServer: string | null;
+  worldHashClient: string | null;
 };
 
 function mapRoomError(error?: string): string {
@@ -876,6 +879,9 @@ export default function GameView(): JSX.Element {
           droppedWrongRoom: routingStats.droppedWrongRoom,
           invalidPosDrops: routingStats.invalidPosDrops,
           lastSnapshotRoom: routingStats.lastSnapshotRoom,
+          worldReady: routingStats.worldReady,
+          worldHashServer: routingStats.worldHashServer,
+          worldHashClient: routingStats.worldHashClient,
         };
       });
     }, 350);
@@ -1058,6 +1064,26 @@ export default function GameView(): JSX.Element {
     const partySize = Math.max(1, Math.min(4, currentRoomMembers.length || 1));
     sceneRef.current?.setPartySize(partySize);
   }, [currentRoomMembers.length]);
+
+  useEffect(() => {
+    const lastWorldInit = [...ws.messages].reverse().find((message) => message.type === 'match:world_init') as any;
+    if (!lastWorldInit?.world || !lastWorldInit?.matchId) return;
+
+    if (currentRoom?.roomCode && lastWorldInit.roomCode !== currentRoom.roomCode) {
+      return;
+    }
+
+    if (currentMatchId && lastWorldInit.matchId !== currentMatchId) {
+      return;
+    }
+
+    if (!currentMatchId && lastWorldInit.matchId) {
+      setCurrentMatchId(lastWorldInit.matchId);
+    }
+
+    sceneRef.current?.applyMatchWorldInit(lastWorldInit);
+  }, [ws.messages, currentRoom?.roomCode, currentMatchId]);
+
 
   useEffect(() => {
     const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;

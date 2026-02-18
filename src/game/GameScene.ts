@@ -118,6 +118,9 @@ export class GameScene extends Phaser.Scene {
   private localTgUserId?: string;
   private matchGridW: number = GAME_CONFIG.gridWidth;
   private matchGridH: number = GAME_CONFIG.gridHeight;
+  private worldReady = false;
+  private worldHashServer: string | null = null;
+  private worldHashClient: string | null = null;
   private controls: ControlsState;
   private gameMode: GameMode = 'solo';
   private partySize = 1;
@@ -2199,6 +2202,9 @@ export class GameScene extends Phaser.Scene {
     this.accumulator = 0;
     this.prediction.reset?.();
     this.remotePlayers?.resetNetState?.();
+    this.worldReady = false;
+    this.worldHashServer = null;
+    this.worldHashClient = null;
   }
 
   public pushMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
@@ -2267,6 +2273,10 @@ export class GameScene extends Phaser.Scene {
     const me = snapshot.players?.find((p) => p.tgUserId === effectiveLocalId);
     if (!me) return;
 
+    if (!this.worldReady) {
+      return;
+    }
+
     if (!isInsideArena(this.arena, me.x, me.y) || !canOccupyCell(this.arena, me.x, me.y)) {
       this.invalidPosDrops += 1;
       return;
@@ -2283,6 +2293,77 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+
+
+  private decodeWorldTile(tile: number): TileType {
+    if (tile === 1) return 'HardWall';
+    if (tile === 2) return 'BreakableBlock';
+    if (tile === 3) return 'ANOMALOUS_STONE';
+    return 'Floor';
+  }
+
+  private encodeWorldTile(tile: TileType): number {
+    if (tile === 'HardWall') return 1;
+    if (tile === 'BreakableBlock') return 2;
+    if (tile === 'ANOMALOUS_STONE') return 3;
+    return 0;
+  }
+
+  private computeWorldHash(tiles: number[]): string {
+    let hash = 2166136261;
+    for (const tile of tiles) {
+      hash ^= tile & 0xff;
+      hash = Math.imul(hash, 16777619);
+    }
+    return `fnv1a_${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  }
+
+  public applyMatchWorldInit(payload: { roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }): boolean {
+    if (this.currentRoomCode && payload.roomCode !== this.currentRoomCode) {
+      this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    if (this.currentMatchId && payload.matchId !== this.currentMatchId) {
+      this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    const { gridW, gridH, tiles } = payload.world;
+    if (!Number.isInteger(gridW) || !Number.isInteger(gridH) || gridW <= 0 || gridH <= 0) {
+      return false;
+    }
+
+    if (!Array.isArray(tiles) || tiles.length !== gridW * gridH) {
+      return false;
+    }
+
+    const nextTiles: TileType[][] = [];
+    for (let y = 0; y < gridH; y += 1) {
+      const row: TileType[] = [];
+      for (let x = 0; x < gridW; x += 1) {
+        row.push(this.decodeWorldTile(tiles[y * gridW + x] ?? 0));
+      }
+      nextTiles.push(row);
+    }
+
+    this.arena.tiles = nextTiles;
+    this.arena.width = gridW;
+    this.arena.height = gridH;
+    this.matchGridW = gridW;
+    this.matchGridH = gridH;
+    this.clearDynamicSprites();
+    this.rebuildArenaTiles();
+    this.syncCameraBoundsToArena();
+
+    const clientTiles = this.arena.tiles.flatMap((row) => row.map((tile) => this.encodeWorldTile(tile)));
+    this.worldHashServer = payload.world.worldHash || null;
+    this.worldHashClient = this.computeWorldHash(clientTiles);
+    this.worldReady = true;
+    this.invalidPosDrops = 0;
+
+    return true;
+  }
 
   public setAudioSettings(next: SceneAudioSettings): void {
     this.audioSettings = { ...next };
@@ -2314,6 +2395,9 @@ export class GameScene extends Phaser.Scene {
     lastSnapshotRoom: string | null;
     currentRoomCode: string | null;
     currentMatchId: string | null;
+    worldReady: boolean;
+    worldHashServer: string | null;
+    worldHashClient: string | null;
   } {
     return {
       droppedWrongRoom: this.droppedWrongRoom,
@@ -2321,6 +2405,9 @@ export class GameScene extends Phaser.Scene {
       lastSnapshotRoom: this.lastSnapshotRoom,
       currentRoomCode: this.currentRoomCode,
       currentMatchId: this.currentMatchId,
+      worldReady: this.worldReady,
+      worldHashServer: this.worldHashServer,
+      worldHashClient: this.worldHashClient,
     };
   }
 

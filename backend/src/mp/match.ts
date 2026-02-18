@@ -35,7 +35,11 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot) => void) {
     matchId: match.matchId,
     tick: match.tick,
     serverTime: Date.now(),
-    world: { ...match.world },
+    world: {
+      gridW: match.world.gridW,
+      gridH: match.world.gridH,
+      worldHash: match.world.worldHash,
+    },
     players: Array.from(match.players.values()).map((p) => ({
       tgUserId: p.tgUserId,
       displayName: p.displayName,
@@ -48,6 +52,17 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot) => void) {
   };
 
   broadcast(snapshot);
+}
+
+
+function canOccupyWorldCell(match: MatchState, x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x >= match.world.gridW || y >= match.world.gridH) {
+    return false;
+  }
+
+  const idx = y * match.world.gridW + x;
+  const tile = match.world.tiles[idx] ?? 1;
+  return tile === 0;
 }
 
 function applyInput(match: MatchState, tgUserId: string, seq: number, payload: MatchInputPayload) {
@@ -68,6 +83,11 @@ function applyInput(match: MatchState, tgUserId: string, seq: number, payload: M
     // Clamp to world bounds
     nx = clamp(nx, 0, match.world.gridW - 1);
     ny = clamp(ny, 0, match.world.gridH - 1);
+
+    if (!canOccupyWorldCell(match, nx, ny)) {
+      p.lastInputSeq = seq;
+      return;
+    }
 
     p.x = nx;
     p.y = ny;

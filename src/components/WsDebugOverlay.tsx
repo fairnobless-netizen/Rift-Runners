@@ -64,6 +64,9 @@ type TickDebugStats = {
   droppedWrongRoom: number;
   invalidPosDrops: number;
   lastSnapshotRoom: string | null;
+  worldReady: boolean;
+  worldHashServer: string | null;
+  worldHashClient: string | null;
 };
 
 type TelemetrySnapshotSummary = {
@@ -675,6 +678,9 @@ export function WsDebugOverlay({
 
           <div style={{ marginTop: 4 }}>
             droppedWrongRoom: {tickDebugStats?.droppedWrongRoom ?? 0} | invalidPosDrops: {tickDebugStats?.invalidPosDrops ?? 0} | lastSnapshotRoom: {tickDebugStats?.lastSnapshotRoom ?? '—'}
+          </div>
+          <div>
+            worldReady: {tickDebugStats?.worldReady ? 'yes' : 'no'} | worldHashServer: {tickDebugStats?.worldHashServer ?? '—'} | worldHashClient: {tickDebugStats?.worldHashClient ?? '—'}
           </div>
 
           <div style={{ marginTop: 4 }}>

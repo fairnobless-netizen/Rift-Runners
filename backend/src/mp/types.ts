@@ -18,6 +18,8 @@ export type MatchState = {
   world: {
     gridW: number;
     gridH: number;
+    tiles: number[];
+    worldHash: string;
   };
 
   players: Map<string, PlayerState>;
