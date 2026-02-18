@@ -1071,10 +1071,30 @@ export default function GameView(): JSX.Element {
 
     const expectedRoomCode = expectedRoomCodeRef.current;
     const expectedMatchId = expectedMatchIdRef.current;
+    if (!expectedRoomCode) {
+      diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_world_init_no_expected_room', {
+        expectedRoomCode,
+        expectedMatchId,
+        gotRoomCode: lastWorldInit.roomCode ?? null,
+        gotMatchId: lastWorldInit.matchId ?? null,
+      });
+      return;
+    }
+
+    if (!expectedMatchId) {
+      diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_world_init_no_expected_match', {
+        expectedRoomCode,
+        expectedMatchId,
+        gotRoomCode: lastWorldInit.roomCode ?? null,
+        gotMatchId: lastWorldInit.matchId ?? null,
+      });
+      return;
+    }
+
     const gotRoomCode = lastWorldInit.roomCode ?? null;
     const gotMatchId = lastWorldInit.matchId ?? null;
 
-    if (!expectedRoomCode || !expectedMatchId || gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId) {
+    if (gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId) {
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_world_init', {
         expectedRoomCode,
         expectedMatchId,
@@ -1084,7 +1104,10 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    sceneRef.current?.applyMatchWorldInit(lastWorldInit);
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    scene.applyMatchWorldInit(lastWorldInit);
   }, [ws.messages]);
 
 
@@ -1095,10 +1118,30 @@ export default function GameView(): JSX.Element {
     const snapshot = last.snapshot;
     const expectedRoomCode = expectedRoomCodeRef.current;
     const expectedMatchId = expectedMatchIdRef.current;
+    if (!expectedRoomCode) {
+      diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot_no_expected_room', {
+        expectedRoomCode,
+        expectedMatchId,
+        gotRoomCode: snapshot.roomCode ?? null,
+        gotMatchId: snapshot.matchId ?? null,
+      });
+      return;
+    }
+
+    if (!expectedMatchId) {
+      diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot_no_expected_match', {
+        expectedRoomCode,
+        expectedMatchId,
+        gotRoomCode: snapshot.roomCode ?? null,
+        gotMatchId: snapshot.matchId ?? null,
+      });
+      return;
+    }
+
     const gotRoomCode = snapshot.roomCode ?? null;
     const gotMatchId = snapshot.matchId ?? null;
 
-    if (!expectedRoomCode || !expectedMatchId || gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId) {
+    if (gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId) {
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot', {
         expectedRoomCode,
         expectedMatchId,
@@ -1108,7 +1151,10 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    sceneRef.current?.applyMatchSnapshot(snapshot, localTgUserId);
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    scene.applyMatchSnapshot(snapshot, localTgUserId);
 
     // If WS snapshots are flowing, match is live → ensure lobby overlay is gone for everyone.
     if (multiplayerUiOpen) {
