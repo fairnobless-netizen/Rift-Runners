@@ -64,6 +64,7 @@ import {
 } from '../game/wallet';
 import { WsDebugOverlay } from './WsDebugOverlay';
 import { useWsClient } from '../ws/useWsClient';
+import type { WsDebugMetrics } from '../ws/wsTypes';
 import { resolveDevIdentity } from '../utils/devIdentity';
 import { API_BASE, apiUrl } from '../utils/apiBase';
 import { RROverlayModal } from './RROverlayModal';
@@ -126,47 +127,6 @@ type TutorialStep = {
   body: string;
 };
 
-type TickDebugStats = {
-  snapshotTick: number;
-  simulationTick: number;
-  renderTick: number;
-  baseDelayTicks: number;
-  baseDelayTargetTicks: number;
-  baseDelayStepCooldownMs: number;
-  baseDelayStepCooldownTicks: number;
-  delayTicks: number;
-  minDelayTicks: number;
-  maxDelayTicks: number;
-  bufferSize: number;
-  underrunRate: number;
-  underrunCount: number;
-  lateSnapshotCount: number;
-  lateSnapshotEma: number;
-  stallCount: number;
-  extrapCount: number;
-  extrapolatingTicks: number;
-  stalled: boolean;
-  rttMs: number | null;
-  rttJitterMs: number;
-  targetBufferPairs: number;
-  targetBufferTargetPairs: number;
-  adaptiveEveryTicks: number;
-  adaptiveEveryTargetTicks: number;
-  bufferHasReserve: boolean;
-  tuning: {
-    baseDelayMax: number;
-    targetBufferMin: number;
-    targetBufferMax: number;
-    cadenceMin: number;
-    cadenceMax: number;
-  };
-  droppedWrongRoom: number;
-  invalidPosDrops: number;
-  lastSnapshotRoom: string | null;
-  worldReady: boolean;
-  worldHashServer: string | null;
-  worldHashClient: string | null;
-};
 
 function mapRoomError(error?: string): string {
   if (error === 'room_full') return 'Комната заполнена';
@@ -201,6 +161,48 @@ type TelegramWebApp = {
   onEvent?: (eventType: 'viewportChanged' | 'safeAreaChanged' | 'contentSafeAreaChanged', handler: () => void) => void;
   offEvent?: (eventType: 'viewportChanged' | 'safeAreaChanged' | 'contentSafeAreaChanged', handler: () => void) => void;
 };
+
+
+function buildWsDebugMetrics(scene: GameScene): WsDebugMetrics {
+  const netInterpStats = scene.getNetInterpStats();
+  const routingStats = scene.getSnapshotRoutingStats();
+
+  return {
+    snapshotTick: scene.getLastSnapshotTick(),
+    simulationTick: scene.getSimulationTick(),
+    renderTick: netInterpStats.renderTick,
+    baseDelayTicks: netInterpStats.baseDelayTicks,
+    baseDelayTargetTicks: netInterpStats.baseDelayTargetTicks,
+    baseDelayStepCooldownMs: netInterpStats.baseDelayStepCooldownMs,
+    baseDelayStepCooldownTicks: netInterpStats.baseDelayStepCooldownTicks,
+    delayTicks: netInterpStats.delayTicks,
+    minDelayTicks: netInterpStats.minDelayTicks,
+    maxDelayTicks: netInterpStats.maxDelayTicks,
+    bufferSize: netInterpStats.bufferSize,
+    underrunRate: netInterpStats.underrunRate,
+    underrunCount: netInterpStats.underrunCount,
+    lateSnapshotCount: netInterpStats.lateSnapshotCount,
+    lateSnapshotEma: netInterpStats.lateSnapshotEma,
+    stallCount: netInterpStats.stallCount,
+    extrapCount: netInterpStats.extrapCount,
+    extrapolatingTicks: netInterpStats.extrapolatingTicks,
+    stalled: netInterpStats.stalled,
+    rttMs: netInterpStats.rttMs,
+    rttJitterMs: netInterpStats.rttJitterMs,
+    targetBufferPairs: netInterpStats.targetBufferPairs,
+    targetBufferTargetPairs: netInterpStats.targetBufferTargetPairs,
+    adaptiveEveryTicks: netInterpStats.adaptiveEveryTicks,
+    adaptiveEveryTargetTicks: netInterpStats.adaptiveEveryTargetTicks,
+    bufferHasReserve: netInterpStats.bufferHasReserve,
+    tuning: netInterpStats.tuning,
+    droppedWrongRoom: routingStats.droppedWrongRoom,
+    invalidPosDrops: routingStats.invalidPosDrops,
+    lastSnapshotRoom: routingStats.lastSnapshotRoom,
+    worldReady: routingStats.worldReady,
+    worldHashServer: routingStats.worldHashServer,
+    worldHashClient: routingStats.worldHashClient,
+  };
+}
 
 export default function GameView(): JSX.Element {
   const pageRef = useRef<HTMLElement | null>(null);
@@ -263,7 +265,7 @@ export default function GameView(): JSX.Element {
   const [storeLoading, setStoreLoading] = useState(false);
   const [storeError, setStoreError] = useState<string | null>(null);
   const [predictionStats, setPredictionStats] = useState<PredictionStats | null>(null);
-  const [tickDebugStats, setTickDebugStats] = useState<TickDebugStats | null>(null);
+  const [tickDebugStats, setTickDebugStats] = useState<WsDebugMetrics | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'audio' | 'account'>('audio');
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
@@ -851,46 +853,7 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    const netInterpStats = scene.getNetInterpStats();
-    const routingStats = scene.getSnapshotRoutingStats();
-
-    setTickDebugStats({
-      snapshotTick: scene.getLastSnapshotTick(),
-      simulationTick: scene.getSimulationTick(),
-
-      renderTick: netInterpStats.renderTick,
-      baseDelayTicks: netInterpStats.baseDelayTicks,
-      baseDelayTargetTicks: netInterpStats.baseDelayTargetTicks,
-      baseDelayStepCooldownMs: netInterpStats.baseDelayStepCooldownMs,
-      baseDelayStepCooldownTicks: netInterpStats.baseDelayStepCooldownTicks,
-      delayTicks: netInterpStats.delayTicks,
-      minDelayTicks: netInterpStats.minDelayTicks,
-      maxDelayTicks: netInterpStats.maxDelayTicks,
-      bufferSize: netInterpStats.bufferSize,
-      underrunRate: netInterpStats.underrunRate,
-      underrunCount: netInterpStats.underrunCount,
-      lateSnapshotCount: netInterpStats.lateSnapshotCount,
-      lateSnapshotEma: netInterpStats.lateSnapshotEma,
-      stallCount: netInterpStats.stallCount,
-      extrapCount: netInterpStats.extrapCount,
-      extrapolatingTicks: netInterpStats.extrapolatingTicks,
-      stalled: netInterpStats.stalled,
-      rttMs: netInterpStats.rttMs,
-      rttJitterMs: netInterpStats.rttJitterMs,
-      targetBufferPairs: netInterpStats.targetBufferPairs,
-      targetBufferTargetPairs: netInterpStats.targetBufferTargetPairs,
-      adaptiveEveryTicks: netInterpStats.adaptiveEveryTicks,
-      adaptiveEveryTargetTicks: netInterpStats.adaptiveEveryTargetTicks,
-      bufferHasReserve: netInterpStats.bufferHasReserve,
-      tuning: netInterpStats.tuning,
-
-      droppedWrongRoom: routingStats.droppedWrongRoom,
-      invalidPosDrops: routingStats.invalidPosDrops,
-      lastSnapshotRoom: routingStats.lastSnapshotRoom,
-      worldReady: routingStats.worldReady,
-      worldHashServer: routingStats.worldHashServer,
-      worldHashClient: routingStats.worldHashClient,
-    });
+    setTickDebugStats(buildWsDebugMetrics(scene));
   }, 350);
 
   return () => window.clearInterval(id);
