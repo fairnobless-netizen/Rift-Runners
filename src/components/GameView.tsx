@@ -286,6 +286,7 @@ export default function GameView(): JSX.Element {
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const expectedRoomCodeRef = useRef<string | null>(null);
   const expectedMatchIdRef = useRef<string | null>(null);
+  const worldReadyRef = useRef(false);
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
@@ -983,6 +984,7 @@ export default function GameView(): JSX.Element {
 
     if (prevRoomCode !== nextRoomCode) {
       expectedMatchIdRef.current = null;
+      worldReadyRef.current = false;
       setCurrentMatchId(null);
     }
   }, [currentRoom?.roomCode]);
@@ -1001,6 +1003,7 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     if (currentRoom?.roomCode) return;
     wsJoinedRoomCodeRef.current = null;
+    worldReadyRef.current = false;
     setCurrentMatchId(null);
   }, [currentRoom?.roomCode]);
 
@@ -1008,6 +1011,7 @@ export default function GameView(): JSX.Element {
     if (!ws.connected) {
       wsJoinedRoomCodeRef.current = null;
       expectedMatchIdRef.current = null;
+      worldReadyRef.current = false;
       setCurrentMatchId(null);
       sceneRef.current?.resetMultiplayerNetState();
     }
@@ -1028,6 +1032,7 @@ export default function GameView(): JSX.Element {
     }
 
     expectedMatchIdRef.current = lastStarted.matchId;
+    worldReadyRef.current = false;
     setCurrentMatchId(lastStarted.matchId);
     diagnosticsStore.log('ROOM', 'INFO', 'match:started:accepted', {
       roomCode: expectedRoomCode,
@@ -1108,6 +1113,12 @@ export default function GameView(): JSX.Element {
     if (!scene) return;
 
     scene.applyMatchWorldInit(lastWorldInit);
+    worldReadyRef.current = true;
+    diagnosticsStore.log('ROOM', 'INFO', 'world_init:accepted', {
+      roomCode: gotRoomCode,
+      matchId: gotMatchId,
+      levelIndex: lastWorldInit.levelIndex ?? null,
+    });
   }, [ws.messages]);
 
 
@@ -1147,6 +1158,17 @@ export default function GameView(): JSX.Element {
         expectedMatchId,
         gotRoomCode,
         gotMatchId,
+      });
+      return;
+    }
+
+    if (!worldReadyRef.current) {
+      diagnosticsStore.log('ROOM', 'WARN', 'drop_snapshot_world_not_ready', {
+        expectedRoomCode,
+        expectedMatchId,
+        gotRoomCode,
+        gotMatchId,
+        snapTick: snapshot.tick ?? null,
       });
       return;
     }
