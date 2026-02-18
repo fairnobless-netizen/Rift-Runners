@@ -160,6 +160,9 @@ type TickDebugStats = {
     cadenceMin: number;
     cadenceMax: number;
   };
+  droppedWrongRoom: number;
+  invalidPosDrops: number;
+  lastSnapshotRoom: string | null;
 };
 
 function mapRoomError(error?: string): string {
@@ -275,6 +278,7 @@ export default function GameView(): JSX.Element {
   const [publicRooms, setPublicRooms] = useState<PublicRoomEntry[]>([]);
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
+  const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
@@ -840,6 +844,7 @@ export default function GameView(): JSX.Element {
       setTickDebugStats(() => {
         if (!scene) return null;
         const netInterpStats = scene.getNetInterpStats();
+        const routingStats = scene.getSnapshotRoutingStats();
         return {
           snapshotTick: scene.getLastSnapshotTick(),
           simulationTick: scene.getSimulationTick(),
@@ -868,6 +873,9 @@ export default function GameView(): JSX.Element {
           adaptiveEveryTargetTicks: netInterpStats.adaptiveEveryTargetTicks,
           bufferHasReserve: netInterpStats.bufferHasReserve,
           tuning: netInterpStats.tuning,
+          droppedWrongRoom: routingStats.droppedWrongRoom,
+          invalidPosDrops: routingStats.invalidPosDrops,
+          lastSnapshotRoom: routingStats.lastSnapshotRoom,
         };
       });
     }, 350);
@@ -984,6 +992,11 @@ export default function GameView(): JSX.Element {
   }, []);
 
 
+
+  useEffect(() => {
+    sceneRef.current?.setActiveMultiplayerSession(currentRoom?.roomCode ?? null, currentMatchId);
+  }, [currentRoom?.roomCode, currentMatchId]);
+
   useEffect(() => {
     if (!ws.connected || !currentRoom?.roomCode || !localTgUserId) return;
 
@@ -998,13 +1011,23 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     if (currentRoom?.roomCode) return;
     wsJoinedRoomCodeRef.current = null;
+    setCurrentMatchId(null);
   }, [currentRoom?.roomCode]);
 
   useEffect(() => {
     if (!ws.connected) {
       wsJoinedRoomCodeRef.current = null;
+      setCurrentMatchId(null);
+      sceneRef.current?.resetMultiplayerNetState();
     }
   }, [ws.connected]);
+
+
+  useEffect(() => {
+    const lastStarted = [...ws.messages].reverse().find((message) => message.type === 'match:started');
+    if (!lastStarted || lastStarted.type !== 'match:started') return;
+    setCurrentMatchId(lastStarted.matchId);
+  }, [ws.messages]);
 
   useEffect(() => {
     const lastError = [...ws.messages].reverse().find((message) => message.type === 'match:error');
@@ -1040,7 +1063,20 @@ export default function GameView(): JSX.Element {
     const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
     if (!last?.snapshot) return;
 
-    sceneRef.current?.applyMatchSnapshot(last.snapshot, localTgUserId);
+    const snapshot = last.snapshot;
+    if (currentRoom?.roomCode && snapshot.roomCode !== currentRoom.roomCode) {
+      return;
+    }
+
+    if (currentMatchId && snapshot.matchId !== currentMatchId) {
+      return;
+    }
+
+    if (!currentMatchId && snapshot.matchId) {
+      setCurrentMatchId(snapshot.matchId);
+    }
+
+    sceneRef.current?.applyMatchSnapshot(snapshot, localTgUserId);
 
     // If WS snapshots are flowing, match is live → ensure lobby overlay is gone for everyone.
     if (multiplayerUiOpen) {
@@ -1053,7 +1089,7 @@ export default function GameView(): JSX.Element {
         });
       }
     }
-  }, [ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode]);
+  }, [ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode, currentMatchId]);
 
   useEffect(() => {
     sceneRef.current?.setNetRtt(ws.rttMs ?? null, ws.rttJitterMs ?? 0);
@@ -1309,6 +1345,7 @@ export default function GameView(): JSX.Element {
 
       setCurrentRoom(result.room);
       setCurrentRoomMembers(result.members);
+      setCurrentMatchId(null);
       if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'joinRoomByCode:success', { roomCode, members: result.members.length });
       const [rooms, availableRooms] = await Promise.all([fetchMyRooms(), fetchPublicRooms()]);
       setMyRooms(rooms);
@@ -1347,12 +1384,15 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    ws.send({ type: 'room:leave' });
     setCurrentRoom(null);
     setCurrentRoomMembers([]);
+    setCurrentMatchId(null);
+    sceneRef.current?.resetMultiplayerNetState();
     const [rooms, availableRooms] = await Promise.all([fetchMyRooms(), fetchPublicRooms()]);
     setMyRooms(rooms);
     setPublicRooms(availableRooms);
-  }, [currentRoom]);
+  }, [currentRoom, ws]);
 
   const onCloseRoom = useCallback(async (): Promise<void> => {
     if (!currentRoom?.roomCode) return;
@@ -1369,12 +1409,15 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    ws.send({ type: 'room:leave' });
     setCurrentRoom(null);
     setCurrentRoomMembers([]);
+    setCurrentMatchId(null);
+    sceneRef.current?.resetMultiplayerNetState();
     const [rooms, availableRooms] = await Promise.all([fetchMyRooms(), fetchPublicRooms()]);
     setMyRooms(rooms);
     setPublicRooms(availableRooms);
-  }, [currentRoom?.roomCode]);
+  }, [currentRoom?.roomCode, ws]);
 
 
 
@@ -1400,6 +1443,7 @@ export default function GameView(): JSX.Element {
       }
       setCurrentRoom(result.room);
       setCurrentRoomMembers(result.members);
+      setCurrentMatchId(null);
       if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'onToggleReady:success', { roomCode: result.room.roomCode, members: result.members.length });
     } finally {
       setSettingReady(false);
@@ -1426,6 +1470,7 @@ export default function GameView(): JSX.Element {
       }
       setCurrentRoom(result.room);
       setCurrentRoomMembers(result.members);
+      setCurrentMatchId(null);
       ws.send({ type: 'match:start' });
       if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'onStartRoom:success', { roomCode: result.room.roomCode });
     } finally {

@@ -61,6 +61,9 @@ type TickDebugStats = {
     cadenceMin: number;
     cadenceMax: number;
   };
+  droppedWrongRoom: number;
+  invalidPosDrops: number;
+  lastSnapshotRoom: string | null;
 };
 
 type TelemetrySnapshotSummary = {
@@ -668,6 +671,10 @@ export function WsDebugOverlay({
           <div style={{ marginTop: 4 }}>
             bufferSize: {tickDebugStats?.bufferSize ?? 0} | underrunRate: {((tickDebugStats?.underrunRate ?? 0) * 100).toFixed(1)}% | underruns: {tickDebugStats?.underrunCount ?? 0} | lateRate(EMA):{' '}
             {((tickDebugStats?.lateSnapshotEma ?? 0) * 100).toFixed(1)}% | lateCount: {tickDebugStats?.lateSnapshotCount ?? 0}
+          </div>
+
+          <div style={{ marginTop: 4 }}>
+            droppedWrongRoom: {tickDebugStats?.droppedWrongRoom ?? 0} | invalidPosDrops: {tickDebugStats?.invalidPosDrops ?? 0} | lastSnapshotRoom: {tickDebugStats?.lastSnapshotRoom ?? '—'}
           </div>
 
           <div style={{ marginTop: 4 }}>

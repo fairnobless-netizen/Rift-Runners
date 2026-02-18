@@ -11,6 +11,7 @@ export type MatchClientMessage =
 
 export type MatchSnapshot = {
   version: ProtocolVersion;
+  roomCode: string;
   matchId: string;
   tick: number;
   serverTime: number;
