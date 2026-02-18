@@ -203,6 +203,9 @@ export default function GameView(): JSX.Element {
   const gameRef = useRef<Phaser.Game | null>(null);
   const sceneRef = useRef<GameScene | null>(null);
   const inputSeqRef = useRef(0);
+  const moveRepeatTimerRef = useRef<number | null>(null);
+  const activeMoveDirRef = useRef<Direction | null>(null);
+
   const joystickTouchZoneRef = useRef<HTMLDivElement | null>(null);
   const joystickPadRef = useRef<HTMLDivElement | null>(null);
   const joystickPointerIdRef = useRef<number | null>(null);
@@ -304,6 +307,21 @@ export default function GameView(): JSX.Element {
     height: window.innerHeight,
   }));
   const ws = useWsClient(token || undefined);
+  const sendMatchMove = useCallback((dir: Direction): void => {
+    if (!ws.connected) return;
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    const seq = inputSeqRef.current + 1;
+    inputSeqRef.current = seq;
+
+    const dx = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
+    const dy = dir === 'up' ? -1 : dir === 'down' ? 1 : 0;
+
+    scene.onLocalMatchInput({ seq, dx, dy });
+    ws.send({ type: 'match:input', seq, payload: { kind: 'move', dir } });
+  }, [ws]);
+
   const isMultiplayerDebugEnabled = isDebugEnabled(window.location.search);
   const wsDiagnostics = {
     enabled: isMultiplayerDebugEnabled,
@@ -536,6 +554,41 @@ export default function GameView(): JSX.Element {
     controlsRef.current.down = direction === 'down';
     controlsRef.current.left = direction === 'left';
     controlsRef.current.right = direction === 'right';
+
+    // Multiplayer: translate joystick intent into match:input (server authoritative).
+    // This ensures other clients see movement and prevents local-only drifting.
+    if (!isMultiplayerMode || !currentRoom || currentRoom.phase !== 'STARTED') {
+      return;
+    }
+
+    // Stop repeat when released
+    if (!direction) {
+      activeMoveDirRef.current = null;
+      if (moveRepeatTimerRef.current != null) {
+        window.clearInterval(moveRepeatTimerRef.current);
+        moveRepeatTimerRef.current = null;
+      }
+      return;
+    }
+
+    // If direction changed -> restart repeat and send immediately
+    if (activeMoveDirRef.current !== direction) {
+      activeMoveDirRef.current = direction;
+
+      if (moveRepeatTimerRef.current != null) {
+        window.clearInterval(moveRepeatTimerRef.current);
+        moveRepeatTimerRef.current = null;
+      }
+
+      // immediate step
+      sendMatchMove(direction);
+
+      // repeat steps while held (tuned to fixed tick ~50ms; 180ms is a safe "tile cadence" start)
+      moveRepeatTimerRef.current = window.setInterval(() => {
+        if (activeMoveDirRef.current !== direction) return;
+        sendMatchMove(direction);
+      }, 180);
+    }
   };
 
   const clearMovement = (): void => {
@@ -1008,6 +1061,11 @@ export default function GameView(): JSX.Element {
 
   useEffect(
     () => () => {
+      if (moveRepeatTimerRef.current != null) {
+        window.clearInterval(moveRepeatTimerRef.current);
+        moveRepeatTimerRef.current = null;
+      }
+      activeMoveDirRef.current = null;
       clearMovement();
     },
     [],
@@ -2420,17 +2478,7 @@ export default function GameView(): JSX.Element {
         onStartMatch={() => ws.send({ type: 'match:start' })}
         getLocalPlayerPosition={() => sceneRef.current?.getLocalPlayerPosition() ?? null}
         onMove={(dir) => {
-          const scene = sceneRef.current;
-          if (!scene) return;
-
-          const seq = inputSeqRef.current + 1;
-          inputSeqRef.current = seq;
-
-          const dx = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
-          const dy = dir === 'up' ? -1 : dir === 'down' ? 1 : 0;
-
-          scene.onLocalMatchInput({ seq, dx, dy });
-          ws.send({ type: 'match:input', seq, payload: { kind: 'move', dir } });
+          sendMatchMove(dir);
         }}
       />
     </main>

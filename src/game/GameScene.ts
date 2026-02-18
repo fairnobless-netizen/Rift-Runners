@@ -1182,6 +1182,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private consumeMovementIntent(time: number): void {
+    // IMPORTANT: In multiplayer, movement is driven by match:input + prediction/reconcile.
+    // Do not run solo movement intent logic, otherwise clients will move locally without server authority.
+    if (this.gameMode === 'multiplayer') {
+      return;
+    }
+
     const inputIntent = this.getDirectionIntent(time);
     if (inputIntent) {
       this.desiredDirection = inputIntent.dir;
