@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import type { MatchSnapshotV1 } from '../ws/wsTypes';
+import type { MatchSnapshotV1 } from '@shared/protocol';
 
 // M15.4: Frozen interpolation tuning constants (single source of truth)
 const INTERP_TUNING = {

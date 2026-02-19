@@ -1,15 +1,3 @@
-export type {
-  MoveDir,
-  MatchInputPayload,
-  MatchClientMessage,
-  MatchServerMessage,
-  MatchSnapshot,
-  MatchSnapshotV1,
-  ProtocolVersion,
-} from '@shared/protocol';
-
-export type { MatchBombPlacedEvent, MatchBombExplodedEvent } from '@shared/protocol';
-
 import type { MatchInputPayload, MatchSnapshotV1 } from '@shared/protocol';
 
 export type WsClientMessage =
