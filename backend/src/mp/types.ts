@@ -8,6 +8,11 @@ export type PlayerState = {
   lastInputSeq: number;
   x: number;
   y: number;
+  state: 'alive' | 'dead_respawning' | 'eliminated';
+  respawnAtTick: number | null;
+  invulnUntilTick: number;
+  spawnX: number;
+  spawnY: number;
 };
 
 export type MatchState = {

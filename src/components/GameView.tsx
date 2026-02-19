@@ -126,7 +126,7 @@ type MatchWorldInitMessage = Extract<
 >;
 
 function isMatchServerMessage(message: { type: string }): message is MatchServerMessage {
-  return message.type.startsWith('match:');
+  return message.type.startsWith('match:') || message.type.startsWith('room:restart_');
 }
 
 function isMatchWorldInit(message: { type: string }): message is MatchWorldInitMessage {
@@ -311,6 +311,8 @@ export default function GameView(): JSX.Element {
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
+  const [restartVote, setRestartVote] = useState<{ active: boolean; yesCount: number; total: number; expiresAt: number | null } | null>(null);
+  const [matchEndState, setMatchEndState] = useState<{ winnerTgUserId: string | null; reason: 'elimination' | 'draw' } | null>(null);
   const expectedRoomCodeRef = useRef<string | null>(null);
   const expectedMatchIdRef = useRef<string | null>(null);
   const worldReadyRef = useRef(false);
@@ -1024,6 +1026,8 @@ export default function GameView(): JSX.Element {
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
       setCurrentMatchId(null);
+      setRestartVote(null);
+      setMatchEndState(null);
       handledMatchEventIdsRef.current.clear();
     }
   }, [currentRoom?.roomCode]);
@@ -1090,6 +1094,8 @@ export default function GameView(): JSX.Element {
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
     setCurrentMatchId(lastStarted.matchId);
+    setRestartVote(null);
+    setMatchEndState(null);
     setCurrentRoom((prev) => {
       if (!prev || prev.roomCode !== expectedRoomCode) return prev;
       if (prev.phase === 'STARTED') return prev;
@@ -1288,16 +1294,52 @@ export default function GameView(): JSX.Element {
         continue;
       }
 
+      if (message.type === 'match:player_respawned') {
+        scene.applyAuthoritativePlayerRespawned(message, localTgUserId);
+        continue;
+      }
+
       if (message.type === 'match:player_eliminated') {
         scene.applyAuthoritativePlayerEliminated(message, localTgUserId);
         continue;
       }
 
       if (message.type === 'match:end') {
-        setRoomsError(message.winnerTgUserId ? `Match ended. Winner: ${message.winnerTgUserId}` : 'Match ended. No winner.');
+        setCurrentRoom((prev) => {
+          if (!prev) return prev;
+          return { ...prev, phase: 'FINISHED' };
+        });
+        setMatchEndState({ winnerTgUserId: message.winnerTgUserId, reason: message.reason });
+        setRoomsError(message.winnerTgUserId ? `Match ended. Winner: ${message.winnerTgUserId}` : 'Match ended. Draw.');
+      }
+
+      if (message.type === 'room:restart_proposed') {
+        setRestartVote({ active: true, yesCount: 1, total: currentRoomMembers.length, expiresAt: message.expiresAt });
+        continue;
+      }
+
+      if (message.type === 'room:restart_vote_state') {
+        setRestartVote((prev) => ({ active: true, yesCount: message.yesCount, total: message.total, expiresAt: prev?.expiresAt ?? null }));
+        continue;
+      }
+
+      if (message.type === 'room:restart_cancelled') {
+        setRestartVote(null);
+        setRoomsError(message.reason === 'timeout' ? 'Restart vote timed out.' : 'Restart vote cancelled.');
+        continue;
+      }
+
+      if (message.type === 'room:restart_accepted') {
+        setRestartVote(null);
+        setMatchEndState(null);
+        worldReadyRef.current = false;
+        firstSnapshotReadyRef.current = false;
+        handledMatchEventIdsRef.current.clear();
+        scene.resetMultiplayerNetState();
+        continue;
       }
     }
-  }, [ws.messages, localTgUserId]);
+  }, [ws.messages, localTgUserId, currentRoomMembers.length]);
 
   useEffect(() => {
     sceneRef.current?.setNetRtt(ws.rttMs ?? null, ws.rttJitterMs ?? 0);
@@ -1481,6 +1523,14 @@ export default function GameView(): JSX.Element {
     if (isInteractionBlocked) return;
     if (!isRemoteDetonateUnlocked) return;
     controlsRef.current.detonateRequested = true;
+  };
+
+  const proposeRestart = (): void => {
+    ws.send({ type: 'room:restart_propose' });
+  };
+
+  const sendRestartVote = (vote: 'yes' | 'no'): void => {
+    ws.send({ type: 'room:restart_vote', vote });
   };
 
   const onZoomInput = (value: number): void => {
@@ -2349,6 +2399,30 @@ export default function GameView(): JSX.Element {
             <strong>GAME OVER</strong>
             <p>Жизни закончились.</p>
             <button type="button" onClick={() => sceneRef.current?.restartSoloRun()}>Restart The Game</button>
+          </div>
+        </div>
+      )}
+      {gameFlowPhase === 'playing' && isMultiplayerMode && currentRoom?.phase === 'FINISHED' && (
+        <div className="waiting-overlay" role="dialog" aria-modal="true" aria-label="Match finished">
+          <div className="waiting-overlay__card">
+            <strong>{matchEndState?.winnerTgUserId ? `Winner: ${matchEndState.winnerTgUserId}` : 'Draw'}</strong>
+            <p>{matchEndState?.reason === 'draw' ? 'All players eliminated.' : 'Elimination victory.'}</p>
+            {isRoomOwner ? (
+              <button type="button" onClick={proposeRestart}>Restart Match</button>
+            ) : (
+              <p>Waiting for host to propose restart.</p>
+            )}
+            {restartVote?.active ? (
+              <div className="rr-mp-inline-actions">
+                <span>{restartVote.yesCount}/{restartVote.total} votes</span>
+                {!isRoomOwner ? (
+                  <>
+                    <button type="button" onClick={() => sendRestartVote('yes')}>Yes</button>
+                    <button type="button" className="ghost" onClick={() => sendRestartVote('no')}>No</button>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       )}

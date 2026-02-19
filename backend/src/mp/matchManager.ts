@@ -90,6 +90,11 @@ export function createMatch(roomId: string, players: string[]): MatchState {
       lastInputSeq: 0,
       x,
       y,
+      state: 'alive',
+      respawnAtTick: null,
+      invulnUntilTick: 0,
+      spawnX: x,
+      spawnY: y,
     });
     state.playerLives.set(tgUserId, 3);
   });

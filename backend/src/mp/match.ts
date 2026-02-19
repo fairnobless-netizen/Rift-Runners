@@ -4,14 +4,17 @@ import type {
   MatchEnd,
   MatchPlayerDamaged,
   MatchPlayerEliminated,
+  MatchPlayerRespawned,
   MatchSnapshot,
   MatchTilesDestroyed,
 } from './protocol';
 import type { MatchState } from './types';
 
 const TICK_RATE_MS = 50; // 20 Hz
+const RESPAWN_DELAY_TICKS = 24;
+const INVULN_TICKS = 20;
 
-type MatchEvent = MatchBombSpawned | MatchBombExploded | MatchTilesDestroyed | MatchPlayerDamaged | MatchPlayerEliminated | MatchEnd;
+type MatchEvent = MatchBombSpawned | MatchBombExploded | MatchTilesDestroyed | MatchPlayerDamaged | MatchPlayerRespawned | MatchPlayerEliminated | MatchEnd;
 
 export function startMatch(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: MatchEvent[]) => void) {
   match.interval = setInterval(() => tick(match, broadcast), TICK_RATE_MS);
@@ -30,12 +33,15 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
 
   const events: MatchEvent[] = [];
 
+  processRespawns(match, events);
+
   while (match.inputQueue.length > 0) {
     const input = match.inputQueue.shift();
     if (!input) continue;
     const player = match.players.get(input.tgUserId);
     if (!player) continue;
     if (match.eliminatedPlayers.has(input.tgUserId)) continue;
+    if (player.state === 'dead_respawning') continue;
     if (input.seq <= player.lastInputSeq) continue;
 
     applyInput(match, input.tgUserId, input.seq, input.payload);
@@ -81,7 +87,7 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
 
 export function tryPlaceBomb(match: MatchState, tgUserId: string, x: number, y: number): MatchBombSpawned | null {
   const player = match.players.get(tgUserId);
-  if (!player || match.eliminatedPlayers.has(tgUserId)) return null;
+  if (!player || match.eliminatedPlayers.has(tgUserId) || player.state !== 'alive') return null;
   if (player.x !== x || player.y !== y) return null;
   if (!canOccupyWorldCell(match, x, y)) return null;
 
@@ -121,6 +127,32 @@ export function tryPlaceBomb(match: MatchState, tgUserId: string, x: number, y: 
   };
 }
 
+function processRespawns(match: MatchState, events: MatchEvent[]): void {
+  for (const player of match.players.values()) {
+    if (player.state !== 'dead_respawning') continue;
+    if (player.respawnAtTick == null || match.tick < player.respawnAtTick) continue;
+
+    player.x = player.spawnX;
+    player.y = player.spawnY;
+    player.state = 'alive';
+    player.respawnAtTick = null;
+    player.invulnUntilTick = match.tick + INVULN_TICKS;
+
+    events.push({
+      type: 'match:player_respawned',
+      roomCode: match.roomId,
+      matchId: match.matchId,
+      eventId: nextEventId(match),
+      serverTick: match.tick,
+      tick: match.tick,
+      tgUserId: player.tgUserId,
+      x: player.x,
+      y: player.y,
+      invulnUntilTick: player.invulnUntilTick,
+    });
+  }
+}
+
 function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
   while (true) {
     const dueBomb = Array.from(match.bombs.values())
@@ -143,12 +175,11 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
       }
     }
 
-    const explodeEventId = nextEventId(match);
     events.push({
       type: 'match:bomb_exploded',
       roomCode: match.roomId,
       matchId: match.matchId,
-      eventId: explodeEventId,
+      eventId: nextEventId(match),
       serverTick: match.tick,
       tick: match.tick,
       bombId: dueBomb.id,
@@ -169,7 +200,8 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
     }
 
     for (const player of match.players.values()) {
-      if (match.eliminatedPlayers.has(player.tgUserId)) continue;
+      if (player.state !== 'alive') continue;
+      if (player.invulnUntilTick > match.tick) continue;
       const hit = impacts.some((impact) => impact.x === player.x && impact.y === player.y);
       if (!hit) continue;
 
@@ -188,6 +220,9 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
       });
 
       if (nextLives <= 0) {
+        player.state = 'eliminated';
+        player.respawnAtTick = null;
+        player.invulnUntilTick = 0;
         match.eliminatedPlayers.add(player.tgUserId);
         events.push({
           type: 'match:player_eliminated',
@@ -198,13 +233,20 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
           tick: match.tick,
           tgUserId: player.tgUserId,
         });
+        continue;
       }
+
+      player.state = 'dead_respawning';
+      player.respawnAtTick = match.tick + RESPAWN_DELAY_TICKS;
+      player.invulnUntilTick = 0;
     }
   }
 }
 
 function maybeEndMatch(match: MatchState, events: MatchEvent[]): void {
-  const alive = Array.from(match.players.keys()).filter((tgUserId) => !match.eliminatedPlayers.has(tgUserId));
+  const alive = Array.from(match.players.values())
+    .filter((player) => player.state !== 'eliminated')
+    .map((player) => player.tgUserId);
   if (alive.length > 1) return;
 
   match.ended = true;
@@ -212,8 +254,10 @@ function maybeEndMatch(match: MatchState, events: MatchEvent[]): void {
     type: 'match:end',
     roomCode: match.roomId,
     matchId: match.matchId,
+    serverTick: match.tick,
+    tick: match.tick,
     winnerTgUserId: alive[0] ?? null,
-    reason: alive.length === 1 ? 'winner' : 'all_eliminated',
+    reason: alive.length === 1 ? 'elimination' : 'draw',
   });
 }
 

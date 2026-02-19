@@ -2280,3 +2280,14 @@ export async function redeemReferral(params: { inviteeTgUserId: string; code: st
     client.release();
   }
 }
+
+export async function setRoomPhase(roomCode: string, phase: 'LOBBY' | 'STARTED' | 'FINISHED'): Promise<void> {
+  await pgQuery(
+    `UPDATE rooms
+     SET phase = $2,
+         started_at = CASE WHEN $2 = 'STARTED' THEN COALESCE(started_at, now()) ELSE started_at END,
+         started_by_tg_user_id = CASE WHEN $2 = 'STARTED' THEN started_by_tg_user_id ELSE started_by_tg_user_id END
+     WHERE room_code = $1`,
+    [roomCode, phase],
+  );
+}

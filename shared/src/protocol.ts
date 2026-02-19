@@ -9,7 +9,9 @@ export type MatchInputPayload =
 export type MatchClientMessage =
   | { type: 'match:start' }
   | { type: 'match:input'; seq: number; payload: MatchInputPayload }
-  | { type: 'match:bomb_place'; payload: { x: number; y: number } };
+  | { type: 'match:bomb_place'; payload: { x: number; y: number } }
+  | { type: 'room:restart_propose' }
+  | { type: 'room:restart_vote'; vote: 'yes' | 'no' };
 
 export type MatchWorldState = {
   gridW: number;
@@ -87,12 +89,52 @@ export type MatchPlayerEliminated = {
   tgUserId: string;
 };
 
+export type MatchPlayerRespawned = {
+  type: 'match:player_respawned';
+  roomCode: string;
+  matchId: string;
+  eventId: string;
+  serverTick: number;
+  tick: number;
+  tgUserId: string;
+  x: number;
+  y: number;
+  invulnUntilTick: number;
+};
+
 export type MatchEnd = {
   type: 'match:end';
   roomCode: string;
   matchId: string;
+  serverTick: number;
+  tick: number;
   winnerTgUserId: string | null;
-  reason: 'winner' | 'all_eliminated';
+  reason: 'elimination' | 'draw';
+};
+
+export type RoomRestartProposed = {
+  type: 'room:restart_proposed';
+  roomCode: string;
+  byTgUserId: string;
+  expiresAt: number;
+};
+
+export type RoomRestartVoteState = {
+  type: 'room:restart_vote_state';
+  roomCode: string;
+  yesCount: number;
+  total: number;
+};
+
+export type RoomRestartAccepted = {
+  type: 'room:restart_accepted';
+  roomCode: string;
+};
+
+export type RoomRestartCancelled = {
+  type: 'room:restart_cancelled';
+  roomCode: string;
+  reason: 'no_vote' | 'timeout';
 };
 
 export type MatchBombPlacedEvent = MatchBombSpawned;
@@ -132,7 +174,12 @@ export type MatchServerMessage =
   | MatchBombExploded
   | MatchTilesDestroyed
   | MatchPlayerDamaged
+  | MatchPlayerRespawned
   | MatchPlayerEliminated
   | MatchEnd
+  | RoomRestartProposed
+  | RoomRestartVoteState
+  | RoomRestartAccepted
+  | RoomRestartCancelled
   | { type: 'match:snapshot'; snapshot: MatchSnapshot }
   | { type: 'match:error'; error: string };
