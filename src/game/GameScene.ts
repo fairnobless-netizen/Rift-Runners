@@ -130,6 +130,7 @@ export class GameScene extends Phaser.Scene {
   private awaitingSoloContinue = false;
   private soloGameOver = false;
   private multiplayerEliminated = false;
+  private multiplayerMatchEnded = false;
   private readonly baseSeed = 0x52494654;
   private readonly runId = 1;
   private rng: DeterministicRng = createDeterministicRng(this.baseSeed);
@@ -448,7 +449,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
-    if (this.isLevelCleared || this.awaitingSoloContinue || this.soloGameOver || this.multiplayerEliminated) return;
+    if (this.isLevelCleared || this.awaitingSoloContinue || this.soloGameOver || this.multiplayerEliminated || this.multiplayerMatchEnded) return;
 
     this.accumulator += delta;
     while (this.accumulator >= this.FIXED_DT) {
@@ -459,15 +460,17 @@ export class GameScene extends Phaser.Scene {
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
     this.consumeMovementIntent(time);
-    this.tryPlaceBomb(time);
-    this.tryRemoteDetonate(time);
-    this.processBombTimers(time);
+    if (this.gameMode !== 'multiplayer') {
+      this.tryPlaceBomb(time);
+      this.tryRemoteDetonate(time);
+      this.processBombTimers(time);
+      this.tickEnemies(time);
+      this.bossController.update(time);
+      this.checkPlayerEnemyCollision();
+    }
     this.cleanupExpiredFlames(time);
-    this.tickEnemies(time);
-    this.bossController.update(time);
     this.updatePlayerStateFromTimers(time);
     this.syncSpritesFromArena(time);
-    this.checkPlayerEnemyCollision();
     this.tryEnterDoor(time);
     if (!this.isBossLevel) {
       this.doorController.update(time, this.isLevelCleared);
@@ -822,6 +825,7 @@ export class GameScene extends Phaser.Scene {
     this.awaitingSoloContinue = false;
     this.soloGameOver = false;
     this.multiplayerEliminated = false;
+    this.multiplayerMatchEnded = false;
     this.playerSprite?.setVisible(true);
     this.emitLifeState();
   }
@@ -843,6 +847,7 @@ export class GameScene extends Phaser.Scene {
     this.awaitingSoloContinue = false;
     this.soloGameOver = false;
     this.multiplayerEliminated = false;
+    this.multiplayerMatchEnded = false;
     this.playerSprite?.setVisible(true);
     this.lives = INITIAL_LIVES;
     this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
@@ -2293,6 +2298,38 @@ export class GameScene extends Phaser.Scene {
     const me = snapshot.players?.find((p) => p.tgUserId === effectiveLocalId);
     if (!me) return;
 
+    this.lives = typeof me.lives === 'number' ? Math.max(0, me.lives) : this.lives;
+    this.stats.lives = this.lives;
+    this.multiplayerEliminated = Boolean(me.eliminated);
+    if (this.multiplayerEliminated) {
+      this.clearMovementInputs();
+      this.playerSprite?.setVisible(false);
+    } else {
+      this.playerSprite?.setVisible(true);
+    }
+    this.emitLifeState();
+    emitStats(this.stats);
+
+    const snapshotBombs = snapshot.world?.bombs ?? [];
+    const seenBombIds = new Set<string>();
+    for (const bomb of snapshotBombs) {
+      seenBombIds.add(bomb.id);
+      this.arena.bombs.set(bomb.id, {
+        key: bomb.id,
+        x: bomb.x,
+        y: bomb.y,
+        range: GAME_CONFIG.defaultRange,
+        ownerId: bomb.ownerId ?? 'remote',
+        detonateAt: this.time.now + GAME_CONFIG.bombFuseMs,
+        escapedByOwner: true,
+      });
+    }
+    for (const key of [...this.arena.bombs.keys()]) {
+      if (!seenBombIds.has(key)) {
+        this.arena.bombs.delete(key);
+      }
+    }
+
     if (!this.worldReady) {
       return;
     }
@@ -2316,6 +2353,46 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+
+  public onBombPlaced(event: { bomb: { id: string; x: number; y: number; ownerId?: string } }): void {
+    const bomb = event?.bomb;
+    if (!bomb) return;
+    this.arena.bombs.set(bomb.id, {
+      key: bomb.id,
+      x: bomb.x,
+      y: bomb.y,
+      range: GAME_CONFIG.defaultRange,
+      ownerId: bomb.ownerId ?? 'remote',
+      detonateAt: this.time.now + GAME_CONFIG.bombFuseMs,
+      escapedByOwner: true,
+    });
+  }
+
+  public onBombExploded(event: { bombId: string; x: number; y: number; tilesDestroyed?: Array<{ x: number; y: number }> }): void {
+    if (!event) return;
+    this.arena.bombs.delete(event.bombId);
+    this.bombSprites.get(event.bombId)?.destroy();
+    this.bombSprites.delete(event.bombId);
+
+    for (const tile of event.tilesDestroyed ?? []) {
+      if (!isInsideArena(this.arena, tile.x, tile.y)) continue;
+      this.arena.tiles[tile.y][tile.x] = 'Floor';
+      this.destroyBreakableSprite(tile.x, tile.y);
+    }
+
+    const impacts = [{ x: event.x, y: event.y }];
+    this.spawnFlame(event.x, event.y, this.time.now + GAME_CONFIG.flameLifetimeMs, 'center');
+    for (const tile of event.tilesDestroyed ?? []) {
+      this.spawnFlame(tile.x, tile.y, this.time.now + GAME_CONFIG.flameLifetimeMs, 'arm');
+      impacts.push({ x: tile.x, y: tile.y });
+    }
+    this.spawnFlameBeams(event.bombId, event.x, event.y, impacts, this.time.now + GAME_CONFIG.flameLifetimeMs);
+  }
+
+  public onMatchEnded(_event: { reason: 'all_eliminated' | 'manual_restart'; winnerTgUserId?: string }): void {
+    this.multiplayerMatchEnded = true;
+    this.clearMovementInputs();
+  }
 
 
   private warnInvalidAuthoritativePosition(snapshot: MatchSnapshotV1, me: { x: number; y: number }, localTgUserId?: string): void {
@@ -2378,7 +2455,7 @@ export class GameScene extends Phaser.Scene {
     return `fnv1a_${(hash >>> 0).toString(16).padStart(8, '0')}`;
   }
 
-  public applyMatchWorldInit(payload: { roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }): boolean {
+  public applyMatchWorldInit(payload: { roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string; bombs?: Array<{ id: string; x: number; y: number; ownerId?: string }> } }): boolean {
     if (this.currentRoomCode && payload.roomCode !== this.currentRoomCode) {
       this.droppedWrongRoom += 1;
       return false;
@@ -2410,6 +2487,18 @@ export class GameScene extends Phaser.Scene {
     this.arena.tiles = nextTiles;
     this.arena.width = gridW;
     this.arena.height = gridH;
+    this.arena.bombs.clear();
+    for (const bomb of payload.world.bombs ?? []) {
+      this.arena.bombs.set(bomb.id, {
+        key: bomb.id,
+        x: bomb.x,
+        y: bomb.y,
+        range: GAME_CONFIG.defaultRange,
+        ownerId: bomb.ownerId ?? 'remote',
+        detonateAt: this.time.now + GAME_CONFIG.bombFuseMs,
+        escapedByOwner: false,
+      });
+    }
     this.matchGridW = gridW;
     this.matchGridH = gridH;
     this.clearDynamicSprites();
