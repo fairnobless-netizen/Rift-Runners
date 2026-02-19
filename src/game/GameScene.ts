@@ -142,6 +142,8 @@ export class GameScene extends Phaser.Scene {
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
   private needsNetResync = false;
+  private lastInvalidPosWarnAtMs = 0;
+  private lastInvalidPosWarnKey: string | null = null;
   private readonly SNAPSHOT_BUFFER_SIZE = 10;
   private arena: ArenaModel = createArena(0, this.rng);
   private levelIndex = 0;
@@ -2284,6 +2286,8 @@ export class GameScene extends Phaser.Scene {
 
     if (!isInsideArena(this.arena, me.x, me.y) || !canOccupyCell(this.arena, me.x, me.y)) {
       this.invalidPosDrops += 1;
+      this.needsNetResync = true;
+      this.warnInvalidAuthoritativePosition(snapshot, me, effectiveLocalId);
       return;
     }
 
@@ -2299,6 +2303,43 @@ export class GameScene extends Phaser.Scene {
   }
 
 
+
+  private warnInvalidAuthoritativePosition(snapshot: MatchSnapshotV1, me: { x: number; y: number }, localTgUserId?: string): void {
+    const now = Date.now();
+    const warnKey = `${snapshot.roomCode ?? 'unknown'}:${snapshot.matchId ?? 'unknown'}:${snapshot.tick ?? -1}:${me.x}:${me.y}`;
+    if (this.lastInvalidPosWarnKey === warnKey && now - this.lastInvalidPosWarnAtMs < 1000) {
+      return;
+    }
+
+    if (now - this.lastInvalidPosWarnAtMs < 3000) {
+      return;
+    }
+
+    this.lastInvalidPosWarnAtMs = now;
+    this.lastInvalidPosWarnKey = warnKey;
+
+    const tile = isInsideArena(this.arena, me.x, me.y)
+      ? this.arena.tiles[me.y]?.[me.x] ?? null
+      : null;
+
+    console.warn('[MP] invalid_authoritative_position_drop', {
+      roomCode: this.currentRoomCode,
+      matchId: this.currentMatchId,
+      snapshotRoom: snapshot.roomCode ?? null,
+      snapshotMatchId: snapshot.matchId ?? null,
+      currentRoomCode: this.currentRoomCode,
+      tick: snapshot.tick ?? null,
+      tgUserId: localTgUserId ?? this.localTgUserId ?? null,
+      x: me.x,
+      y: me.y,
+      tile,
+      gridW: this.arena.width,
+      gridH: this.arena.height,
+      worldHashServer: this.worldHashServer,
+      worldHashClient: this.worldHashClient,
+      invalidPosDrops: this.invalidPosDrops,
+    });
+  }
 
   private decodeWorldTile(tile: number): TileType {
     if (tile === 1) return 'HardWall';

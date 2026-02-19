@@ -212,6 +212,7 @@ export default function GameView(): JSX.Element {
   const sceneRef = useRef<GameScene | null>(null);
   const inputSeqRef = useRef(0);
   const moveRepeatTimerRef = useRef<number | null>(null);
+  const moveRepeatDelayTimerRef = useRef<number | null>(null);
   const activeMoveDirRef = useRef<Direction | null>(null);
 
   const joystickTouchZoneRef = useRef<HTMLDivElement | null>(null);
@@ -561,6 +562,18 @@ export default function GameView(): JSX.Element {
   }, [currentTutorialStep, tutorialActive]);
 
 
+  const clearMoveTimers = (): void => {
+    if (moveRepeatDelayTimerRef.current != null) {
+      window.clearTimeout(moveRepeatDelayTimerRef.current);
+      moveRepeatDelayTimerRef.current = null;
+    }
+
+    if (moveRepeatTimerRef.current != null) {
+      window.clearInterval(moveRepeatTimerRef.current);
+      moveRepeatTimerRef.current = null;
+    }
+  };
+
   const setMovementFromDirection = (direction: Direction | null): void => {
     controlsRef.current.up = direction === 'up';
     controlsRef.current.down = direction === 'down';
@@ -576,30 +589,26 @@ export default function GameView(): JSX.Element {
     // Stop repeat when released
     if (!direction) {
       activeMoveDirRef.current = null;
-      if (moveRepeatTimerRef.current != null) {
-        window.clearInterval(moveRepeatTimerRef.current);
-        moveRepeatTimerRef.current = null;
-      }
+      clearMoveTimers();
       return;
     }
 
     // If direction changed -> restart repeat and send immediately
     if (activeMoveDirRef.current !== direction) {
       activeMoveDirRef.current = direction;
-
-      if (moveRepeatTimerRef.current != null) {
-        window.clearInterval(moveRepeatTimerRef.current);
-        moveRepeatTimerRef.current = null;
-      }
+      clearMoveTimers();
 
       // immediate step
       sendMatchMove(direction);
 
-      // repeat steps while held (tuned to fixed tick ~50ms; 180ms is a safe "tile cadence" start)
-      moveRepeatTimerRef.current = window.setInterval(() => {
-        if (activeMoveDirRef.current !== direction) return;
-        sendMatchMove(direction);
-      }, 180);
+      // Repeat steps while held using solo cadence config.
+      moveRepeatDelayTimerRef.current = window.setTimeout(() => {
+        moveRepeatDelayTimerRef.current = null;
+        moveRepeatTimerRef.current = window.setInterval(() => {
+          if (activeMoveDirRef.current !== direction) return;
+          sendMatchMove(direction);
+        }, GAME_CONFIG.moveRepeatIntervalMs);
+      }, GAME_CONFIG.moveRepeatDelayMs);
     }
   };
 
@@ -1046,6 +1055,11 @@ export default function GameView(): JSX.Element {
     expectedMatchIdRef.current = lastStarted.matchId;
     worldReadyRef.current = false;
     setCurrentMatchId(lastStarted.matchId);
+    setCurrentRoom((prev) => {
+      if (!prev || prev.roomCode !== expectedRoomCode) return prev;
+      if (prev.phase === 'STARTED') return prev;
+      return { ...prev, phase: 'STARTED' };
+    });
     diagnosticsStore.log('ROOM', 'INFO', 'match:started:accepted', {
       roomCode: expectedRoomCode,
       matchId: lastStarted.matchId,
@@ -1209,10 +1223,7 @@ export default function GameView(): JSX.Element {
 
   useEffect(
     () => () => {
-      if (moveRepeatTimerRef.current != null) {
-        window.clearInterval(moveRepeatTimerRef.current);
-        moveRepeatTimerRef.current = null;
-      }
+      clearMoveTimers();
       activeMoveDirRef.current = null;
       clearMovement();
     },
