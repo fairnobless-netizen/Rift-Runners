@@ -387,45 +387,26 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         },
       });
 
-      startMatch(
-        match,
-        (snapshot) => {
-          const activeRoom = rooms.get(room.roomId);
-          if (!activeRoom) {
-            endMatch(match.matchId);
-            return;
-          }
+      startMatch(match, (snapshot) => {
+        const activeRoom = rooms.get(room.roomId);
+        if (!activeRoom) {
+          endMatch(match.matchId);
+          return;
+        }
 
-          if (activeRoom.matchId !== snapshot.matchId) {
-            return;
-          }
+        if (activeRoom.matchId !== snapshot.matchId) {
+          return;
+        }
 
-          if (snapshot.roomCode !== activeRoom.roomId) {
-            return;
-          }
+        if (snapshot.roomCode !== activeRoom.roomId) {
+          return;
+        }
 
-          broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, {
-            type: 'match:snapshot',
-            snapshot,
-          });
-        },
-        (eventMsg) => {
-          broadcastToRoomMatch(room.roomId, match.matchId, eventMsg);
-        },
-        (endedRoomCode, endedMatchId) => {
-          const activeRoom = rooms.get(endedRoomCode);
-          if (!activeRoom || activeRoom.matchId !== endedMatchId) {
-            return;
-          }
-
-          activeRoom.matchId = null;
-          for (const client of clients) {
-            if (client.roomId === endedRoomCode && client.matchId === endedMatchId) {
-              client.matchId = null;
-            }
-          }
-        },
-      );
+        broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, {
+          type: 'match:snapshot',
+          snapshot,
+        });
+      });
 
       return;
     }
@@ -481,15 +462,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         const dir = payload.dir;
         if (dir !== 'up' && dir !== 'down' && dir !== 'left' && dir !== 'right') return;
 
-        match.inputQueue.push({
-          tgUserId: ctx.tgUserId,
-          seq,
-          payload,
-        });
-        return;
-      }
-
-      if (payload.kind === 'place_bomb') {
         match.inputQueue.push({
           tgUserId: ctx.tgUserId,
           seq,
