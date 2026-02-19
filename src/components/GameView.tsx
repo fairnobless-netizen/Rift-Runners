@@ -1048,7 +1048,7 @@ export default function GameView(): JSX.Element {
     if (!lastStarted || lastStarted.type !== 'match:started') return;
 
     const expectedRoomCode = expectedRoomCodeRef.current;
-    const gotRoomCode = (lastStarted as any).roomCode ?? null;
+    const gotRoomCode = lastStarted.roomCode ?? null;
     const gotMatchId = lastStarted.matchId ?? null;
     if (!expectedRoomCode) {
       diagnosticsStore.log('ROOM', 'WARN', 'match:started:drop_no_room_context', {
@@ -1113,7 +1113,7 @@ export default function GameView(): JSX.Element {
   }, [currentRoomMembers.length]);
 
   useEffect(() => {
-    const lastWorldInit = [...ws.messages].reverse().find((message) => message.type === 'match:world_init') as any;
+    const lastWorldInit = [...ws.messages].reverse().find((message): message is Extract<(typeof ws.messages)[number], { type: 'match:world_init' }> => message.type === 'match:world_init');
     if (!lastWorldInit?.world || !lastWorldInit?.matchId) return;
 
     const expectedRoomCode = expectedRoomCodeRef.current;
@@ -1165,7 +1165,7 @@ export default function GameView(): JSX.Element {
 
 
   useEffect(() => {
-    const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
+    const last = [...ws.messages].reverse().find((m): m is Extract<(typeof ws.messages)[number], { type: 'match:snapshot' }> => m.type === 'match:snapshot');
     if (!last?.snapshot) return;
 
     const snapshot = last.snapshot;

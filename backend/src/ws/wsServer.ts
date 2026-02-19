@@ -250,10 +250,24 @@ function detachClientFromRoom(ctx: ClientCtx) {
   if (room) {
     room.players.delete(ctx.tgUserId);
 
-    if (room.players.size === 0) {
-      if (room.matchId) {
-        endMatch(room.matchId);
+    if (room.matchId && room.players.size < 2) {
+      const winnerId = room.players.size === 1 ? Array.from(room.players.keys())[0] ?? null : null;
+      const endedMessage: MatchServerMessage = {
+        type: 'match:ended',
+        winnerId,
+      };
+      broadcastToRoomMatch(room.roomId, room.matchId, endedMessage);
+      endMatch(room.matchId);
+      room.matchId = null;
+
+      for (const client of clients) {
+        if (client.roomId === room.roomId) {
+          client.matchId = null;
+        }
       }
+    }
+
+    if (room.players.size === 0) {
       rooms.delete(room.roomId);
     }
   }
@@ -368,11 +382,11 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         playersCount: players.length,
       });
 
-      const startedMessage = {
+      const startedMessage: MatchServerMessage = {
         type: 'match:started',
         roomCode: room.roomId,
         matchId: match.matchId,
-      } as MatchServerMessage;
+      };
       broadcastToRoomMatch(room.roomId, match.matchId, startedMessage);
 
       broadcastToRoomMatch(room.roomId, match.matchId, {

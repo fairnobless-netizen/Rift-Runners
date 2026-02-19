@@ -1,4 +1,4 @@
-import type { MatchInputPayload, MatchSnapshotV1 } from '@shared/protocol';
+import type { MatchClientMessage, MatchServerMessage } from '@shared/protocol';
 
 export type WsClientMessage =
   | { type: 'ping'; id: number; t: number }
@@ -6,20 +6,14 @@ export type WsClientMessage =
   | { type: 'room:create' }
   | { type: 'room:join'; roomId: string; tgUserId?: string }
   | { type: 'room:leave' }
-  | { type: 'match:start' }
-  | { type: 'match:input'; seq: number; payload: MatchInputPayload };
+  | MatchClientMessage;
 
 export type WsServerMessage =
   | { type: 'pong'; id: number; t: number; serverNow: number }
   | { type: 'lobby:list'; rooms: Array<{ roomId: string; players: number }> }
   | { type: 'room:joined'; room: unknown }
   | { type: 'room:left' }
-  | { type: 'match:started'; matchId: string }
-  | { type: 'match:world_init'; roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }
-  | { type: 'match:bomb_placed'; roomCode: string; matchId: string; eventId: string; serverTick: number; tick: number; bomb: { id: string; x: number; y: number } }
-  | { type: 'match:bomb_exploded'; roomCode: string; matchId: string; eventId: string; serverTick: number; tick: number; bombId: string; x: number; y: number; tilesDestroyed?: Array<{ x: number; y: number }> }
-  | { type: 'match:snapshot'; snapshot: MatchSnapshotV1 }
-  | { type: 'match:error'; error: string }
+  | MatchServerMessage
   | { type: 'error'; error: string };
 
 export type WsDebugMetrics = {

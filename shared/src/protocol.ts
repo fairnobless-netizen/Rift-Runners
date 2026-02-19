@@ -52,8 +52,13 @@ export type MatchBombExploded = {
   bombId: string;
   x: number;
   y: number;
-  tilesDestroyed?: Array<{ x: number; y: number }>;
+  blastCells: Array<{ x: number; y: number }>;
 };
+
+export interface MatchEnded {
+  type: 'match:ended';
+  winnerId: string | null;
+}
 
 export type MatchBombPlacedEvent = MatchBombPlaced;
 export type MatchBombExplodedEvent = MatchBombExploded;
@@ -88,5 +93,6 @@ export type MatchServerMessage =
   | MatchWorldInit
   | MatchBombPlaced
   | MatchBombExploded
+  | MatchEnded
   | { type: 'match:snapshot'; snapshot: MatchSnapshot }
   | { type: 'match:error'; error: string };
