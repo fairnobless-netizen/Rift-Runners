@@ -304,10 +304,12 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         playersCount: players.length,
       });
 
-      broadcastToRoomMatch(room.roomId, match.matchId, {
+      const startedMessage = {
         type: 'match:started',
+        roomCode: room.roomId,
         matchId: match.matchId,
-      });
+      } as MatchServerMessage;
+      broadcastToRoomMatch(room.roomId, match.matchId, startedMessage);
 
       broadcastToRoomMatch(room.roomId, match.matchId, {
         type: 'match:world_init',
