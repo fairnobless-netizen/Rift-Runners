@@ -387,7 +387,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         },
       });
 
-      startMatch(match, (snapshot) => {
+      startMatch(match, (snapshot, events) => {
         const activeRoom = rooms.get(room.roomId);
         if (!activeRoom) {
           endMatch(match.matchId);
@@ -406,6 +406,14 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
           type: 'match:snapshot',
           snapshot,
         });
+
+        for (const evt of events.bombPlaced) {
+          broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, evt);
+        }
+
+        for (const evt of events.bombExploded) {
+          broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, evt);
+        }
       });
 
       return;
@@ -462,6 +470,14 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         const dir = payload.dir;
         if (dir !== 'up' && dir !== 'down' && dir !== 'left' && dir !== 'right') return;
 
+        match.inputQueue.push({
+          tgUserId: ctx.tgUserId,
+          seq,
+          payload,
+        });
+      }
+
+      if (payload.kind === 'place_bomb') {
         match.inputQueue.push({
           tgUserId: ctx.tgUserId,
           seq,

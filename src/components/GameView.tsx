@@ -201,6 +201,10 @@ function buildWsDebugMetrics(scene: GameScene): WsDebugMetrics {
     worldReady: routingStats.worldReady,
     worldHashServer: routingStats.worldHashServer,
     worldHashClient: routingStats.worldHashClient,
+    bombsCount: routingStats.bombsCount,
+    lastBombEventTick: routingStats.lastBombEventTick,
+    tilesDestroyedCount: routingStats.tilesDestroyedCount,
+    lastTilesDestroyedTick: routingStats.lastTilesDestroyedTick,
   };
 }
 
@@ -1149,6 +1153,49 @@ export default function GameView(): JSX.Element {
 
 
   useEffect(() => {
+    const lastBombPlaced = [...ws.messages].reverse().find((message) => message.type === 'match:bomb_placed') as any;
+    if (!lastBombPlaced?.eventId) return;
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    if (!expectedRoomCode || !expectedMatchId) {
+      return;
+    }
+
+    if (lastBombPlaced.roomCode !== expectedRoomCode || lastBombPlaced.matchId !== expectedMatchId) {
+      return;
+    }
+
+    if (!worldReadyRef.current) {
+      return;
+    }
+
+    sceneRef.current?.applyMatchBombPlaced(lastBombPlaced);
+  }, [ws.messages]);
+
+  useEffect(() => {
+    const lastBombExploded = [...ws.messages].reverse().find((message) => message.type === 'match:bomb_exploded') as any;
+    if (!lastBombExploded?.eventId) return;
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    if (!expectedRoomCode || !expectedMatchId) {
+      return;
+    }
+
+    if (lastBombExploded.roomCode !== expectedRoomCode || lastBombExploded.matchId !== expectedMatchId) {
+      return;
+    }
+
+    if (!worldReadyRef.current) {
+      return;
+    }
+
+    sceneRef.current?.applyMatchBombExploded(lastBombExploded);
+  }, [ws.messages]);
+
+
+  useEffect(() => {
     const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
     if (!last?.snapshot) return;
 
@@ -1360,6 +1407,14 @@ export default function GameView(): JSX.Element {
 
   const requestBomb = (): void => {
     if (isInteractionBlocked) return;
+
+    if (isMultiplayerMode && currentRoom?.phase === 'STARTED' && ws.connected) {
+      const seq = inputSeqRef.current + 1;
+      inputSeqRef.current = seq;
+      ws.send({ type: 'match:input', seq, payload: { kind: 'place_bomb' } });
+      return;
+    }
+
     controlsRef.current.placeBombRequested = true;
   };
 

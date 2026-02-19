@@ -27,6 +27,8 @@ export type WsServerMessage =
   | { type: 'match:started'; matchId: string }
   | { type: 'match:world_init'; roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }
   | { type: 'match:snapshot'; snapshot: MatchSnapshotV1 }
+  | { type: 'match:bomb_placed'; eventId: string; roomCode: string; matchId: string; tick: number; bomb: { id: string; x: number; y: number; ownerId: string; explodeTick: number } }
+  | { type: 'match:bomb_exploded'; eventId: string; roomCode: string; matchId: string; tick: number; bombId: string; destroyed: Array<{ x: number; y: number }>; affected: Array<{ x: number; y: number }> }
   | { type: 'match:error'; error: string }
   | { type: 'error'; error: string };
 
@@ -70,4 +72,8 @@ export type WsDebugMetrics = {
   worldReady: boolean;
   worldHashServer: string | null;
   worldHashClient: string | null;
+  bombsCount: number;
+  lastBombEventTick: number;
+  tilesDestroyedCount: number;
+  lastTilesDestroyedTick: number;
 };

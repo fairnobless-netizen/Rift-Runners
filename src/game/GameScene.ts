@@ -121,6 +121,10 @@ export class GameScene extends Phaser.Scene {
   private worldReady = false;
   private worldHashServer: string | null = null;
   private worldHashClient: string | null = null;
+  private seenMatchEventIds = new Set<string>();
+  private lastBombEventTick = -1;
+  private tilesDestroyedCount = 0;
+  private lastTilesDestroyedTick = -1;
   private controls: ControlsState;
   private gameMode: GameMode = 'solo';
   private partySize = 1;
@@ -457,9 +461,11 @@ export class GameScene extends Phaser.Scene {
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
     this.consumeMovementIntent(time);
-    this.tryPlaceBomb(time);
-    this.tryRemoteDetonate(time);
-    this.processBombTimers(time);
+    if (this.gameMode !== 'multiplayer') {
+      this.tryPlaceBomb(time);
+      this.tryRemoteDetonate(time);
+      this.processBombTimers(time);
+    }
     this.cleanupExpiredFlames(time);
     this.tickEnemies(time);
     this.bossController.update(time);
@@ -2212,6 +2218,10 @@ export class GameScene extends Phaser.Scene {
     this.worldReady = false;
     this.worldHashServer = null;
     this.worldHashClient = null;
+    this.seenMatchEventIds.clear();
+    this.lastBombEventTick = -1;
+    this.tilesDestroyedCount = 0;
+    this.lastTilesDestroyedTick = -1;
   }
 
   public pushMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
@@ -2407,6 +2417,83 @@ export class GameScene extends Phaser.Scene {
     this.worldHashClient = this.computeWorldHash(clientTiles);
     this.worldReady = true;
     this.invalidPosDrops = 0;
+    this.seenMatchEventIds.clear();
+    this.lastBombEventTick = -1;
+    this.tilesDestroyedCount = 0;
+    this.lastTilesDestroyedTick = -1;
+
+    return true;
+  }
+
+
+  public applyMatchBombPlaced(payload: { eventId: string; roomCode: string; matchId: string; tick: number; bomb: { id: string; x: number; y: number; ownerId: string; explodeTick: number } }): boolean {
+    if (this.currentRoomCode && payload.roomCode !== this.currentRoomCode) {
+      this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    if (this.currentMatchId && payload.matchId !== this.currentMatchId) {
+      this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    if (!payload.eventId || this.seenMatchEventIds.has(payload.eventId)) {
+      return false;
+    }
+
+    this.seenMatchEventIds.add(payload.eventId);
+    this.lastBombEventTick = Math.max(this.lastBombEventTick, payload.tick ?? -1);
+
+    const x = Number(payload.bomb?.x);
+    const y = Number(payload.bomb?.y);
+    if (!Number.isInteger(x) || !Number.isInteger(y) || !isInsideArena(this.arena, x, y)) {
+      return false;
+    }
+
+    if (!this.arena.bombs.has(toKey(x, y))) {
+      placeBomb(this.arena, x, y, 1, String(payload.bomb?.ownerId ?? 'remote'), this.time.now + GAME_CONFIG.bombFuseMs);
+    }
+
+    return true;
+  }
+
+  public applyMatchBombExploded(payload: { eventId: string; roomCode: string; matchId: string; tick: number; bombId: string; destroyed: Array<{ x: number; y: number }>; affected: Array<{ x: number; y: number }> }): boolean {
+    if (this.currentRoomCode && payload.roomCode !== this.currentRoomCode) {
+      this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    if (this.currentMatchId && payload.matchId !== this.currentMatchId) {
+      this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    if (!payload.eventId || this.seenMatchEventIds.has(payload.eventId)) {
+      return false;
+    }
+
+    this.seenMatchEventIds.add(payload.eventId);
+    this.lastBombEventTick = Math.max(this.lastBombEventTick, payload.tick ?? -1);
+
+    removeBomb(this.arena, String(payload.bombId ?? ''));
+
+    for (const cell of payload.destroyed ?? []) {
+      const x = Number(cell?.x);
+      const y = Number(cell?.y);
+      if (!Number.isInteger(x) || !Number.isInteger(y) || !isInsideArena(this.arena, x, y)) {
+        continue;
+      }
+      destroyBreakable(this.arena, x, y);
+      this.destroyBreakableSprite(x, y);
+      this.tilesDestroyedCount += 1;
+      this.lastTilesDestroyedTick = Math.max(this.lastTilesDestroyedTick, payload.tick ?? -1);
+    }
+
+    if ((payload.destroyed?.length ?? 0) > 0) {
+      this.rebuildArenaTiles();
+      const clientTiles = this.arena.tiles.flatMap((row) => row.map((tile) => this.encodeWorldTile(tile)));
+      this.worldHashClient = this.computeWorldHash(clientTiles);
+    }
 
     return true;
   }
@@ -2444,6 +2531,10 @@ export class GameScene extends Phaser.Scene {
     worldReady: boolean;
     worldHashServer: string | null;
     worldHashClient: string | null;
+    bombsCount: number;
+    lastBombEventTick: number;
+    tilesDestroyedCount: number;
+    lastTilesDestroyedTick: number;
   } {
     return {
       droppedWrongRoom: this.droppedWrongRoom,
@@ -2454,6 +2545,10 @@ export class GameScene extends Phaser.Scene {
       worldReady: this.worldReady,
       worldHashServer: this.worldHashServer,
       worldHashClient: this.worldHashClient,
+      bombsCount: this.arena.bombs.size,
+      lastBombEventTick: this.lastBombEventTick,
+      tilesDestroyedCount: this.tilesDestroyedCount,
+      lastTilesDestroyedTick: this.lastTilesDestroyedTick,
     };
   }
 

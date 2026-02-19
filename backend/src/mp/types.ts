@@ -10,6 +10,15 @@ export type PlayerState = {
   y: number;
 };
 
+export type BombState = {
+  id: string;
+  x: number;
+  y: number;
+  ownerId: string;
+  placedTick: number;
+  explodeTick: number;
+};
+
 export type MatchState = {
   matchId: string;
   roomId: string;
@@ -23,6 +32,7 @@ export type MatchState = {
   };
 
   players: Map<string, PlayerState>;
+  bombs: Map<string, BombState>;
 
   inputQueue: Array<{
     tgUserId: string;

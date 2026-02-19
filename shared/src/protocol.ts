@@ -3,7 +3,8 @@ export type ProtocolVersion = 'match_v1';
 export type MoveDir = 'up' | 'down' | 'left' | 'right';
 
 export type MatchInputPayload =
-  | { kind: 'move'; dir: MoveDir };
+  | { kind: 'move'; dir: MoveDir }
+  | { kind: 'place_bomb' };
 
 export type MatchClientMessage =
   | { type: 'match:start' }
@@ -33,6 +34,7 @@ export type MatchSnapshot = {
     gridW: number;
     gridH: number;
     worldHash?: string;
+    bombs?: Array<{ id: string; x: number; y: number; ownerId: string; explodeTick: number }>;
   };
   players: Array<{
     tgUserId: string;
@@ -45,10 +47,32 @@ export type MatchSnapshot = {
   }>;
 };
 
+export type MatchBombPlacedEvent = {
+  type: 'match:bomb_placed';
+  eventId: string;
+  roomCode: string;
+  matchId: string;
+  tick: number;
+  bomb: { id: string; x: number; y: number; ownerId: string; explodeTick: number };
+};
+
+export type MatchBombExplodedEvent = {
+  type: 'match:bomb_exploded';
+  eventId: string;
+  roomCode: string;
+  matchId: string;
+  tick: number;
+  bombId: string;
+  destroyed: Array<{ x: number; y: number }>;
+  affected: Array<{ x: number; y: number }>;
+};
+
 export type MatchSnapshotV1 = MatchSnapshot;
 
 export type MatchServerMessage =
   | { type: 'match:started'; roomCode: string; matchId: string }
   | MatchWorldInit
   | { type: 'match:snapshot'; snapshot: MatchSnapshot }
+  | MatchBombPlacedEvent
+  | MatchBombExplodedEvent
   | { type: 'match:error'; error: string };
