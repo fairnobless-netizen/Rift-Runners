@@ -23,6 +23,21 @@ export type MatchState = {
   };
 
   players: Map<string, PlayerState>;
+  playerLives: Map<string, number>;
+  eliminatedPlayers: Set<string>;
+
+  bombs: Map<string, {
+    id: string;
+    ownerId: string;
+    x: number;
+    y: number;
+    tickPlaced: number;
+    explodeAtTick: number;
+    range: number;
+  }>;
+  maxBombsPerPlayer: number;
+  bombFuseTicks: number;
+  bombRange: number;
 
   eventSeq: number;
   seenEventIds: string[];
@@ -34,4 +49,5 @@ export type MatchState = {
   }>;
 
   interval?: NodeJS.Timeout;
+  ended: boolean;
 };

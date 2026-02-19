@@ -2,7 +2,7 @@ import { WebSocket } from 'ws';
 import type { RawData, Server as WebSocketServer } from 'ws';
 
 import type { MatchClientMessage, MatchServerMessage } from '../mp/protocol';
-import { startMatch } from '../mp/match';
+import { startMatch, tryPlaceBomb } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 
 // ✅ add DB cleanup
@@ -294,8 +294,8 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
   try {
     switch (msg.type) {
     case 'ping': {
-      const id = Number((msg as any).id);
-      const t = Number((msg as any).t);
+      const id = Number(msg.id);
+      const t = Number(msg.t);
 
       if (!Number.isFinite(id) || !Number.isFinite(t)) {
         return;
@@ -368,11 +368,11 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         playersCount: players.length,
       });
 
-      const startedMessage = {
+      const startedMessage: MatchServerMessage = {
         type: 'match:started',
         roomCode: room.roomId,
         matchId: match.matchId,
-      } as MatchServerMessage;
+      };
       broadcastToRoomMatch(room.roomId, match.matchId, startedMessage);
 
       broadcastToRoomMatch(room.roomId, match.matchId, {
@@ -387,7 +387,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         },
       });
 
-      startMatch(match, (snapshot) => {
+      startMatch(match, (snapshot, events) => {
         const activeRoom = rooms.get(room.roomId);
         if (!activeRoom) {
           endMatch(match.matchId);
@@ -400,6 +400,14 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
         if (snapshot.roomCode !== activeRoom.roomId) {
           return;
+        }
+
+
+        for (const event of events) {
+          if (activeRoom.matchId !== event.matchId || event.roomCode !== activeRoom.roomId) {
+            continue;
+          }
+          broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
         }
 
         broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, {
@@ -451,10 +459,10 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return;
       }
 
-      const seq = Number((msg as any).seq);
+      const seq = Number(msg.seq);
       if (!Number.isSafeInteger(seq) || seq <= 0) return;
 
-      const payload = (msg as any).payload;
+      const { payload } = msg;
       if (!payload || typeof payload !== 'object') return;
 
       // Minimal validation for v1
@@ -469,6 +477,39 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         });
       }
 
+      return;
+    }
+
+    case 'match:bomb_place': {
+      if (!ctx.roomId || !ctx.matchId) {
+        logInboundDrop(ctx, msg, 'bomb_place_no_session');
+        return;
+      }
+
+      const room = rooms.get(ctx.roomId);
+      if (!room || !isSocketAttachedToRoom(ctx, room) || room.matchId !== ctx.matchId) {
+        logInboundDrop(ctx, msg, 'bomb_place_room_mismatch', room);
+        return;
+      }
+
+      const match = getMatch(ctx.matchId);
+      if (!match || match.roomId !== ctx.roomId) {
+        logInboundDrop(ctx, msg, 'bomb_place_match_mismatch', room);
+        return;
+      }
+
+      const x = Number(msg.payload?.x);
+      const y = Number(msg.payload?.y);
+      if (!Number.isInteger(x) || !Number.isInteger(y)) {
+        return;
+      }
+
+      const spawned = tryPlaceBomb(match, ctx.tgUserId, x, y);
+      if (!spawned) {
+        return;
+      }
+
+      broadcastToRoomMatch(room.roomId, match.matchId, spawned);
       return;
     }
 
