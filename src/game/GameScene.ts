@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { RemotePlayersRenderer } from './RemotePlayersRenderer';
 import { LocalPredictionController } from './LocalPredictionController';
-import type { MatchSnapshotV1 } from '../ws/wsTypes';
+import type { MatchSnapshotV1 } from '@shared/protocol';
 import {
   canOccupyCell,
   createArena,

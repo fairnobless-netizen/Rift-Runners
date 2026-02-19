@@ -1,4 +1,4 @@
-import { WsClientMessage, WsServerMessage } from './wsTypes';
+import type { WsClientMessage, WsServerMessage } from './wsTypes';
 
 export type WsClientOptions = {
   url: string;
