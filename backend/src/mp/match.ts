@@ -1,9 +1,19 @@
+import type {
+  MatchBombExploded,
+  MatchBombSpawned,
+  MatchEnd,
+  MatchPlayerDamaged,
+  MatchPlayerEliminated,
+  MatchSnapshot,
+  MatchTilesDestroyed,
+} from './protocol';
 import type { MatchState } from './types';
-import type { MatchSnapshot, MatchInputPayload } from './protocol';
 
 const TICK_RATE_MS = 50; // 20 Hz
 
-export function startMatch(match: MatchState, broadcast: (snapshot: MatchSnapshot) => void) {
+type MatchEvent = MatchBombSpawned | MatchBombExploded | MatchTilesDestroyed | MatchPlayerDamaged | MatchPlayerEliminated | MatchEnd;
+
+export function startMatch(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: MatchEvent[]) => void) {
   match.interval = setInterval(() => tick(match, broadcast), TICK_RATE_MS);
 }
 
@@ -14,20 +24,25 @@ export function stopMatch(match: MatchState) {
   }
 }
 
-function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot) => void) {
-  match.tick++;
+function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: MatchEvent[]) => void) {
+  if (match.ended) return;
+  match.tick += 1;
 
-  // Apply queued inputs deterministically: FIFO
+  const events: MatchEvent[] = [];
+
   while (match.inputQueue.length > 0) {
-    const input = match.inputQueue.shift()!;
+    const input = match.inputQueue.shift();
+    if (!input) continue;
     const player = match.players.get(input.tgUserId);
     if (!player) continue;
-
-    // Ignore old/out-of-order seq
+    if (match.eliminatedPlayers.has(input.tgUserId)) continue;
     if (input.seq <= player.lastInputSeq) continue;
 
-    applyInput(match, player.tgUserId, input.seq, input.payload);
+    applyInput(match, input.tgUserId, input.seq, input.payload);
   }
+
+  processBombExplosions(match, events);
+  maybeEndMatch(match, events);
 
   const snapshot: MatchSnapshot = {
     version: 'match_v1',
@@ -39,6 +54,14 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot) => void) {
       gridW: match.world.gridW,
       gridH: match.world.gridH,
       worldHash: match.world.worldHash,
+      bombs: Array.from(match.bombs.values()).map((bomb) => ({
+        id: bomb.id,
+        x: bomb.x,
+        y: bomb.y,
+        ownerId: bomb.ownerId,
+        tickPlaced: bomb.tickPlaced,
+        explodeAtTick: bomb.explodeAtTick,
+      })),
     },
     players: Array.from(match.players.values()).map((p) => ({
       tgUserId: p.tgUserId,
@@ -48,12 +71,176 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot) => void) {
       lastInputSeq: p.lastInputSeq,
       x: p.x,
       y: p.y,
+      lives: match.playerLives.get(p.tgUserId) ?? 0,
+      eliminated: match.eliminatedPlayers.has(p.tgUserId),
     })),
   };
 
-  broadcast(snapshot);
+  broadcast(snapshot, events);
 }
 
+export function tryPlaceBomb(match: MatchState, tgUserId: string, x: number, y: number): MatchBombSpawned | null {
+  const player = match.players.get(tgUserId);
+  if (!player || match.eliminatedPlayers.has(tgUserId)) return null;
+  if (player.x !== x || player.y !== y) return null;
+  if (!canOccupyWorldCell(match, x, y)) return null;
+
+  const ownedBombCount = Array.from(match.bombs.values()).filter((bomb) => bomb.ownerId === tgUserId).length;
+  if (ownedBombCount >= match.maxBombsPerPlayer) return null;
+
+  const collision = Array.from(match.bombs.values()).some((bomb) => bomb.x === x && bomb.y === y);
+  if (collision) return null;
+
+  const eventId = nextEventId(match);
+  const bombId = `bomb_${eventId}`;
+  match.bombs.set(bombId, {
+    id: bombId,
+    ownerId: tgUserId,
+    x,
+    y,
+    tickPlaced: match.tick,
+    explodeAtTick: match.tick + match.bombFuseTicks,
+    range: match.bombRange,
+  });
+
+  return {
+    type: 'match:bomb_spawned',
+    roomCode: match.roomId,
+    matchId: match.matchId,
+    eventId,
+    serverTick: match.tick,
+    tick: match.tick,
+    bomb: {
+      id: bombId,
+      x,
+      y,
+      ownerId: tgUserId,
+      tickPlaced: match.tick,
+      explodeAtTick: match.tick + match.bombFuseTicks,
+    },
+  };
+}
+
+function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
+  while (true) {
+    const dueBomb = Array.from(match.bombs.values())
+      .filter((bomb) => match.tick >= bomb.explodeAtTick)
+      .sort((a, b) => a.explodeAtTick - b.explodeAtTick)[0];
+
+    if (!dueBomb) return;
+
+    match.bombs.delete(dueBomb.id);
+
+    const impacts = collectExplosionImpacts(match, dueBomb.x, dueBomb.y, dueBomb.range);
+    const destroyedTiles: Array<{ x: number; y: number }> = [];
+
+    for (const impact of impacts) {
+      const idx = impact.y * match.world.gridW + impact.x;
+      const tile = match.world.tiles[idx] ?? 1;
+      if (tile === 2) {
+        match.world.tiles[idx] = 0;
+        destroyedTiles.push({ x: impact.x, y: impact.y });
+      }
+    }
+
+    const explodeEventId = nextEventId(match);
+    events.push({
+      type: 'match:bomb_exploded',
+      roomCode: match.roomId,
+      matchId: match.matchId,
+      eventId: explodeEventId,
+      serverTick: match.tick,
+      tick: match.tick,
+      bombId: dueBomb.id,
+      x: dueBomb.x,
+      y: dueBomb.y,
+    });
+
+    if (destroyedTiles.length > 0) {
+      events.push({
+        type: 'match:tiles_destroyed',
+        roomCode: match.roomId,
+        matchId: match.matchId,
+        eventId: nextEventId(match),
+        serverTick: match.tick,
+        tick: match.tick,
+        tiles: destroyedTiles,
+      });
+    }
+
+    for (const player of match.players.values()) {
+      if (match.eliminatedPlayers.has(player.tgUserId)) continue;
+      const hit = impacts.some((impact) => impact.x === player.x && impact.y === player.y);
+      if (!hit) continue;
+
+      const nextLives = Math.max(0, (match.playerLives.get(player.tgUserId) ?? 0) - 1);
+      match.playerLives.set(player.tgUserId, nextLives);
+
+      events.push({
+        type: 'match:player_damaged',
+        roomCode: match.roomId,
+        matchId: match.matchId,
+        eventId: nextEventId(match),
+        serverTick: match.tick,
+        tick: match.tick,
+        tgUserId: player.tgUserId,
+        lives: nextLives,
+      });
+
+      if (nextLives <= 0) {
+        match.eliminatedPlayers.add(player.tgUserId);
+        events.push({
+          type: 'match:player_eliminated',
+          roomCode: match.roomId,
+          matchId: match.matchId,
+          eventId: nextEventId(match),
+          serverTick: match.tick,
+          tick: match.tick,
+          tgUserId: player.tgUserId,
+        });
+      }
+    }
+  }
+}
+
+function maybeEndMatch(match: MatchState, events: MatchEvent[]): void {
+  const alive = Array.from(match.players.keys()).filter((tgUserId) => !match.eliminatedPlayers.has(tgUserId));
+  if (alive.length > 1) return;
+
+  match.ended = true;
+  events.push({
+    type: 'match:end',
+    roomCode: match.roomId,
+    matchId: match.matchId,
+    winnerTgUserId: alive[0] ?? null,
+    reason: alive.length === 1 ? 'winner' : 'all_eliminated',
+  });
+}
+
+function collectExplosionImpacts(match: MatchState, x: number, y: number, range: number): Array<{ x: number; y: number }> {
+  const impacts: Array<{ x: number; y: number }> = [{ x, y }];
+  const dirs: Array<{ dx: number; dy: number }> = [
+    { dx: 1, dy: 0 },
+    { dx: -1, dy: 0 },
+    { dx: 0, dy: 1 },
+    { dx: 0, dy: -1 },
+  ];
+
+  for (const { dx, dy } of dirs) {
+    for (let step = 1; step <= range; step += 1) {
+      const nx = x + dx * step;
+      const ny = y + dy * step;
+      if (nx < 0 || ny < 0 || nx >= match.world.gridW || ny >= match.world.gridH) break;
+      const idx = ny * match.world.gridW + nx;
+      const tile = match.world.tiles[idx] ?? 1;
+      if (tile === 1) break;
+      impacts.push({ x: nx, y: ny });
+      if (tile === 2) break;
+    }
+  }
+
+  return impacts;
+}
 
 function canOccupyWorldCell(match: MatchState, x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= match.world.gridW || y >= match.world.gridH) {
@@ -65,7 +252,7 @@ function canOccupyWorldCell(match: MatchState, x: number, y: number): boolean {
   return tile === 0;
 }
 
-function applyInput(match: MatchState, tgUserId: string, seq: number, payload: MatchInputPayload) {
+function applyInput(match: MatchState, tgUserId: string, seq: number, payload: { kind: 'move'; dir: 'up' | 'down' | 'left' | 'right' } | { kind: 'bomb_place'; x: number; y: number }) {
   const p = match.players.get(tgUserId);
   if (!p) return;
 
@@ -80,7 +267,6 @@ function applyInput(match: MatchState, tgUserId: string, seq: number, payload: M
       case 'right': nx += 1; break;
     }
 
-    // Clamp to world bounds
     nx = clamp(nx, 0, match.world.gridW - 1);
     ny = clamp(ny, 0, match.world.gridH - 1);
 
@@ -92,7 +278,15 @@ function applyInput(match: MatchState, tgUserId: string, seq: number, payload: M
     p.x = nx;
     p.y = ny;
     p.lastInputSeq = seq;
+    return;
   }
+
+  p.lastInputSeq = seq;
+}
+
+function nextEventId(match: MatchState): string {
+  match.eventSeq += 1;
+  return `${match.matchId}_${match.eventSeq}`;
 }
 
 function clamp(v: number, min: number, max: number) {

@@ -65,9 +65,16 @@ export function createMatch(roomId: string, players: string[]): MatchState {
     tick: 0,
     world: { gridW, gridH, tiles: worldTiles, worldHash },
     players: new Map<string, PlayerState>(),
+    playerLives: new Map<string, number>(),
+    eliminatedPlayers: new Set<string>(),
+    bombs: new Map(),
+    maxBombsPerPlayer: 1,
+    bombFuseTicks: 40,
+    bombRange: 2,
     eventSeq: 0,
     seenEventIds: [],
     inputQueue: [],
+    ended: false,
   };
 
   // Deterministic spawns by join order: spread along top row
@@ -84,6 +91,7 @@ export function createMatch(roomId: string, players: string[]): MatchState {
       x,
       y,
     });
+    state.playerLives.set(tgUserId, 3);
   });
 
   matches.set(matchId, state);

@@ -3,11 +3,13 @@ export type ProtocolVersion = 'match_v1';
 export type MoveDir = 'up' | 'down' | 'left' | 'right';
 
 export type MatchInputPayload =
-  | { kind: 'move'; dir: MoveDir };
+  | { kind: 'move'; dir: MoveDir }
+  | { kind: 'bomb_place'; x: number; y: number };
 
 export type MatchClientMessage =
   | { type: 'match:start' }
-  | { type: 'match:input'; seq: number; payload: MatchInputPayload };
+  | { type: 'match:input'; seq: number; payload: MatchInputPayload }
+  | { type: 'match:bomb_place'; payload: { x: number; y: number } };
 
 export type MatchWorldState = {
   gridW: number;
@@ -32,8 +34,8 @@ export type BombSnapshot = {
   explodeAtTick?: number;
 };
 
-export type MatchBombPlaced = {
-  type: 'match:bomb_placed';
+export type MatchBombSpawned = {
+  type: 'match:bomb_spawned';
   roomCode: string;
   matchId: string;
   eventId: string;
@@ -52,10 +54,48 @@ export type MatchBombExploded = {
   bombId: string;
   x: number;
   y: number;
-  tilesDestroyed?: Array<{ x: number; y: number }>;
 };
 
-export type MatchBombPlacedEvent = MatchBombPlaced;
+export type MatchTilesDestroyed = {
+  type: 'match:tiles_destroyed';
+  roomCode: string;
+  matchId: string;
+  eventId: string;
+  serverTick: number;
+  tick: number;
+  tiles: Array<{ x: number; y: number }>;
+};
+
+export type MatchPlayerDamaged = {
+  type: 'match:player_damaged';
+  roomCode: string;
+  matchId: string;
+  eventId: string;
+  serverTick: number;
+  tick: number;
+  tgUserId: string;
+  lives: number;
+};
+
+export type MatchPlayerEliminated = {
+  type: 'match:player_eliminated';
+  roomCode: string;
+  matchId: string;
+  eventId: string;
+  serverTick: number;
+  tick: number;
+  tgUserId: string;
+};
+
+export type MatchEnd = {
+  type: 'match:end';
+  roomCode: string;
+  matchId: string;
+  winnerTgUserId: string | null;
+  reason: 'winner' | 'all_eliminated';
+};
+
+export type MatchBombPlacedEvent = MatchBombSpawned;
 export type MatchBombExplodedEvent = MatchBombExploded;
 
 export type MatchSnapshot = {
@@ -78,6 +118,8 @@ export type MatchSnapshot = {
     lastInputSeq: number;
     x: number;
     y: number;
+    lives?: number;
+    eliminated?: boolean;
   }>;
 };
 
@@ -86,7 +128,11 @@ export type MatchSnapshotV1 = MatchSnapshot;
 export type MatchServerMessage =
   | { type: 'match:started'; roomCode: string; matchId: string }
   | MatchWorldInit
-  | MatchBombPlaced
+  | MatchBombSpawned
   | MatchBombExploded
+  | MatchTilesDestroyed
+  | MatchPlayerDamaged
+  | MatchPlayerEliminated
+  | MatchEnd
   | { type: 'match:snapshot'; snapshot: MatchSnapshot }
   | { type: 'match:error'; error: string };

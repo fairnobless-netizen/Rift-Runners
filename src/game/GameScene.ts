@@ -459,9 +459,11 @@ export class GameScene extends Phaser.Scene {
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
     this.consumeMovementIntent(time);
-    this.tryPlaceBomb(time);
-    this.tryRemoteDetonate(time);
-    this.processBombTimers(time);
+    if (this.gameMode !== 'multiplayer') {
+      this.tryPlaceBomb(time);
+      this.tryRemoteDetonate(time);
+      this.processBombTimers(time);
+    }
     this.cleanupExpiredFlames(time);
     this.tickEnemies(time);
     this.bossController.update(time);
@@ -2433,6 +2435,49 @@ export class GameScene extends Phaser.Scene {
     this.invalidPosDrops = 0;
 
     return true;
+  }
+
+
+
+  public applyAuthoritativeBombSpawned(payload: { bomb: { id: string; x: number; y: number; ownerId?: string; tickPlaced?: number; explodeAtTick?: number } }): void {
+    const { bomb } = payload;
+    this.arena.bombs.set(bomb.id, {
+      key: bomb.id,
+      x: bomb.x,
+      y: bomb.y,
+      range: this.stats.range,
+      ownerId: bomb.ownerId ?? 'remote',
+      detonateAt: this.time.now + GAME_CONFIG.bombFuseMs,
+      escapedByOwner: false,
+    });
+  }
+
+  public applyAuthoritativeBombExploded(payload: { bombId: string; x: number; y: number }): void {
+    this.arena.bombs.delete(payload.bombId);
+    this.spawnFlame(payload.x, payload.y, this.time.now + GAME_CONFIG.flameLifetimeMs, 'center');
+  }
+
+  public applyAuthoritativeTilesDestroyed(payload: { tiles: Array<{ x: number; y: number }> }): void {
+    for (const tile of payload.tiles) {
+      if (!isInsideArena(this.arena, tile.x, tile.y)) continue;
+      destroyBreakable(this.arena, tile.x, tile.y);
+      this.destroyBreakableSprite(tile.x, tile.y);
+    }
+  }
+
+  public applyAuthoritativePlayerDamaged(payload: { tgUserId: string; lives: number }, localTgUserId?: string): void {
+    if (payload.tgUserId !== localTgUserId) return;
+    this.lives = Math.max(0, payload.lives);
+    this.stats.lives = this.lives;
+    this.emitLifeState();
+    emitStats(this.stats);
+  }
+
+  public applyAuthoritativePlayerEliminated(payload: { tgUserId: string }, localTgUserId?: string): void {
+    if (payload.tgUserId !== localTgUserId) return;
+    this.multiplayerEliminated = true;
+    this.playerSprite?.setVisible(false);
+    this.emitLifeState();
   }
 
   public setAudioSettings(next: SceneAudioSettings): void {

@@ -247,7 +247,7 @@ export function useWsClient(token?: string) {
           }
         }
 
-        if (msg.type === 'match:bomb_placed' || msg.type === 'match:bomb_exploded') {
+        if (msg.type === 'match:bomb_spawned' || msg.type === 'match:bomb_exploded') {
           const eventId = typeof msg.eventId === 'string' ? msg.eventId : '';
           const serverTick = Number.isFinite(msg.serverTick) ? msg.serverTick : -1;
 

@@ -28,7 +28,7 @@ import {
 } from '../game/campaign';
 
 import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../game/types';
-import type { MatchServerMessage, MatchWorldInit } from '@shared/protocol';
+import type { MatchServerMessage } from '@shared/protocol';
 import {
   buyShopSku,
   claimReferral,
@@ -120,11 +120,16 @@ type NicknameCheckState =
   | 'auth_required'
   | 'server_error';
 
+type MatchWorldInitMessage = Extract<
+  MatchServerMessage,
+  { type: 'match:world_init' }
+>;
+
 function isMatchServerMessage(message: { type: string }): message is MatchServerMessage {
   return message.type.startsWith('match:');
 }
 
-function isMatchWorldInit(message: { type: string }): message is MatchWorldInit {
+function isMatchWorldInit(message: { type: string }): message is MatchWorldInitMessage {
   return isMatchServerMessage(message) && message.type === 'match:world_init';
 }
 
@@ -238,6 +243,7 @@ export default function GameView(): JSX.Element {
   const joystickPadRef = useRef<HTMLDivElement | null>(null);
   const joystickPointerIdRef = useRef<number | null>(null);
   const hudLivesRef = useRef<HTMLSpanElement | null>(null);
+  const handledMatchEventIdsRef = useRef<Set<string>>(new Set());
   const bombBtnRef = useRef<HTMLButtonElement | null>(null);
   const detonateBtnRef = useRef<HTMLButtonElement | null>(null);
   const multiplayerBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -1018,6 +1024,7 @@ export default function GameView(): JSX.Element {
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
       setCurrentMatchId(null);
+      handledMatchEventIdsRef.current.clear();
     }
   }, [currentRoom?.roomCode]);
 
@@ -1038,6 +1045,7 @@ export default function GameView(): JSX.Element {
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
     setCurrentMatchId(null);
+    handledMatchEventIdsRef.current.clear();
   }, [currentRoom?.roomCode]);
 
   useEffect(() => {
@@ -1047,6 +1055,7 @@ export default function GameView(): JSX.Element {
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
       setCurrentMatchId(null);
+      handledMatchEventIdsRef.current.clear();
       sceneRef.current?.resetMultiplayerNetState();
     }
   }, [ws.connected]);
@@ -1057,7 +1066,7 @@ export default function GameView(): JSX.Element {
     if (!lastStarted || lastStarted.type !== 'match:started') return;
 
     const expectedRoomCode = expectedRoomCodeRef.current;
-    const gotRoomCode = (lastStarted as any).roomCode ?? null;
+    const gotRoomCode = lastStarted.roomCode ?? null;
     const gotMatchId = lastStarted.matchId ?? null;
     if (!expectedRoomCode) {
       diagnosticsStore.log('ROOM', 'WARN', 'match:started:drop_no_room_context', {
@@ -1163,11 +1172,8 @@ export default function GameView(): JSX.Element {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    const { gridW, gridH, tiles } = lastWorldInit.world;
-    scene.applyMatchWorldInit({
-      ...lastWorldInit,
-      world: { ...lastWorldInit.world, gridW, gridH, tiles },
-    });
+    scene.applyMatchWorldInit(lastWorldInit);
+    const { gridW, gridH } = lastWorldInit.world;
     worldReadyRef.current = true;
     diagnosticsStore.log('ROOM', 'INFO', 'world_init:accepted', {
       roomCode: gotRoomCode,
@@ -1179,8 +1185,8 @@ export default function GameView(): JSX.Element {
 
 
   useEffect(() => {
-    const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
-    if (!last?.snapshot) return;
+    const last = [...ws.messages].reverse().find((m): m is Extract<MatchServerMessage, { type: 'match:snapshot' }> => m.type === 'match:snapshot');
+    if (!last) return;
 
     const snapshot = last.snapshot;
     const expectedRoomCode = expectedRoomCodeRef.current;
@@ -1247,6 +1253,51 @@ export default function GameView(): JSX.Element {
       }
     }
   }, [ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode]);
+
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    const matchMessages = ws.messages.filter(isMatchServerMessage);
+    for (const message of matchMessages) {
+      if ('eventId' in message && typeof message.eventId === 'string') {
+        if (handledMatchEventIdsRef.current.has(message.eventId)) {
+          continue;
+        }
+        handledMatchEventIdsRef.current.add(message.eventId);
+      }
+
+      if (message.type === 'match:bomb_spawned') {
+        scene.applyAuthoritativeBombSpawned(message);
+        continue;
+      }
+
+      if (message.type === 'match:bomb_exploded') {
+        scene.applyAuthoritativeBombExploded(message);
+        continue;
+      }
+
+      if (message.type === 'match:tiles_destroyed') {
+        scene.applyAuthoritativeTilesDestroyed(message);
+        continue;
+      }
+
+      if (message.type === 'match:player_damaged') {
+        scene.applyAuthoritativePlayerDamaged(message, localTgUserId);
+        continue;
+      }
+
+      if (message.type === 'match:player_eliminated') {
+        scene.applyAuthoritativePlayerEliminated(message, localTgUserId);
+        continue;
+      }
+
+      if (message.type === 'match:end') {
+        setRoomsError(message.winnerTgUserId ? `Match ended. Winner: ${message.winnerTgUserId}` : 'Match ended. No winner.');
+      }
+    }
+  }, [ws.messages, localTgUserId]);
 
   useEffect(() => {
     sceneRef.current?.setNetRtt(ws.rttMs ?? null, ws.rttJitterMs ?? 0);
@@ -1414,6 +1465,15 @@ export default function GameView(): JSX.Element {
     }
 
     setBombGateReason(null);
+
+    if (isMultiplayerMode) {
+      const position = sceneRef.current?.getLocalPlayerPosition();
+      if (position) {
+        ws.send({ type: 'match:bomb_place', payload: { x: position.x, y: position.y } });
+      }
+      return;
+    }
+
     controlsRef.current.placeBombRequested = true;
   };
 
