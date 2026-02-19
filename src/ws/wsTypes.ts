@@ -1,5 +1,7 @@
 export type {
   MoveDir,
+  MatchBombExplodedEvent,
+  MatchBombPlacedEvent,
   MatchInputPayload,
   MatchClientMessage,
   MatchServerMessage,
