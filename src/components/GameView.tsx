@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type FormEvent } from 'react';
+import type { MatchServerMessage } from '@shared/protocol';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
@@ -120,6 +121,18 @@ type NicknameCheckState =
   | 'server_error';
 
 const DEBUG_NICK = false;
+
+type MatchBombPlacedMessage = Extract<MatchServerMessage, { type: 'match:bomb_placed' }>;
+type MatchBombExplodedMessage = Extract<MatchServerMessage, { type: 'match:bomb_exploded' }>;
+type MatchEndedMessage = Extract<MatchServerMessage, { type: 'match:ended' }>;
+type MatchWorldInitMessage = Extract<MatchServerMessage, { type: 'match:world_init' }>;
+type MatchSnapshotMessage = Extract<MatchServerMessage, { type: 'match:snapshot' }>;
+
+const isMatchBombPlaced = (m: MatchServerMessage): m is MatchBombPlacedMessage => m.type === 'match:bomb_placed';
+const isMatchBombExploded = (m: MatchServerMessage): m is MatchBombExplodedMessage => m.type === 'match:bomb_exploded';
+const isMatchEnded = (m: MatchServerMessage): m is MatchEndedMessage => m.type === 'match:ended';
+const isMatchWorldInit = (m: MatchServerMessage): m is MatchWorldInitMessage => m.type === 'match:world_init';
+const isMatchSnapshot = (m: MatchServerMessage): m is MatchSnapshotMessage => m.type === 'match:snapshot';
 
 type TutorialStep = {
   id: string;
@@ -278,6 +291,7 @@ export default function GameView(): JSX.Element {
   const [predictionStats, setPredictionStats] = useState<PredictionStats | null>(null);
   const [tickDebugStats, setTickDebugStats] = useState<WsDebugMetrics | null>(null);
   const [bombGateReason, setBombGateReason] = useState<string | null>('phase_not_started');
+  const [multiplayerMatchEnded, setMultiplayerMatchEnded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'audio' | 'account'>('audio');
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
@@ -1113,7 +1127,7 @@ export default function GameView(): JSX.Element {
   }, [currentRoomMembers.length]);
 
   useEffect(() => {
-    const lastWorldInit = [...ws.messages].reverse().find((message) => message.type === 'match:world_init') as any;
+    const lastWorldInit = [...ws.messages as MatchServerMessage[]].reverse().find(isMatchWorldInit);
     if (!lastWorldInit?.world || !lastWorldInit?.matchId) return;
 
     const expectedRoomCode = expectedRoomCodeRef.current;
@@ -1159,16 +1173,15 @@ export default function GameView(): JSX.Element {
     diagnosticsStore.log('ROOM', 'INFO', 'world_init:accepted', {
       roomCode: gotRoomCode,
       matchId: gotMatchId,
-      levelIndex: lastWorldInit.levelIndex ?? null,
     });
   }, [ws.messages]);
 
 
   useEffect(() => {
-    const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
-    if (!last?.snapshot) return;
+    const lastSnapshot = [...ws.messages as MatchServerMessage[]].reverse().find(isMatchSnapshot);
+    if (!lastSnapshot?.snapshot) return;
 
-    const snapshot = last.snapshot;
+    const snapshot = lastSnapshot.snapshot;
     const expectedRoomCode = expectedRoomCodeRef.current;
     const expectedMatchId = expectedMatchIdRef.current;
     if (!expectedRoomCode) {
@@ -1233,6 +1246,45 @@ export default function GameView(): JSX.Element {
       }
     }
   }, [ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode]);
+
+  useEffect(() => {
+    const lastBombPlaced = [...ws.messages as MatchServerMessage[]].reverse().find(isMatchBombPlaced);
+    if (!lastBombPlaced) return;
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    if (!expectedRoomCode || !expectedMatchId) return;
+    if (lastBombPlaced.roomCode !== expectedRoomCode || lastBombPlaced.matchId !== expectedMatchId) return;
+    if (!worldReadyRef.current) return;
+
+    sceneRef.current?.onBombPlaced(lastBombPlaced);
+  }, [ws.messages]);
+
+  useEffect(() => {
+    const lastBombExploded = [...ws.messages as MatchServerMessage[]].reverse().find(isMatchBombExploded);
+    if (!lastBombExploded) return;
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    if (!expectedRoomCode || !expectedMatchId) return;
+    if (lastBombExploded.roomCode !== expectedRoomCode || lastBombExploded.matchId !== expectedMatchId) return;
+    if (!worldReadyRef.current) return;
+
+    sceneRef.current?.onBombExploded(lastBombExploded);
+  }, [ws.messages]);
+
+  useEffect(() => {
+    const lastMatchEnded = [...ws.messages as MatchServerMessage[]].reverse().find(isMatchEnded);
+    if (!lastMatchEnded) return;
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    if (!expectedRoomCode || !expectedMatchId) return;
+    if (lastMatchEnded.roomCode !== expectedRoomCode || lastMatchEnded.matchId !== expectedMatchId) return;
+
+    sceneRef.current?.onMatchEnded(lastMatchEnded);
+    setMultiplayerMatchEnded(true);
+  }, [ws.messages]);
 
   useEffect(() => {
     sceneRef.current?.setNetRtt(ws.rttMs ?? null, ws.rttJitterMs ?? 0);
@@ -1400,6 +1452,13 @@ export default function GameView(): JSX.Element {
     }
 
     setBombGateReason(null);
+    if (isMultiplayerMode) {
+      const seq = inputSeqRef.current + 1;
+      inputSeqRef.current = seq;
+      ws.send({ type: 'match:input', seq, payload: { kind: 'place_bomb' } });
+      return;
+    }
+
     controlsRef.current.placeBombRequested = true;
   };
 
@@ -1634,6 +1693,7 @@ export default function GameView(): JSX.Element {
       setCurrentRoom(result.room);
       setCurrentRoomMembers(result.members);
       setCurrentMatchId(null);
+      setMultiplayerMatchEnded(false);
       ws.send({ type: 'match:start' });
       if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'onStartRoom:success', { roomCode: result.room.roomCode });
     } finally {
@@ -2266,6 +2326,21 @@ export default function GameView(): JSX.Element {
             <strong>Continue?</strong>
             <p>Вы потеряли жизнь. Нажмите Continue для респауна.</p>
             <button type="button" onClick={() => sceneRef.current?.continueSoloRun()}>Continue</button>
+          </div>
+        </div>
+      )}
+      {gameFlowPhase === 'playing' && isMultiplayerMode && multiplayerMatchEnded && (
+        <div className="waiting-overlay" role="dialog" aria-modal="true" aria-label="Match ended overlay">
+          <div className="waiting-overlay__card">
+            <strong>GAME OVER</strong>
+            {isRoomOwner ? (
+              <>
+                <p>Матч завершён. Хост может перезапустить матч.</p>
+                <button type="button" onClick={() => onStartRoom()}>Restart</button>
+              </>
+            ) : (
+              <p>Waiting for host…</p>
+            )}
           </div>
         </div>
       )}

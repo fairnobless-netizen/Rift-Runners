@@ -3,7 +3,8 @@ export type ProtocolVersion = 'match_v1';
 export type MoveDir = 'up' | 'down' | 'left' | 'right';
 
 export type MatchInputPayload =
-  | { kind: 'move'; dir: MoveDir };
+  | { kind: 'move'; dir: MoveDir }
+  | { kind: 'place_bomb' };
 
 export type MatchClientMessage =
   | { type: 'match:start' }
@@ -53,6 +54,16 @@ export type MatchBombExploded = {
   x: number;
   y: number;
   tilesDestroyed?: Array<{ x: number; y: number }>;
+  blastCells?: Array<{ x: number; y: number }>;
+  damageApplied?: Array<{ tgUserId: string; newLives: number; eliminated: boolean }>;
+};
+
+export type MatchEnded = {
+  type: 'match:ended';
+  roomCode: string;
+  matchId: string;
+  reason: 'all_eliminated' | 'host_restart' | 'server_stop';
+  winnerTgUserId?: string;
 };
 
 export type MatchBombPlacedEvent = MatchBombPlaced;
@@ -78,6 +89,8 @@ export type MatchSnapshot = {
     lastInputSeq: number;
     x: number;
     y: number;
+    lives: number;
+    eliminated: boolean;
   }>;
 };
 
@@ -88,5 +101,6 @@ export type MatchServerMessage =
   | MatchWorldInit
   | MatchBombPlaced
   | MatchBombExploded
+  | MatchEnded
   | { type: 'match:snapshot'; snapshot: MatchSnapshot }
   | { type: 'match:error'; error: string };

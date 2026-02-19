@@ -406,6 +406,8 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
           type: 'match:snapshot',
           snapshot,
         });
+      }, (msg) => {
+        broadcastToRoomMatch(room.roomId, match.matchId, msg);
       });
 
       return;
@@ -462,6 +464,12 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         const dir = payload.dir;
         if (dir !== 'up' && dir !== 'down' && dir !== 'left' && dir !== 'right') return;
 
+        match.inputQueue.push({
+          tgUserId: ctx.tgUserId,
+          seq,
+          payload,
+        });
+      } else if (payload.kind === 'place_bomb') {
         match.inputQueue.push({
           tgUserId: ctx.tgUserId,
           seq,
