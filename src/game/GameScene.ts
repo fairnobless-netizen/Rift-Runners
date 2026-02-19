@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { RemotePlayersRenderer } from './RemotePlayersRenderer';
 import { LocalPredictionController } from './LocalPredictionController';
-import type { MatchSnapshotV1 } from '../ws/wsTypes';
+import type { MatchBombExplodedEvent, MatchBombPlacedEvent, MatchSnapshotV1 } from '../ws/wsTypes';
 import {
   canOccupyCell,
   createArena,
@@ -142,6 +142,13 @@ export class GameScene extends Phaser.Scene {
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
   private needsNetResync = false;
+  private serverTick = -1;
+  private lastEventTick = -1;
+  private eventsDroppedDup = 0;
+  private seenEventIds = new Set<string>();
+  private seenEventQueue: string[] = [];
+  private readonly MAX_SEEN_EVENT_IDS = 256;
+  private lastNetResyncRequestAtMs = 0;
   private lastInvalidPosWarnAtMs = 0;
   private lastInvalidPosWarnKey: string | null = null;
   private readonly SNAPSHOT_BUFFER_SIZE = 10;
@@ -2200,6 +2207,71 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private markEventSeen(eventId: string): void {
+    if (this.seenEventIds.has(eventId)) {
+      return;
+    }
+
+    this.seenEventIds.add(eventId);
+    this.seenEventQueue.push(eventId);
+    if (this.seenEventQueue.length > this.MAX_SEEN_EVENT_IDS) {
+      const oldest = this.seenEventQueue.shift();
+      if (oldest) {
+        this.seenEventIds.delete(oldest);
+      }
+    }
+  }
+
+  private requestNetResync(reason: string): void {
+    this.needsNetResync = true;
+
+    const now = Date.now();
+    if (now - this.lastNetResyncRequestAtMs < 3000) {
+      return;
+    }
+
+    this.lastNetResyncRequestAtMs = now;
+    console.warn('[MP] net_resync_requested', {
+      reason,
+      roomCode: this.currentRoomCode,
+      matchId: this.currentMatchId,
+      serverTick: this.serverTick,
+      snapshotTick: this.lastSnapshotTick,
+      lastEventTick: this.lastEventTick,
+      worldHashServer: this.worldHashServer,
+      worldHashClient: this.worldHashClient,
+    });
+  }
+
+  public applyMatchBombEvent(event: MatchBombPlacedEvent | MatchBombExplodedEvent): boolean {
+    if (this.currentRoomCode && event.roomCode !== this.currentRoomCode) {
+      this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    if (this.currentMatchId && event.matchId !== this.currentMatchId) {
+      this.droppedWrongRoom += 1;
+      return false;
+    }
+
+    if (typeof event.eventId !== 'string' || event.eventId.length === 0) {
+      return false;
+    }
+
+    if (this.seenEventIds.has(event.eventId)) {
+      this.eventsDroppedDup += 1;
+      return false;
+    }
+
+    if (typeof event.serverTick === 'number' && Number.isFinite(event.serverTick)) {
+      this.serverTick = Math.max(this.serverTick, event.serverTick);
+      this.lastEventTick = Math.max(this.lastEventTick, event.serverTick);
+    }
+
+    this.markEventSeen(event.eventId);
+    return true;
+  }
+
   public resetMultiplayerNetState(): void {
     this.needsNetResync = true;
     this.lastSnapshotTick = -1;
@@ -2212,6 +2284,12 @@ export class GameScene extends Phaser.Scene {
     this.worldReady = false;
     this.worldHashServer = null;
     this.worldHashClient = null;
+    this.serverTick = -1;
+    this.lastEventTick = -1;
+    this.eventsDroppedDup = 0;
+    this.seenEventIds.clear();
+    this.seenEventQueue = [];
+    this.lastNetResyncRequestAtMs = 0;
   }
 
   public pushMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
@@ -2231,6 +2309,11 @@ export class GameScene extends Phaser.Scene {
 
     if (snapshot.tick <= this.lastSnapshotTick) return false;
 
+    if (snapshot.tick > this.lastEventTick) {
+      this.seenEventIds.clear();
+      this.seenEventQueue = [];
+    }
+
     if (localTgUserId) {
       this.localTgUserId = localTgUserId;
     }
@@ -2242,6 +2325,7 @@ export class GameScene extends Phaser.Scene {
     // Resync on first multiplayer snapshot to align timebase.
     if (shouldResync) {
       this.needsNetResync = false;
+      this.serverTick = Math.max(this.serverTick, snapshot.tick);
 
       this.simulationTick = snapshot.tick;
       this.accumulator = 0;
@@ -2257,8 +2341,17 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.lastSnapshotTick = snapshot.tick;
+    this.serverTick = Math.max(this.serverTick, snapshot.tick);
     this.matchGridW = snapshot.world?.gridW ?? this.matchGridW;
     this.matchGridH = snapshot.world?.gridH ?? this.matchGridH;
+
+    const snapshotWorldHash = snapshot.world?.worldHash ?? null;
+    if (snapshotWorldHash) {
+      this.worldHashServer = snapshotWorldHash;
+      if (this.worldHashClient && this.worldHashClient !== snapshotWorldHash) {
+        this.requestNetResync('snapshot_world_hash_mismatch');
+      }
+    }
 
     this.snapshotBuffer.push(snapshot);
     if (this.snapshotBuffer.length > this.SNAPSHOT_BUFFER_SIZE) {
@@ -2286,7 +2379,7 @@ export class GameScene extends Phaser.Scene {
 
     if (!isInsideArena(this.arena, me.x, me.y) || !canOccupyCell(this.arena, me.x, me.y)) {
       this.invalidPosDrops += 1;
-      this.needsNetResync = true;
+      this.requestNetResync('invalid_authoritative_position');
       this.warnInvalidAuthoritativePosition(snapshot, me, effectiveLocalId);
       return;
     }
@@ -2408,6 +2501,10 @@ export class GameScene extends Phaser.Scene {
     this.worldReady = true;
     this.invalidPosDrops = 0;
 
+    if (this.worldHashServer && this.worldHashClient && this.worldHashServer !== this.worldHashClient) {
+      this.requestNetResync('world_hash_mismatch');
+    }
+
     return true;
   }
 
@@ -2444,6 +2541,11 @@ export class GameScene extends Phaser.Scene {
     worldReady: boolean;
     worldHashServer: string | null;
     worldHashClient: string | null;
+    serverTick: number;
+    lastEventTick: number;
+    eventsBuffered: number;
+    eventsDroppedDup: number;
+    needsNetResync: boolean;
   } {
     return {
       droppedWrongRoom: this.droppedWrongRoom,
@@ -2454,6 +2556,11 @@ export class GameScene extends Phaser.Scene {
       worldReady: this.worldReady,
       worldHashServer: this.worldHashServer,
       worldHashClient: this.worldHashClient,
+      serverTick: this.serverTick,
+      lastEventTick: this.lastEventTick,
+      eventsBuffered: this.seenEventQueue.length,
+      eventsDroppedDup: this.eventsDroppedDup,
+      needsNetResync: this.needsNetResync,
     };
   }
 

@@ -37,6 +37,8 @@ export type MatchBombPlaced = {
   roomCode: string;
   matchId: string;
   tick: number;
+  serverTick: number;
+  eventId: string;
   bomb: BombSnapshot;
 };
 
@@ -45,9 +47,12 @@ export type MatchBombExploded = {
   roomCode: string;
   matchId: string;
   tick: number;
+  serverTick: number;
+  eventId: string;
   bombId: string;
   x: number;
   y: number;
+  tilesDestroyed?: Array<{ x: number; y: number }>;
 };
 
 export type MatchBombPlacedEvent = MatchBombPlaced;

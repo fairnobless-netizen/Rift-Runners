@@ -31,4 +31,13 @@ export type MatchState = {
   }>;
 
   interval?: NodeJS.Timeout;
+  outboundEvents: MatchBombEvent[];
+  emittedEventIds: Set<string>;
+};
+
+
+export type MatchBombEvent = {
+  type: 'match:bomb_placed' | 'match:bomb_exploded';
+  eventId: string;
+  serverTick: number;
 };

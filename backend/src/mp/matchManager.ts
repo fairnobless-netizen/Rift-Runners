@@ -66,6 +66,8 @@ export function createMatch(roomId: string, players: string[]): MatchState {
     world: { gridW, gridH, tiles: worldTiles, worldHash },
     players: new Map<string, PlayerState>(),
     inputQueue: [],
+    outboundEvents: [],
+    emittedEventIds: new Set<string>(),
   };
 
   // Deterministic spawns by join order: spread along top row

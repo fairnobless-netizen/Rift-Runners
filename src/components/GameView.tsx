@@ -201,6 +201,11 @@ function buildWsDebugMetrics(scene: GameScene): WsDebugMetrics {
     worldReady: routingStats.worldReady,
     worldHashServer: routingStats.worldHashServer,
     worldHashClient: routingStats.worldHashClient,
+    serverTick: routingStats.serverTick,
+    lastEventTick: routingStats.lastEventTick,
+    eventsBuffered: routingStats.eventsBuffered,
+    eventsDroppedDup: routingStats.eventsDroppedDup,
+    needsNetResync: routingStats.needsNetResync,
   };
 }
 
@@ -288,6 +293,7 @@ export default function GameView(): JSX.Element {
   const expectedRoomCodeRef = useRef<string | null>(null);
   const expectedMatchIdRef = useRef<string | null>(null);
   const worldReadyRef = useRef(false);
+  const firstSnapshotReceivedRef = useRef(false);
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
@@ -392,6 +398,8 @@ export default function GameView(): JSX.Element {
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
   const deathOverlayVisible = lifeState.awaitingContinue || lifeState.gameOver;
   const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay || deathOverlayVisible || lifeState.eliminated;
+  const canPlaceBomb = !isInteractionBlocked && (!isMultiplayerMode
+    || ((currentRoom?.phase ?? 'LOBBY') === 'STARTED' && worldReadyRef.current && firstSnapshotReceivedRef.current));
   const shellSizeRef = useRef<{ width: number; height: number }>({ width: window.innerWidth, height: window.innerHeight });
 
   useEffect(() => {
@@ -582,7 +590,7 @@ export default function GameView(): JSX.Element {
 
     // Multiplayer: translate joystick intent into match:input (server authoritative).
     // This ensures other clients see movement and prevents local-only drifting.
-    if (!isMultiplayerMode || !currentRoom || currentRoom.phase !== 'STARTED') {
+    if (!isMultiplayerMode || !currentRoom || currentRoom.phase !== 'STARTED' || !worldReadyRef.current || !firstSnapshotReceivedRef.current) {
       return;
     }
 
@@ -994,6 +1002,7 @@ export default function GameView(): JSX.Element {
     if (prevRoomCode !== nextRoomCode) {
       expectedMatchIdRef.current = null;
       worldReadyRef.current = false;
+      firstSnapshotReceivedRef.current = false;
       setCurrentMatchId(null);
     }
   }, [currentRoom?.roomCode]);
@@ -1013,6 +1022,7 @@ export default function GameView(): JSX.Element {
     if (currentRoom?.roomCode) return;
     wsJoinedRoomCodeRef.current = null;
     worldReadyRef.current = false;
+    firstSnapshotReceivedRef.current = false;
     setCurrentMatchId(null);
   }, [currentRoom?.roomCode]);
 
@@ -1021,6 +1031,7 @@ export default function GameView(): JSX.Element {
       wsJoinedRoomCodeRef.current = null;
       expectedMatchIdRef.current = null;
       worldReadyRef.current = false;
+      firstSnapshotReceivedRef.current = false;
       setCurrentMatchId(null);
       sceneRef.current?.resetMultiplayerNetState();
     }
@@ -1054,6 +1065,7 @@ export default function GameView(): JSX.Element {
 
     expectedMatchIdRef.current = lastStarted.matchId;
     worldReadyRef.current = false;
+    firstSnapshotReceivedRef.current = false;
     setCurrentMatchId(lastStarted.matchId);
     setCurrentRoom((prev) => {
       if (!prev || prev.roomCode !== expectedRoomCode) return prev;
@@ -1149,6 +1161,18 @@ export default function GameView(): JSX.Element {
 
 
   useEffect(() => {
+    const lastBombEvent = [...ws.messages].reverse().find(
+      (m) => m.type === 'match:bomb_placed' || m.type === 'match:bomb_exploded',
+    ) as any;
+    if (!lastBombEvent) return;
+
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    scene.applyMatchBombEvent(lastBombEvent);
+  }, [ws.messages]);
+
+  useEffect(() => {
     const last = [...ws.messages].reverse().find((m) => m.type === 'match:snapshot') as any;
     if (!last?.snapshot) return;
 
@@ -1203,6 +1227,7 @@ export default function GameView(): JSX.Element {
     if (!scene) return;
 
     scene.applyMatchSnapshot(snapshot, localTgUserId);
+    firstSnapshotReceivedRef.current = true;
 
     // If WS snapshots are flowing, match is live → ensure lobby overlay is gone for everyone.
     if (multiplayerUiOpen) {
@@ -1360,6 +1385,14 @@ export default function GameView(): JSX.Element {
 
   const requestBomb = (): void => {
     if (isInteractionBlocked) return;
+
+    if (isMultiplayerMode) {
+      const phase = currentRoom?.phase ?? 'LOBBY';
+      if (phase !== 'STARTED' || !worldReadyRef.current || !firstSnapshotReceivedRef.current) {
+        return;
+      }
+    }
+
     controlsRef.current.placeBombRequested = true;
   };
 
@@ -2415,6 +2448,7 @@ export default function GameView(): JSX.Element {
                   className="bomb-btn"
                   onTouchStart={requestBomb}
                   onMouseDown={requestBomb}
+                  disabled={!canPlaceBomb}
                 >
                   Bomb
                 </button>

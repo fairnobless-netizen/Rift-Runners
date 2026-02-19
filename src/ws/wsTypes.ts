@@ -8,7 +8,7 @@ export type {
   ProtocolVersion,
 } from '@shared/protocol';
 
-import type { MatchInputPayload, MatchSnapshotV1 } from '@shared/protocol';
+import type { MatchBombExplodedEvent, MatchBombPlacedEvent, MatchInputPayload, MatchSnapshotV1 } from '@shared/protocol';
 
 export type WsClientMessage =
   | { type: 'ping'; id: number; t: number }
@@ -26,6 +26,8 @@ export type WsServerMessage =
   | { type: 'room:left' }
   | { type: 'match:started'; matchId: string }
   | { type: 'match:world_init'; roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }
+  | MatchBombPlacedEvent
+  | MatchBombExplodedEvent
   | { type: 'match:snapshot'; snapshot: MatchSnapshotV1 }
   | { type: 'match:error'; error: string }
   | { type: 'error'; error: string };
@@ -70,4 +72,9 @@ export type WsDebugMetrics = {
   worldReady: boolean;
   worldHashServer: string | null;
   worldHashClient: string | null;
+  serverTick: number;
+  lastEventTick: number;
+  eventsBuffered: number;
+  eventsDroppedDup: number;
+  needsNetResync: boolean;
 };

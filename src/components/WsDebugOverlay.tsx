@@ -640,6 +640,12 @@ export function WsDebugOverlay({
             droppedWrongRoom: {tickDebugStats?.droppedWrongRoom ?? 0} | invalidPosDrops: {tickDebugStats?.invalidPosDrops ?? 0} | lastSnapshotRoom: {tickDebugStats?.lastSnapshotRoom ?? '—'}
           </div>
           <div>
+            serverTick: {tickDebugStats?.serverTick ?? '—'} | snapshotTick: {tickDebugStats?.snapshotTick ?? '—'} | lastEventTick: {tickDebugStats?.lastEventTick ?? '—'}
+          </div>
+          <div>
+            eventsBuffered: {tickDebugStats?.eventsBuffered ?? 0} | eventsDroppedDup: {tickDebugStats?.eventsDroppedDup ?? 0} | needsNetResync: {String(tickDebugStats?.needsNetResync ?? false)}
+          </div>
+          <div>
             worldReady: {tickDebugStats?.worldReady ? 'yes' : 'no'} | worldHashServer: {tickDebugStats?.worldHashServer ?? '—'} | worldHashClient: {tickDebugStats?.worldHashClient ?? '—'}
           </div>
 
