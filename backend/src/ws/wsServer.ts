@@ -6,7 +6,7 @@ import { startMatch, tryPlaceBomb } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 
 // ✅ add DB cleanup
-import { closeRoomTx, getRoomByCode, leaveRoomV2 } from '../db/repos';
+import { closeRoomTx, getRoomByCode, leaveRoomV2, setRoomPhase } from '../db/repos';
 
 type ClientCtx = {
   socket: WebSocket;
@@ -20,6 +20,13 @@ type RoomState = {
   roomId: string;
   players: Map<string, WebSocket>;
   matchId: string | null;
+};
+
+type RestartVoteState = {
+  active: boolean;
+  yes: Set<string>;
+  no: Set<string>;
+  expiresAt: number;
 };
 
 type RoomJoinMessage = {
@@ -41,6 +48,7 @@ type ServerMessage =
 
 const rooms = new Map<string, RoomState>();
 const clients = new Set<ClientCtx>();
+const restartVotes = new Map<string, RestartVoteState>();
 
 setInterval(() => {
   const now = Date.now();
@@ -122,6 +130,33 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
 
     send(client.socket, msg);
   }
+}
+
+function broadcastToRoom(roomId: string, msg: MatchServerMessage) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+
+  for (const client of clients) {
+    if (client.roomId !== roomId) continue;
+    if (!isSocketAttachedToRoom(client, room)) continue;
+    send(client.socket, msg);
+  }
+}
+
+function clearRestartVote(roomId: string): void {
+  restartVotes.delete(roomId);
+}
+
+function emitRestartVoteState(roomId: string): void {
+  const room = rooms.get(roomId);
+  const vote = restartVotes.get(roomId);
+  if (!room || !vote) return;
+  broadcastToRoom(roomId, {
+    type: 'room:restart_vote_state',
+    roomCode: roomId,
+    yesCount: vote.yes.size,
+    total: room.players.size,
+  });
 }
 
 function attachClientToRoom(ctx: ClientCtx, roomId: string) {
@@ -250,6 +285,15 @@ function detachClientFromRoom(ctx: ClientCtx) {
   if (room) {
     room.players.delete(ctx.tgUserId);
 
+    const vote = restartVotes.get(roomId);
+    if (vote) {
+      vote.yes.delete(ctx.tgUserId);
+      vote.no.delete(ctx.tgUserId);
+      if (room.players.size === 0) {
+        clearRestartVote(roomId);
+      }
+    }
+
     if (room.players.size === 0) {
       if (room.matchId) {
         endMatch(room.matchId);
@@ -355,6 +399,8 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
       const match = createMatch(room.roomId, players);
       room.matchId = match.matchId;
+      clearRestartVote(room.roomId);
+      await setRoomPhase(room.roomId, 'STARTED');
 
       for (const client of clients) {
         if (client.roomId === room.roomId && isSocketAttachedToRoom(client, room)) {
@@ -407,6 +453,11 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
           if (activeRoom.matchId !== event.matchId || event.roomCode !== activeRoom.roomId) {
             continue;
           }
+
+          if (event.type === 'match:end') {
+            void setRoomPhase(activeRoom.roomId, 'FINISHED');
+          }
+
           broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
         }
 
@@ -510,6 +561,162 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       }
 
       broadcastToRoomMatch(room.roomId, match.matchId, spawned);
+      return;
+    }
+
+    case 'room:restart_propose': {
+      if (!ctx.roomId) {
+        return;
+      }
+
+      const room = getRoom(ctx.roomId);
+      if (!room || !isSocketAttachedToRoom(ctx, room)) {
+        return;
+      }
+
+      const dbRoom = await getRoomByCode(ctx.roomId);
+      if (!dbRoom || String(dbRoom.ownerTgUserId) !== String(ctx.tgUserId)) {
+        return send(ctx.socket, { type: 'match:error', error: 'not_room_owner' });
+      }
+
+      if (String(dbRoom.phase ?? 'LOBBY') !== 'FINISHED') {
+        return send(ctx.socket, { type: 'match:error', error: 'restart_phase_invalid' });
+      }
+
+      const expiresAt = Date.now() + 20_000;
+      restartVotes.set(room.roomId, {
+        active: true,
+        yes: new Set([ctx.tgUserId]),
+        no: new Set(),
+        expiresAt,
+      });
+
+      broadcastToRoom(room.roomId, {
+        type: 'room:restart_proposed',
+        roomCode: room.roomId,
+        byTgUserId: ctx.tgUserId,
+        expiresAt,
+      });
+      emitRestartVoteState(room.roomId);
+
+      setTimeout(() => {
+        const vote = restartVotes.get(room.roomId);
+        if (!vote || vote.expiresAt !== expiresAt || !vote.active) return;
+        clearRestartVote(room.roomId);
+        broadcastToRoom(room.roomId, {
+          type: 'room:restart_cancelled',
+          roomCode: room.roomId,
+          reason: 'timeout',
+        });
+      }, 20_100);
+      return;
+    }
+
+    case 'room:restart_vote': {
+      if (!ctx.roomId) {
+        return;
+      }
+
+      const room = getRoom(ctx.roomId);
+      if (!room || !isSocketAttachedToRoom(ctx, room)) {
+        return;
+      }
+
+      const vote = restartVotes.get(room.roomId);
+      if (!vote || !vote.active) {
+        return;
+      }
+
+      if (Date.now() > vote.expiresAt) {
+        clearRestartVote(room.roomId);
+        broadcastToRoom(room.roomId, {
+          type: 'room:restart_cancelled',
+          roomCode: room.roomId,
+          reason: 'timeout',
+        });
+        return;
+      }
+
+      if (msg.vote === 'no') {
+        vote.no.add(ctx.tgUserId);
+        vote.yes.delete(ctx.tgUserId);
+        clearRestartVote(room.roomId);
+        broadcastToRoom(room.roomId, {
+          type: 'room:restart_cancelled',
+          roomCode: room.roomId,
+          reason: 'no_vote',
+        });
+        return;
+      }
+
+      vote.yes.add(ctx.tgUserId);
+      vote.no.delete(ctx.tgUserId);
+      emitRestartVoteState(room.roomId);
+
+      if (vote.yes.size < room.players.size) {
+        return;
+      }
+
+      clearRestartVote(room.roomId);
+      broadcastToRoom(room.roomId, {
+        type: 'room:restart_accepted',
+        roomCode: room.roomId,
+      });
+
+      await setRoomPhase(room.roomId, 'STARTED');
+
+      const players = Array.from(room.players.keys());
+      const match = createMatch(room.roomId, players);
+      room.matchId = match.matchId;
+
+      for (const client of clients) {
+        if (client.roomId === room.roomId && isSocketAttachedToRoom(client, room)) {
+          client.matchId = match.matchId;
+        }
+      }
+
+      broadcastToRoomMatch(room.roomId, match.matchId, {
+        type: 'match:started',
+        roomCode: room.roomId,
+        matchId: match.matchId,
+      });
+
+      broadcastToRoomMatch(room.roomId, match.matchId, {
+        type: 'match:world_init',
+        roomCode: room.roomId,
+        matchId: match.matchId,
+        world: {
+          gridW: match.world.gridW,
+          gridH: match.world.gridH,
+          tiles: [...match.world.tiles],
+          worldHash: match.world.worldHash,
+        },
+      });
+
+      startMatch(match, (snapshot, events) => {
+        const activeRoom = rooms.get(room.roomId);
+        if (!activeRoom) {
+          endMatch(match.matchId);
+          return;
+        }
+
+        if (activeRoom.matchId !== snapshot.matchId) {
+          return;
+        }
+
+        for (const event of events) {
+          if (event.type === 'match:end') {
+            void setRoomPhase(activeRoom.roomId, 'FINISHED');
+          }
+          broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
+        }
+
+        broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, {
+          type: 'match:snapshot',
+          snapshot,
+        });
+      });
+
       return;
     }
 

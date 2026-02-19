@@ -2473,6 +2473,14 @@ export class GameScene extends Phaser.Scene {
     emitStats(this.stats);
   }
 
+  public applyAuthoritativePlayerRespawned(payload: { tgUserId: string; x: number; y: number }, localTgUserId?: string): void {
+    if (payload.tgUserId !== localTgUserId) return;
+    this.multiplayerEliminated = false;
+    this.setLocalPlayerPosition(payload.x, payload.y);
+    this.playerSprite?.setVisible(true);
+    this.emitLifeState();
+  }
+
   public applyAuthoritativePlayerEliminated(payload: { tgUserId: string }, localTgUserId?: string): void {
     if (payload.tgUserId !== localTgUserId) return;
     this.multiplayerEliminated = true;
