@@ -1,7 +1,5 @@
 export type {
   MoveDir,
-  MatchBombExplodedEvent,
-  MatchBombPlacedEvent,
   MatchInputPayload,
   MatchClientMessage,
   MatchServerMessage,
@@ -9,6 +7,8 @@ export type {
   MatchSnapshotV1,
   ProtocolVersion,
 } from '@shared/protocol';
+
+export type { MatchBombPlacedEvent, MatchBombExplodedEvent } from '@shared/protocol';
 
 import type { MatchInputPayload, MatchSnapshotV1 } from '@shared/protocol';
 
