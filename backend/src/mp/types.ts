@@ -24,6 +24,9 @@ export type MatchState = {
 
   players: Map<string, PlayerState>;
 
+  eventSeq: number;
+  seenEventIds: string[];
+
   inputQueue: Array<{
     tgUserId: string;
     seq: number;

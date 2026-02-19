@@ -5,6 +5,15 @@ import type { WsClientMessage, WsServerMessage } from './wsTypes';
 
 export type NetSimPresetId = 'good-wifi' | '4g-ok' | 'bad-4g' | 'train';
 
+
+type BombEventNetStats = {
+  serverTick: number;
+  lastEventTick: number;
+  eventsBuffered: number;
+  eventsDroppedDup: number;
+  eventsDroppedOutOfOrder: number;
+};
+
 type NetSimPreset = {
   id: NetSimPresetId;
   label: string;
@@ -143,6 +152,15 @@ export function useWsClient(token?: string) {
 
   const [rttMs, setRttMs] = useState<number | null>(null);
   const [rttJitterMs, setRttJitterMs] = useState<number>(0);
+  const bombEventSeenRef = useRef<Map<string, number>>(new Map());
+  const lastEventTickRef = useRef<number>(-1);
+  const [bombEventNetStats, setBombEventNetStats] = useState<BombEventNetStats>({
+    serverTick: -1,
+    lastEventTick: -1,
+    eventsBuffered: 0,
+    eventsDroppedDup: 0,
+    eventsDroppedOutOfOrder: 0,
+  });
 
   useEffect(() => {
     if (!token) return;
@@ -217,6 +235,51 @@ export function useWsClient(token?: string) {
           preview: JSON.stringify(msg).slice(0, 1000),
         });
 
+        if (msg.type === 'match:snapshot') {
+          const snapshotTick = Number.isFinite(msg.snapshot?.tick) ? msg.snapshot.tick : -1;
+          if (snapshotTick >= 0) {
+            lastEventTickRef.current = Math.max(lastEventTickRef.current, snapshotTick);
+            setBombEventNetStats((prev) => ({
+              ...prev,
+              serverTick: Math.max(prev.serverTick, snapshotTick),
+              lastEventTick: lastEventTickRef.current,
+            }));
+          }
+        }
+
+        if (msg.type === 'match:bomb_placed' || msg.type === 'match:bomb_exploded') {
+          const eventId = typeof msg.eventId === 'string' ? msg.eventId : '';
+          const serverTick = Number.isFinite(msg.serverTick) ? msg.serverTick : -1;
+
+          if (eventId) {
+            if (bombEventSeenRef.current.has(eventId)) {
+              setBombEventNetStats((prev) => ({ ...prev, eventsDroppedDup: prev.eventsDroppedDup + 1, serverTick: Math.max(prev.serverTick, serverTick) }));
+              return;
+            }
+
+            bombEventSeenRef.current.set(eventId, Date.now());
+            if (bombEventSeenRef.current.size > 2048) {
+              const oldest = bombEventSeenRef.current.keys().next().value;
+              if (typeof oldest === 'string') bombEventSeenRef.current.delete(oldest);
+            }
+          }
+
+          if (serverTick >= 0 && serverTick < lastEventTickRef.current) {
+            setBombEventNetStats((prev) => ({ ...prev, eventsDroppedOutOfOrder: prev.eventsDroppedOutOfOrder + 1, serverTick: Math.max(prev.serverTick, serverTick) }));
+            return;
+          }
+
+          if (serverTick >= 0) {
+            lastEventTickRef.current = Math.max(lastEventTickRef.current, serverTick);
+          }
+
+          setBombEventNetStats((prev) => ({
+            ...prev,
+            serverTick: Math.max(prev.serverTick, serverTick),
+            lastEventTick: lastEventTickRef.current,
+          }));
+        }
+
         const config = netSimConfigRef.current;
         const shouldSimulateSnapshot = import.meta.env.DEV && msg.type === 'match:snapshot' && config.enabled;
         if (shouldSimulateSnapshot && shouldDrop(config)) return;
@@ -245,6 +308,9 @@ export function useWsClient(token?: string) {
     return () => {
       window.clearInterval(pingTimer);
       pingSentAtRef.current.clear();
+      bombEventSeenRef.current.clear();
+      lastEventTickRef.current = -1;
+      setBombEventNetStats({ serverTick: -1, lastEventTick: -1, eventsBuffered: 0, eventsDroppedDup: 0, eventsDroppedOutOfOrder: 0 });
 
       client.disconnect();
       clientRef.current = null;
@@ -263,6 +329,7 @@ export function useWsClient(token?: string) {
     netSimPresets: NET_SIM_PRESETS,
     rttMs,
     rttJitterMs,
+    bombEventNetStats,
     setNetSimEnabled: (enabled: boolean) => {
       if (!import.meta.env.DEV) return;
       setNetSimConfig((prev) => ({ ...prev, enabled }));

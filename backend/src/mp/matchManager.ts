@@ -65,6 +65,8 @@ export function createMatch(roomId: string, players: string[]): MatchState {
     tick: 0,
     world: { gridW, gridH, tiles: worldTiles, worldHash },
     players: new Map<string, PlayerState>(),
+    eventSeq: 0,
+    seenEventIds: [],
     inputQueue: [],
   };
 

@@ -16,14 +16,19 @@ export type WsServerMessage =
   | { type: 'room:left' }
   | { type: 'match:started'; matchId: string }
   | { type: 'match:world_init'; roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }
+  | { type: 'match:bomb_placed'; roomCode: string; matchId: string; eventId: string; serverTick: number; tick: number; bomb: { id: string; x: number; y: number } }
+  | { type: 'match:bomb_exploded'; roomCode: string; matchId: string; eventId: string; serverTick: number; tick: number; bombId: string; x: number; y: number; tilesDestroyed?: Array<{ x: number; y: number }> }
   | { type: 'match:snapshot'; snapshot: MatchSnapshotV1 }
   | { type: 'match:error'; error: string }
   | { type: 'error'; error: string };
 
 export type WsDebugMetrics = {
   snapshotTick: number;
+  lastAppliedSnapshotTick: number;
   simulationTick: number;
   renderTick: number;
+  serverTick: number;
+  lastEventTick: number;
   baseDelayTicks: number;
   baseDelayTargetTicks: number;
   baseDelayStepCooldownMs: number;
@@ -32,6 +37,9 @@ export type WsDebugMetrics = {
   minDelayTicks: number;
   maxDelayTicks: number;
   bufferSize: number;
+  eventsBuffered: number;
+  eventsDroppedDup: number;
+  eventsDroppedOutOfOrder: number;
   underrunRate: number;
   underrunCount: number;
   lateSnapshotCount: number;
@@ -60,4 +68,8 @@ export type WsDebugMetrics = {
   worldReady: boolean;
   worldHashServer: string | null;
   worldHashClient: string | null;
+  needsNetResync: boolean;
+  netResyncReason: string | null;
+  bombInputGated: boolean;
+  bombGateReason: string | null;
 };

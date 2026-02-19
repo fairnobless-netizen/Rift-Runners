@@ -163,13 +163,16 @@ type TelegramWebApp = {
 };
 
 
-function buildWsDebugMetrics(scene: GameScene): WsDebugMetrics {
+function buildWsDebugMetrics(scene: GameScene, bombEventNetStats?: { serverTick: number; lastEventTick: number; eventsBuffered: number; eventsDroppedDup: number; eventsDroppedOutOfOrder: number }, bombGate?: { gated: boolean; reason: string | null }): WsDebugMetrics {
   const netInterpStats = scene.getNetInterpStats();
   const routingStats = scene.getSnapshotRoutingStats();
 
   return {
     snapshotTick: scene.getLastSnapshotTick(),
+    lastAppliedSnapshotTick: scene.getLastAppliedSnapshotTick(),
     simulationTick: scene.getSimulationTick(),
+    serverTick: bombEventNetStats?.serverTick ?? -1,
+    lastEventTick: bombEventNetStats?.lastEventTick ?? -1,
     renderTick: netInterpStats.renderTick,
     baseDelayTicks: netInterpStats.baseDelayTicks,
     baseDelayTargetTicks: netInterpStats.baseDelayTargetTicks,
@@ -179,6 +182,9 @@ function buildWsDebugMetrics(scene: GameScene): WsDebugMetrics {
     minDelayTicks: netInterpStats.minDelayTicks,
     maxDelayTicks: netInterpStats.maxDelayTicks,
     bufferSize: netInterpStats.bufferSize,
+    eventsBuffered: bombEventNetStats?.eventsBuffered ?? 0,
+    eventsDroppedDup: bombEventNetStats?.eventsDroppedDup ?? 0,
+    eventsDroppedOutOfOrder: bombEventNetStats?.eventsDroppedOutOfOrder ?? 0,
     underrunRate: netInterpStats.underrunRate,
     underrunCount: netInterpStats.underrunCount,
     lateSnapshotCount: netInterpStats.lateSnapshotCount,
@@ -201,6 +207,10 @@ function buildWsDebugMetrics(scene: GameScene): WsDebugMetrics {
     worldReady: routingStats.worldReady,
     worldHashServer: routingStats.worldHashServer,
     worldHashClient: routingStats.worldHashClient,
+    needsNetResync: routingStats.needsNetResync,
+    netResyncReason: routingStats.netResyncReason,
+    bombInputGated: bombGate?.gated ?? true,
+    bombGateReason: bombGate?.reason ?? 'unknown',
   };
 }
 
@@ -267,6 +277,7 @@ export default function GameView(): JSX.Element {
   const [storeError, setStoreError] = useState<string | null>(null);
   const [predictionStats, setPredictionStats] = useState<PredictionStats | null>(null);
   const [tickDebugStats, setTickDebugStats] = useState<WsDebugMetrics | null>(null);
+  const [bombGateReason, setBombGateReason] = useState<string | null>('phase_not_started');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'audio' | 'account'>('audio');
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
@@ -288,6 +299,7 @@ export default function GameView(): JSX.Element {
   const expectedRoomCodeRef = useRef<string | null>(null);
   const expectedMatchIdRef = useRef<string | null>(null);
   const worldReadyRef = useRef(false);
+  const firstSnapshotReadyRef = useRef(false);
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
@@ -866,11 +878,11 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    setTickDebugStats(buildWsDebugMetrics(scene));
+    setTickDebugStats(buildWsDebugMetrics(scene, ws.bombEventNetStats, { gated: Boolean(bombGateReason), reason: bombGateReason }));
   }, 350);
 
   return () => window.clearInterval(id);
-}, []);
+}, [ws.bombEventNetStats, bombGateReason]);
 
 
   useEffect(() => {
@@ -995,6 +1007,7 @@ export default function GameView(): JSX.Element {
     if (prevRoomCode !== nextRoomCode) {
       expectedMatchIdRef.current = null;
       worldReadyRef.current = false;
+      firstSnapshotReadyRef.current = false;
       setCurrentMatchId(null);
     }
   }, [currentRoom?.roomCode]);
@@ -1014,6 +1027,7 @@ export default function GameView(): JSX.Element {
     if (currentRoom?.roomCode) return;
     wsJoinedRoomCodeRef.current = null;
     worldReadyRef.current = false;
+    firstSnapshotReadyRef.current = false;
     setCurrentMatchId(null);
   }, [currentRoom?.roomCode]);
 
@@ -1022,6 +1036,7 @@ export default function GameView(): JSX.Element {
       wsJoinedRoomCodeRef.current = null;
       expectedMatchIdRef.current = null;
       worldReadyRef.current = false;
+      firstSnapshotReadyRef.current = false;
       setCurrentMatchId(null);
       sceneRef.current?.resetMultiplayerNetState();
     }
@@ -1055,6 +1070,7 @@ export default function GameView(): JSX.Element {
 
     expectedMatchIdRef.current = lastStarted.matchId;
     worldReadyRef.current = false;
+    firstSnapshotReadyRef.current = false;
     setCurrentMatchId(lastStarted.matchId);
     setCurrentRoom((prev) => {
       if (!prev || prev.roomCode !== expectedRoomCode) return prev;
@@ -1203,6 +1219,7 @@ export default function GameView(): JSX.Element {
     if (!scene) return;
 
     scene.applyMatchSnapshot(snapshot, localTgUserId);
+    firstSnapshotReadyRef.current = true;
 
     // If WS snapshots are flowing, match is live → ensure lobby overlay is gone for everyone.
     if (multiplayerUiOpen) {
@@ -1359,7 +1376,30 @@ export default function GameView(): JSX.Element {
   };
 
   const requestBomb = (): void => {
-    if (isInteractionBlocked) return;
+    if (isInteractionBlocked) {
+      setBombGateReason('interaction_blocked');
+      return;
+    }
+
+    if (isMultiplayerMode) {
+      const phase = currentRoom?.phase ?? 'LOBBY';
+      const hasWorldInit = worldReadyRef.current;
+      const hasFirstSnapshot = firstSnapshotReadyRef.current;
+      if (phase !== 'STARTED') {
+        setBombGateReason('phase_not_started');
+        return;
+      }
+      if (!hasWorldInit) {
+        setBombGateReason('await_world_init');
+        return;
+      }
+      if (!hasFirstSnapshot) {
+        setBombGateReason('await_first_snapshot');
+        return;
+      }
+    }
+
+    setBombGateReason(null);
     controlsRef.current.placeBombRequested = true;
   };
 
