@@ -48,7 +48,7 @@ export type MatchSnapshot = {
 export type MatchSnapshotV1 = MatchSnapshot;
 
 export type MatchServerMessage =
-  | { type: 'match:started'; matchId: string }
+  | { type: 'match:started'; roomCode: string; matchId: string }
   | MatchWorldInit
   | { type: 'match:snapshot'; snapshot: MatchSnapshot }
   | { type: 'match:error'; error: string };

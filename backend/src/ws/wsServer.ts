@@ -159,6 +159,69 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
   });
 }
 
+function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
+  const room = getRoom(roomId);
+  if (!room) {
+    logWsEvent('ws_rejoin_sync_skipped_no_match', {
+      tgUserId: ctx.tgUserId,
+      roomId,
+      reason: 'room_missing',
+    });
+    return;
+  }
+
+  const roomMatchId = room.matchId;
+  const activeMatch = getMatchByRoom(roomId);
+
+  if (!roomMatchId || !activeMatch) {
+    logWsEvent('ws_rejoin_sync_skipped_no_match', {
+      tgUserId: ctx.tgUserId,
+      roomId,
+      roomMatchId,
+      activeMatchId: activeMatch?.matchId ?? null,
+    });
+    return;
+  }
+
+  if (activeMatch.matchId !== roomMatchId) {
+    logWsEvent('ws_rejoin_sync_skipped_no_match', {
+      tgUserId: ctx.tgUserId,
+      roomId,
+      reason: 'room_match_mismatch',
+      roomMatchId,
+      activeMatchId: activeMatch.matchId,
+    });
+
+    room.matchId = activeMatch.matchId;
+    ctx.matchId = activeMatch.matchId;
+    return;
+  }
+
+  send(ctx.socket, {
+    type: 'match:started',
+    roomCode: roomId,
+    matchId: activeMatch.matchId,
+  });
+
+  send(ctx.socket, {
+    type: 'match:world_init',
+    roomCode: roomId,
+    matchId: activeMatch.matchId,
+    world: {
+      gridW: activeMatch.world.gridW,
+      gridH: activeMatch.world.gridH,
+      tiles: [...activeMatch.world.tiles],
+      worldHash: activeMatch.world.worldHash,
+    },
+  });
+
+  logWsEvent('ws_rejoin_sync_sent', {
+    tgUserId: ctx.tgUserId,
+    roomId,
+    matchId: activeMatch.matchId,
+  });
+}
+
 async function detachClientFromRoomDb(roomCode: string, tgUserId: string) {
   try {
     const room = await getRoomByCode(roomCode);
@@ -251,6 +314,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       }
 
       attachClientToRoom(ctx, msg.roomId);
+      sendRejoinSyncIfActiveMatch(ctx, msg.roomId);
       return;
     }
 
