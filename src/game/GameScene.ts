@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { RemotePlayersRenderer } from './RemotePlayersRenderer';
 import { LocalPredictionController } from './LocalPredictionController';
-import type { MatchSnapshotV1 } from '@shared/protocol';
+import type { MatchBombExplodedEvent, MatchBombPlacedEvent, MatchEnded, MatchSnapshotV1 } from '@shared/protocol';
 import {
   canOccupyCell,
   createArena,
@@ -233,6 +233,7 @@ export class GameScene extends Phaser.Scene {
   private flameBeamSprites = new Map<string, Phaser.GameObjects.Image>();
   private activeFlames = new Map<string, FlameModel>();
   private activeFlameBeams = new Map<string, FlameBeamModel>();
+  private multiplayerMatchEnded = false;
 
   private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
   private spaceKey?: Phaser.Input.Keyboard.Key;
@@ -448,7 +449,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
-    if (this.isLevelCleared || this.awaitingSoloContinue || this.soloGameOver || this.multiplayerEliminated) return;
+    if (this.isLevelCleared || this.awaitingSoloContinue || this.soloGameOver || this.multiplayerEliminated || this.multiplayerMatchEnded) return;
 
     this.accumulator += delta;
     while (this.accumulator >= this.FIXED_DT) {
@@ -459,15 +460,23 @@ export class GameScene extends Phaser.Scene {
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
     this.consumeMovementIntent(time);
-    this.tryPlaceBomb(time);
+    if (this.gameMode !== 'multiplayer') {
+      this.tryPlaceBomb(time);
+    }
     this.tryRemoteDetonate(time);
-    this.processBombTimers(time);
+    if (this.gameMode !== 'multiplayer') {
+      this.processBombTimers(time);
+    }
     this.cleanupExpiredFlames(time);
-    this.tickEnemies(time);
+    if (this.gameMode !== 'multiplayer') {
+      this.tickEnemies(time);
+    }
     this.bossController.update(time);
     this.updatePlayerStateFromTimers(time);
     this.syncSpritesFromArena(time);
-    this.checkPlayerEnemyCollision();
+    if (this.gameMode !== 'multiplayer') {
+      this.checkPlayerEnemyCollision();
+    }
     this.tryEnterDoor(time);
     if (!this.isBossLevel) {
       this.doorController.update(time, this.isLevelCleared);
@@ -822,6 +831,7 @@ export class GameScene extends Phaser.Scene {
     this.awaitingSoloContinue = false;
     this.soloGameOver = false;
     this.multiplayerEliminated = false;
+    this.multiplayerMatchEnded = false;
     this.playerSprite?.setVisible(true);
     this.emitLifeState();
   }
@@ -843,6 +853,7 @@ export class GameScene extends Phaser.Scene {
     this.awaitingSoloContinue = false;
     this.soloGameOver = false;
     this.multiplayerEliminated = false;
+    this.multiplayerMatchEnded = false;
     this.playerSprite?.setVisible(true);
     this.lives = INITIAL_LIVES;
     this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
@@ -1715,32 +1726,34 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(playerStyle.origin?.x ?? 0.5, playerStyle.origin?.y ?? 0.5)
       .setDepth(playerStyle.depth ?? DEPTH_PLAYER);
 
-    const bombKeys = new Set(this.arena.bombs.keys());
-    for (const bomb of this.arena.bombs.values()) {
-      const sprite = this.bombSprites.get(bomb.key) ?? this.createBombSprite(bomb.key);
-      if (!sprite) continue;
+    if (this.gameMode !== 'multiplayer') {
+      const bombKeys = new Set(this.arena.bombs.keys());
+      for (const bomb of this.arena.bombs.values()) {
+        const sprite = this.bombSprites.get(bomb.key) ?? this.createBombSprite(bomb.key);
+        if (!sprite) continue;
 
-      const baseStyle = this.getAssetStyle('bomb', 'active', 'none');
-      const remain = Phaser.Math.Clamp((bomb.detonateAt - time) / GAME_CONFIG.bombFuseMs, 0, 1);
-      const warningRatio = Phaser.Math.Clamp(1 - (bomb.detonateAt - time) / BOMB_PULSE_CONFIG.warningThresholdMs, 0, 1);
-      const pulse = 0.5 + 0.5 * Math.sin(time * 0.02);
-      const pulseScale = Phaser.Math.Linear(BOMB_PULSE_CONFIG.pulseMinScale, BOMB_PULSE_CONFIG.pulseMaxScale, pulse * warningRatio);
-      const alpha = Phaser.Math.Linear(BOMB_PULSE_CONFIG.maxAlpha, BOMB_PULSE_CONFIG.minAlpha, warningRatio * (1 - remain));
-      const shouldWarn = warningRatio > 0.1;
+        const baseStyle = this.getAssetStyle('bomb', 'active', 'none');
+        const remain = Phaser.Math.Clamp((bomb.detonateAt - time) / GAME_CONFIG.bombFuseMs, 0, 1);
+        const warningRatio = Phaser.Math.Clamp(1 - (bomb.detonateAt - time) / BOMB_PULSE_CONFIG.warningThresholdMs, 0, 1);
+        const pulse = 0.5 + 0.5 * Math.sin(time * 0.02);
+        const pulseScale = Phaser.Math.Linear(BOMB_PULSE_CONFIG.pulseMinScale, BOMB_PULSE_CONFIG.pulseMaxScale, pulse * warningRatio);
+        const alpha = Phaser.Math.Linear(BOMB_PULSE_CONFIG.maxAlpha, BOMB_PULSE_CONFIG.minAlpha, warningRatio * (1 - remain));
+        const shouldWarn = warningRatio > 0.1;
 
-      sprite
-        .setPosition(bomb.x * tileSize + tileSize / 2, bomb.y * tileSize + tileSize / 2)
-        .setTexture(this.getTextureKey(baseStyle))
-        .setDisplaySize(tileSize * (baseStyle.scale ?? 0.7) * pulseScale, tileSize * (baseStyle.scale ?? 0.7) * pulseScale)
-        .setOrigin(baseStyle.origin?.x ?? 0.5, baseStyle.origin?.y ?? 0.5)
-        .setAlpha(alpha)
-        .setTint(shouldWarn ? 0xffc457 : 0xffffff);
-    }
+        sprite
+          .setPosition(bomb.x * tileSize + tileSize / 2, bomb.y * tileSize + tileSize / 2)
+          .setTexture(this.getTextureKey(baseStyle))
+          .setDisplaySize(tileSize * (baseStyle.scale ?? 0.7) * pulseScale, tileSize * (baseStyle.scale ?? 0.7) * pulseScale)
+          .setOrigin(baseStyle.origin?.x ?? 0.5, baseStyle.origin?.y ?? 0.5)
+          .setAlpha(alpha)
+          .setTint(shouldWarn ? 0xffc457 : 0xffffff);
+      }
 
-    for (const [key, sprite] of this.bombSprites.entries()) {
-      if (bombKeys.has(key)) continue;
-      sprite.destroy();
-      this.bombSprites.delete(key);
+      for (const [key, sprite] of this.bombSprites.entries()) {
+        if (bombKeys.has(key)) continue;
+        sprite.destroy();
+        this.bombSprites.delete(key);
+      }
     }
 
     const itemKeys = new Set(this.arena.items.keys());
@@ -2217,6 +2230,7 @@ export class GameScene extends Phaser.Scene {
     this.worldReady = false;
     this.worldHashServer = null;
     this.worldHashClient = null;
+    this.multiplayerMatchEnded = false;
   }
 
   public pushMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
@@ -2292,6 +2306,13 @@ export class GameScene extends Phaser.Scene {
 
     const me = snapshot.players?.find((p) => p.tgUserId === effectiveLocalId);
     if (!me) return;
+
+    this.lives = Math.max(0, me.lives ?? this.lives);
+    this.stats.lives = this.lives;
+    this.multiplayerEliminated = Boolean(me.eliminated);
+    this.playerSprite?.setVisible(!this.multiplayerEliminated);
+    this.emitLifeState();
+    emitStats(this.stats);
 
     if (!this.worldReady) {
       return;
@@ -2430,9 +2451,67 @@ export class GameScene extends Phaser.Scene {
       });
     }
     this.worldReady = true;
+    this.multiplayerMatchEnded = false;
     this.invalidPosDrops = 0;
 
     return true;
+  }
+
+  public onBombPlaced(event: MatchBombPlacedEvent): void {
+    if (this.gameMode !== 'multiplayer') return;
+    if (!event?.bomb?.id) return;
+
+    const bomb = event.bomb;
+    const tileSize = GAME_CONFIG.tileSize;
+    const existing = this.bombSprites.get(bomb.id);
+    if (existing) {
+      existing
+        .setVisible(true)
+        .setActive(true)
+        .setPosition(bomb.x * tileSize + tileSize / 2, bomb.y * tileSize + tileSize / 2);
+      return;
+    }
+
+    const style = this.getAssetStyle('bomb', 'active', 'none');
+    const sprite = this.add
+      .image(bomb.x * tileSize + tileSize / 2, bomb.y * tileSize + tileSize / 2, this.getTextureKey(style))
+      .setOrigin(0.5, 0.5)
+      .setDepth(DEPTH_BOMB)
+      .setVisible(true)
+      .setActive(true);
+    this.bombSprites.set(bomb.id, sprite);
+  }
+
+  public onBombExploded(event: MatchBombExplodedEvent): void {
+    if (this.gameMode !== 'multiplayer') return;
+
+    const sprite = this.bombSprites.get(event.bombId);
+    if (sprite) {
+      sprite.destroy();
+      this.bombSprites.delete(event.bombId);
+    }
+
+    for (const tile of event.tilesDestroyed ?? []) {
+      if (!isInsideArena(this.arena, tile.x, tile.y)) continue;
+      this.arena.tiles[tile.y][tile.x] = 'Floor';
+      this.destroyBreakableSprite(tile.x, tile.y);
+    }
+
+    const now = this.time.now;
+    const impacts: Array<{ x: number; y: number }> = [{ x: event.x, y: event.y }, ...(event.tilesDestroyed ?? [])];
+    this.spawnFlame(event.x, event.y, now + GAME_CONFIG.flameLifetimeMs, 'center');
+    for (const impact of impacts) {
+      if (impact.x === event.x && impact.y === event.y) continue;
+      const axis: FlameArmAxis = impact.x === event.x ? 'vertical' : 'horizontal';
+      this.spawnFlame(impact.x, impact.y, now + GAME_CONFIG.flameLifetimeMs, 'arm', axis);
+    }
+    this.spawnFlameBeams(event.bombId, event.x, event.y, impacts, now + GAME_CONFIG.flameLifetimeMs);
+  }
+
+  public onMatchEnded(_event: MatchEnded): void {
+    if (this.gameMode !== 'multiplayer') return;
+    this.multiplayerMatchEnded = true;
+    this.clearMovementInputs();
   }
 
   public setAudioSettings(next: SceneAudioSettings): void {

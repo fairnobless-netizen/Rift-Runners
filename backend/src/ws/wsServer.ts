@@ -387,25 +387,46 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         },
       });
 
-      startMatch(match, (snapshot) => {
+      startMatch(match, (message) => {
         const activeRoom = rooms.get(room.roomId);
         if (!activeRoom) {
           endMatch(match.matchId);
           return;
         }
 
-        if (activeRoom.matchId !== snapshot.matchId) {
+        if (message.type === 'match:error') {
           return;
         }
 
-        if (snapshot.roomCode !== activeRoom.roomId) {
+        const messageMatchId =
+          message.type === 'match:snapshot'
+            ? message.snapshot.matchId
+            : message.matchId;
+
+        const messageRoomCode =
+          message.type === 'match:snapshot'
+            ? message.snapshot.roomCode
+            : message.roomCode;
+
+        if (activeRoom.matchId !== messageMatchId) {
           return;
         }
 
-        broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, {
-          type: 'match:snapshot',
-          snapshot,
-        });
+        if (messageRoomCode !== activeRoom.roomId) {
+          return;
+        }
+
+        broadcastToRoomMatch(activeRoom.roomId, messageMatchId, message);
+
+        if ((message as any).type === 'match:ended') {
+          activeRoom.matchId = null;
+
+          for (const client of clients) {
+            if (client.roomId !== activeRoom.roomId) continue;
+            if (!isSocketAttachedToRoom(client, activeRoom)) continue;
+            client.matchId = null;
+          }
+        }
       });
 
       return;
@@ -462,6 +483,16 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         const dir = payload.dir;
         if (dir !== 'up' && dir !== 'down' && dir !== 'left' && dir !== 'right') return;
 
+        match.inputQueue.push({
+          tgUserId: ctx.tgUserId,
+          seq,
+          payload,
+        });
+
+        return;
+      }
+
+      if (payload.kind === 'place_bomb') {
         match.inputQueue.push({
           tgUserId: ctx.tgUserId,
           seq,

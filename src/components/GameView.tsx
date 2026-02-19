@@ -296,6 +296,7 @@ export default function GameView(): JSX.Element {
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
+  const [matchEndedState, setMatchEndedState] = useState<{ reason: 'all_eliminated' | 'manual_restart'; winnerTgUserId?: string } | null>(null);
   const expectedRoomCodeRef = useRef<string | null>(null);
   const expectedMatchIdRef = useRef<string | null>(null);
   const worldReadyRef = useRef(false);
@@ -1009,6 +1010,7 @@ export default function GameView(): JSX.Element {
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
       setCurrentMatchId(null);
+      setMatchEndedState(null);
     }
   }, [currentRoom?.roomCode]);
 
@@ -1029,6 +1031,7 @@ export default function GameView(): JSX.Element {
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
     setCurrentMatchId(null);
+    setMatchEndedState(null);
   }, [currentRoom?.roomCode]);
 
   useEffect(() => {
@@ -1038,6 +1041,7 @@ export default function GameView(): JSX.Element {
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
       setCurrentMatchId(null);
+      setMatchEndedState(null);
       sceneRef.current?.resetMultiplayerNetState();
     }
   }, [ws.connected]);
@@ -1072,6 +1076,7 @@ export default function GameView(): JSX.Element {
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
     setCurrentMatchId(lastStarted.matchId);
+    setMatchEndedState(null);
     setCurrentRoom((prev) => {
       if (!prev || prev.roomCode !== expectedRoomCode) return prev;
       if (prev.phase === 'STARTED') return prev;
@@ -1081,6 +1086,62 @@ export default function GameView(): JSX.Element {
       roomCode: expectedRoomCode,
       matchId: lastStarted.matchId,
     });
+  }, [ws.messages]);
+
+  useEffect(() => {
+    const lastPlaced = [...ws.messages].reverse().find((message) => message.type === 'match:bomb_placed') as any;
+    if (!lastPlaced?.bomb || !lastPlaced?.matchId) return;
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    const gotRoomCode = lastPlaced.roomCode ?? null;
+    const gotMatchId = lastPlaced.matchId ?? null;
+
+    if (!expectedRoomCode || !expectedMatchId) return;
+    if (gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId) return;
+    if (!worldReadyRef.current) return;
+
+    sceneRef.current?.onBombPlaced(lastPlaced);
+  }, [ws.messages]);
+
+  useEffect(() => {
+    const lastExploded = [...ws.messages].reverse().find((message) => message.type === 'match:bomb_exploded') as any;
+    if (!lastExploded?.bombId || !lastExploded?.matchId) return;
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    const gotRoomCode = lastExploded.roomCode ?? null;
+    const gotMatchId = lastExploded.matchId ?? null;
+
+    if (!expectedRoomCode || !expectedMatchId) return;
+    if (gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId) return;
+    if (!worldReadyRef.current) return;
+
+    sceneRef.current?.onBombExploded(lastExploded);
+  }, [ws.messages]);
+
+  useEffect(() => {
+    const lastEnded = [...ws.messages].reverse().find((message) => message.type === 'match:ended') as any;
+    if (!lastEnded?.matchId || !lastEnded?.reason) return;
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    const gotRoomCode = lastEnded.roomCode ?? null;
+    const gotMatchId = lastEnded.matchId ?? null;
+
+    if (!expectedRoomCode || !expectedMatchId) return;
+    if (gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId) return;
+
+    sceneRef.current?.onMatchEnded(lastEnded);
+    setMatchEndedState({ reason: lastEnded.reason, winnerTgUserId: lastEnded.winnerTgUserId });
+    setCurrentRoom((prev) => {
+      if (!prev || prev.roomCode !== expectedRoomCode) return prev;
+      return { ...prev, phase: 'LOBBY' };
+    });
+    expectedMatchIdRef.current = null;
+    worldReadyRef.current = false;
+    firstSnapshotReadyRef.current = false;
+    setCurrentMatchId(null);
   }, [ws.messages]);
 
   useEffect(() => {
@@ -1400,6 +1461,18 @@ export default function GameView(): JSX.Element {
     }
 
     setBombGateReason(null);
+    if (isMultiplayerMode) {
+      if (!ws.connected) {
+        setBombGateReason('ws_not_connected');
+        return;
+      }
+
+      const seq = inputSeqRef.current + 1;
+      inputSeqRef.current = seq;
+      ws.send({ type: 'match:input', seq, payload: { kind: 'place_bomb' } });
+      return;
+    }
+
     controlsRef.current.placeBombRequested = true;
   };
 
@@ -2275,6 +2348,23 @@ export default function GameView(): JSX.Element {
             <strong>GAME OVER</strong>
             <p>Жизни закончились.</p>
             <button type="button" onClick={() => sceneRef.current?.restartSoloRun()}>Restart The Game</button>
+          </div>
+        </div>
+      )}
+      {gameFlowPhase === 'playing' && matchEndedState && (
+        <div className="waiting-overlay" role="dialog" aria-modal="true" aria-label="Match ended overlay">
+          <div className="waiting-overlay__card">
+            <strong>GAME OVER</strong>
+            <p>
+              {matchEndedState.winnerTgUserId
+                ? `Победитель: ${matchEndedState.winnerTgUserId}`
+                : 'Все игроки выбыли.'}
+            </p>
+            {isRoomOwner ? (
+              <button type="button" onClick={() => ws.send({ type: 'match:start' })}>Restart</button>
+            ) : (
+              <p>Ожидание перезапуска хостом или возвращение в лобби.</p>
+            )}
           </div>
         </div>
       )}
