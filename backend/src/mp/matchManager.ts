@@ -53,8 +53,8 @@ export function createMatch(roomId: string, players: string[]): MatchState {
 
   const matchId = newMatchId();
 
-  const gridW = 15;
-  const gridH = 15;
+  const gridW = 27;
+  const gridH = 14;
 
   const worldTiles = buildWorldTiles(gridW, gridH);
   const worldHash = hashWorldTiles(worldTiles);
