@@ -1023,10 +1023,22 @@ export default function GameView(): JSX.Element {
     if (!lastStarted || lastStarted.type !== 'match:started') return;
 
     const expectedRoomCode = expectedRoomCodeRef.current;
+    const gotRoomCode = (lastStarted as any).roomCode ?? null;
+    const gotMatchId = lastStarted.matchId ?? null;
     if (!expectedRoomCode) {
       diagnosticsStore.log('ROOM', 'WARN', 'match:started:drop_no_room_context', {
-        roomCode: null,
-        matchId: lastStarted.matchId,
+        expectedRoomCode,
+        gotRoomCode,
+        gotMatchId,
+      });
+      return;
+    }
+
+    if (gotRoomCode !== expectedRoomCode) {
+      diagnosticsStore.log('ROOM', 'WARN', 'match:started:drop_room_mismatch', {
+        expectedRoomCode,
+        gotRoomCode,
+        gotMatchId,
       });
       return;
     }
