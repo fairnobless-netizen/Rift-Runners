@@ -28,6 +28,7 @@ import {
 } from '../game/campaign';
 
 import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../game/types';
+import type { MatchServerMessage, MatchWorldInit } from '@shared/protocol';
 import {
   buyShopSku,
   claimReferral,
@@ -118,6 +119,14 @@ type NicknameCheckState =
   | 'invalid'
   | 'auth_required'
   | 'server_error';
+
+function isMatchServerMessage(message: { type: string }): message is MatchServerMessage {
+  return message.type.startsWith('match:');
+}
+
+function isMatchWorldInit(message: { type: string }): message is MatchWorldInit {
+  return isMatchServerMessage(message) && message.type === 'match:world_init';
+}
 
 const DEBUG_NICK = false;
 
@@ -1113,8 +1122,8 @@ export default function GameView(): JSX.Element {
   }, [currentRoomMembers.length]);
 
   useEffect(() => {
-    const lastWorldInit = [...ws.messages].reverse().find((message) => message.type === 'match:world_init') as any;
-    if (!lastWorldInit?.world || !lastWorldInit?.matchId) return;
+    const lastWorldInit = [...ws.messages].reverse().find(isMatchWorldInit);
+    if (!lastWorldInit) return;
 
     const expectedRoomCode = expectedRoomCodeRef.current;
     const expectedMatchId = expectedMatchIdRef.current;
@@ -1154,12 +1163,17 @@ export default function GameView(): JSX.Element {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    scene.applyMatchWorldInit(lastWorldInit);
+    const { gridW, gridH, tiles } = lastWorldInit.world;
+    scene.applyMatchWorldInit({
+      ...lastWorldInit,
+      world: { ...lastWorldInit.world, gridW, gridH, tiles },
+    });
     worldReadyRef.current = true;
     diagnosticsStore.log('ROOM', 'INFO', 'world_init:accepted', {
       roomCode: gotRoomCode,
       matchId: gotMatchId,
-      levelIndex: lastWorldInit.levelIndex ?? null,
+      gridW,
+      gridH,
     });
   }, [ws.messages]);
 
