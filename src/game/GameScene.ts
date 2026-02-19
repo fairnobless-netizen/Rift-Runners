@@ -135,6 +135,7 @@ export class GameScene extends Phaser.Scene {
   private rng: DeterministicRng = createDeterministicRng(this.baseSeed);
   private simulationTick = 0;
   private lastSnapshotTick = -1;
+  private lastAppliedSnapshotTick = -1;
   private snapshotBuffer: MatchSnapshotV1[] = [];
   private currentRoomCode: string | null = null;
   private currentMatchId: string | null = null;
@@ -142,6 +143,7 @@ export class GameScene extends Phaser.Scene {
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
   private needsNetResync = false;
+  private netResyncReason: string | null = null;
   private lastInvalidPosWarnAtMs = 0;
   private lastInvalidPosWarnKey: string | null = null;
   private readonly SNAPSHOT_BUFFER_SIZE = 10;
@@ -815,6 +817,7 @@ export class GameScene extends Phaser.Scene {
     this.gameMode = mode;
     if (mode === 'multiplayer') {
       this.needsNetResync = true;
+      this.netResyncReason = 'reset_state';
     }
     this.awaitingSoloContinue = false;
     this.soloGameOver = false;
@@ -2202,7 +2205,9 @@ export class GameScene extends Phaser.Scene {
 
   public resetMultiplayerNetState(): void {
     this.needsNetResync = true;
+    this.netResyncReason = 'reset_state';
     this.lastSnapshotTick = -1;
+    this.lastAppliedSnapshotTick = -1;
     this.snapshotBuffer = [];
     this.localInputQueue = [];
     this.inputSeq = 0;
@@ -2242,6 +2247,7 @@ export class GameScene extends Phaser.Scene {
     // Resync on first multiplayer snapshot to align timebase.
     if (shouldResync) {
       this.needsNetResync = false;
+      this.netResyncReason = null;
 
       this.simulationTick = snapshot.tick;
       this.accumulator = 0;
@@ -2257,8 +2263,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.lastSnapshotTick = snapshot.tick;
+    this.lastAppliedSnapshotTick = Math.max(this.lastAppliedSnapshotTick, snapshot.tick);
     this.matchGridW = snapshot.world?.gridW ?? this.matchGridW;
     this.matchGridH = snapshot.world?.gridH ?? this.matchGridH;
+
+    const snapshotWorldHash = snapshot.world?.worldHash ?? null;
+    if (snapshotWorldHash && this.worldHashClient && snapshotWorldHash !== this.worldHashClient) {
+      this.needsNetResync = true;
+      this.netResyncReason = 'snapshot_world_hash_mismatch';
+    }
 
     this.snapshotBuffer.push(snapshot);
     if (this.snapshotBuffer.length > this.SNAPSHOT_BUFFER_SIZE) {
@@ -2287,6 +2300,7 @@ export class GameScene extends Phaser.Scene {
     if (!isInsideArena(this.arena, me.x, me.y) || !canOccupyCell(this.arena, me.x, me.y)) {
       this.invalidPosDrops += 1;
       this.needsNetResync = true;
+      this.netResyncReason = 'invalid_authoritative_position';
       this.warnInvalidAuthoritativePosition(snapshot, me, effectiveLocalId);
       return;
     }
@@ -2405,6 +2419,16 @@ export class GameScene extends Phaser.Scene {
     const clientTiles = this.arena.tiles.flatMap((row) => row.map((tile) => this.encodeWorldTile(tile)));
     this.worldHashServer = payload.world.worldHash || null;
     this.worldHashClient = this.computeWorldHash(clientTiles);
+    if (this.worldHashServer && this.worldHashClient && this.worldHashServer !== this.worldHashClient) {
+      this.needsNetResync = true;
+      this.netResyncReason = 'world_hash_mismatch';
+      console.warn('[MP] world_hash_mismatch', {
+        roomCode: payload.roomCode,
+        matchId: payload.matchId,
+        worldHashServer: this.worldHashServer,
+        worldHashClient: this.worldHashClient,
+      });
+    }
     this.worldReady = true;
     this.invalidPosDrops = 0;
 
@@ -2434,6 +2458,10 @@ export class GameScene extends Phaser.Scene {
     return this.lastSnapshotTick;
   }
 
+  public getLastAppliedSnapshotTick(): number {
+    return this.lastAppliedSnapshotTick;
+  }
+
 
   public getSnapshotRoutingStats(): {
     droppedWrongRoom: number;
@@ -2444,6 +2472,8 @@ export class GameScene extends Phaser.Scene {
     worldReady: boolean;
     worldHashServer: string | null;
     worldHashClient: string | null;
+    needsNetResync: boolean;
+    netResyncReason: string | null;
   } {
     return {
       droppedWrongRoom: this.droppedWrongRoom,
@@ -2454,6 +2484,8 @@ export class GameScene extends Phaser.Scene {
       worldReady: this.worldReady,
       worldHashServer: this.worldHashServer,
       worldHashClient: this.worldHashClient,
+      needsNetResync: this.needsNetResync,
+      netResyncReason: this.netResyncReason,
     };
   }
 

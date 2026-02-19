@@ -604,7 +604,7 @@ export function WsDebugOverlay({
           )}
 
           <div style={{ marginTop: 4 }}>
-            snapshotTick: {tickDebugStats?.snapshotTick ?? '—'} | simulationTick: {tickDebugStats?.simulationTick ?? '—'}
+            serverTick: {tickDebugStats?.serverTick ?? '—'} | snapshotTick: {tickDebugStats?.snapshotTick ?? '—'} | appliedSnapshotTick: {tickDebugStats?.lastAppliedSnapshotTick ?? '—'} | lastEventTick: {tickDebugStats?.lastEventTick ?? '—'} | simulationTick: {tickDebugStats?.simulationTick ?? '—'}
           </div>
 
           <div style={{ marginTop: 4 }}>
@@ -640,7 +640,16 @@ export function WsDebugOverlay({
             droppedWrongRoom: {tickDebugStats?.droppedWrongRoom ?? 0} | invalidPosDrops: {tickDebugStats?.invalidPosDrops ?? 0} | lastSnapshotRoom: {tickDebugStats?.lastSnapshotRoom ?? '—'}
           </div>
           <div>
+            eventsBuffered: {tickDebugStats?.eventsBuffered ?? 0} | eventsDroppedDup: {tickDebugStats?.eventsDroppedDup ?? 0} | eventsDroppedOutOfOrder: {tickDebugStats?.eventsDroppedOutOfOrder ?? 0}
+          </div>
+          <div>
             worldReady: {tickDebugStats?.worldReady ? 'yes' : 'no'} | worldHashServer: {tickDebugStats?.worldHashServer ?? '—'} | worldHashClient: {tickDebugStats?.worldHashClient ?? '—'}
+          </div>
+          <div>
+            needsNetResync: {String(tickDebugStats?.needsNetResync ?? false)} | netResyncReason: {tickDebugStats?.netResyncReason ?? '—'}
+          </div>
+          <div>
+            bombGated: {String(tickDebugStats?.bombInputGated ?? false)} | bombGateReason: {tickDebugStats?.bombGateReason ?? '—'}
           </div>
 
           <div style={{ marginTop: 4 }}>
