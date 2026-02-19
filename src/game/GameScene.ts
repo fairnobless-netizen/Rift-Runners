@@ -475,6 +475,11 @@ export class GameScene extends Phaser.Scene {
     this.simulationTick += 1;
     this.processLocalInputQueue();
     this.prediction.updateFixed();
+
+    if (!this.worldReady) {
+      return;
+    }
+
     this.remotePlayers?.update(this.simulationTick, this.snapshotBuffer, this.localTgUserId);
   }
 
