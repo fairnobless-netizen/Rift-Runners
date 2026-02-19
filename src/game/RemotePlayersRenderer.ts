@@ -105,6 +105,11 @@ export class RemotePlayersRenderer {
   }
 
   resetNetState() {
+    for (const view of this.players.values()) {
+      view.container.destroy(true);
+    }
+    this.players.clear();
+
     this.renderTick = -1;
     this.bufferSize = 0;
 
