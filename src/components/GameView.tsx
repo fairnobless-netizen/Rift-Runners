@@ -64,6 +64,7 @@ import {
   type WalletLedgerEntry,
 } from '../game/wallet';
 import { WsDebugOverlay } from './WsDebugOverlay';
+import { MultiplayerInspectorOverlay } from './MultiplayerInspectorOverlay';
 import { useWsClient } from '../ws/useWsClient';
 import type { WsDebugMetrics } from '../ws/wsTypes';
 import { resolveDevIdentity } from '../utils/devIdentity';
@@ -325,6 +326,13 @@ export default function GameView(): JSX.Element {
   const firstSnapshotReadyRef = useRef(false);
   const pendingSnapshotRef = useRef<MatchSnapshotMessage['snapshot'] | null>(null);
   const lastAppliedSnapshotTickRef = useRef<number | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [lastWorldInitAt, setLastWorldInitAt] = useState<number | null>(null);
+  const [lastSnapshotAt, setLastSnapshotAt] = useState<number | null>(null);
+  const [lastRecvSnapshotTick, setLastRecvSnapshotTick] = useState<number | null>(null);
+  const [wrongMatchDrops, setWrongMatchDrops] = useState(0);
+  const [duplicateTickDrops, setDuplicateTickDrops] = useState(0);
+
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
@@ -1039,6 +1047,11 @@ export default function GameView(): JSX.Element {
       setRestartVote(null);
       setMatchEndState(null);
       setRoomsError(null);
+      setWrongMatchDrops(0);
+      setDuplicateTickDrops(0);
+      setLastWorldInitAt(null);
+      setLastSnapshotAt(null);
+      setLastRecvSnapshotTick(null);
       handledMatchEventIdsRef.current.clear();
     }
   }, [currentRoom?.roomCode]);
@@ -1169,6 +1182,7 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    setLastWorldInitAt(Date.now());
     const gotRoomCode = lastWorldInit.roomCode ?? null;
     const gotMatchId = lastWorldInit.matchId ?? null;
 
@@ -1194,6 +1208,7 @@ export default function GameView(): JSX.Element {
 
     const activeExpectedMatchId = expectedMatchIdRef.current;
     if (!activeExpectedMatchId || gotMatchId !== activeExpectedMatchId) {
+      setWrongMatchDrops((v) => v + 1);
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_world_init_match_mismatch', {
         expectedRoomCode,
         expectedMatchId: activeExpectedMatchId,
@@ -1265,6 +1280,8 @@ export default function GameView(): JSX.Element {
     if (!last) return;
 
     const snapshot = last.snapshot;
+    setLastSnapshotAt(Date.now());
+    setLastRecvSnapshotTick(snapshot.tick ?? null);
     if (!expectedRoomCode) {
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot_no_expected_room', {
         expectedRoomCode,
@@ -1301,6 +1318,7 @@ export default function GameView(): JSX.Element {
 
     const snapshotExpectedMatchId = expectedMatchIdRef.current;
     if (!snapshotExpectedMatchId || gotMatchId !== snapshotExpectedMatchId) {
+      setWrongMatchDrops((v) => v + 1);
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot_match_mismatch', {
         expectedRoomCode,
         expectedMatchId: snapshotExpectedMatchId,
@@ -1312,6 +1330,7 @@ export default function GameView(): JSX.Element {
     }
 
     if (snapshot.tick === lastAppliedSnapshotTickRef.current) {
+      setDuplicateTickDrops((v) => v + 1);
       return;
     }
 
@@ -2904,6 +2923,31 @@ export default function GameView(): JSX.Element {
 
       <DiagnosticsOverlay enabled={isMultiplayerDebugEnabled} />
 
+
+      {isMultiplayerDebugEnabled && inspectorOpen ? (
+        <MultiplayerInspectorOverlay
+          connected={ws.connected}
+          identity={{ tgUserId: localTgUserId ?? undefined, clientId: devIdentity.clientId, displayName: profileName }}
+          inboundTrace={ws.inboundTrace}
+          outboundTrace={ws.outboundTrace}
+          tickDebugStats={tickDebugStats}
+          binding={{
+            currentRoomCode: currentRoom?.roomCode ?? null,
+            expectedMatchId: expectedMatchIdRef.current,
+            worldReady: worldReadyRef.current,
+            lastWorldInitAt,
+            lastSnapshotAt,
+            lastRecvSnapshotTick,
+            lastAppliedSnapshotTick: lastAppliedSnapshotTickRef.current,
+            bufferedSnapshotsCount: pendingSnapshotRef.current ? 1 : 0,
+            wrongRoomDrops: tickDebugStats?.droppedWrongRoom ?? 0,
+            wrongMatchDrops,
+            duplicateTickDrops,
+            invalidPosDrops: tickDebugStats?.invalidPosDrops ?? 0,
+          }}
+        />
+      ) : null}
+
       <WsDebugOverlay
         connected={ws.connected}
         messages={ws.messages}
@@ -2928,6 +2972,8 @@ export default function GameView(): JSX.Element {
         onMove={(dir) => {
           sendMatchMove(dir);
         }}
+        inspectorEnabled={inspectorOpen}
+        onToggleInspector={() => setInspectorOpen((v) => !v)}
       />
     </main>
   );

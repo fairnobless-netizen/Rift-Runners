@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { diagnosticsStore } from '../debug/diagnosticsStore';
 import { WsClient } from './wsClient';
-import type { WsClientMessage, WsServerMessage } from './wsTypes';
+import type {
+  WsClientMessage,
+  WsInboundTraceEntry,
+  WsOutboundTraceEntry,
+  WsServerMessage,
+} from './wsTypes';
 
 export type NetSimPresetId = 'good-wifi' | '4g-ok' | 'bad-4g' | 'train';
 
@@ -141,6 +146,8 @@ export function useWsClient(token?: string) {
 
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<WsServerMessage[]>([]);
+  const [inboundTrace, setInboundTrace] = useState<WsInboundTraceEntry[]>([]);
+  const [outboundTrace, setOutboundTrace] = useState<WsOutboundTraceEntry[]>([]);
   const [urlUsed, setUrlUsed] = useState<string>('');
   const [lastError, setLastError] = useState<string | null>(null);
 
@@ -280,6 +287,9 @@ export function useWsClient(token?: string) {
           }));
         }
 
+        const recvAt = Date.now();
+        setInboundTrace((prev) => [...prev.slice(-80), { at: recvAt, message: msg }]);
+
         const config = netSimConfigRef.current;
         const shouldSimulateSnapshot = import.meta.env.DEV && msg.type === 'match:snapshot' && config.enabled;
         if (shouldSimulateSnapshot && shouldDrop(config)) return;
@@ -323,6 +333,8 @@ export function useWsClient(token?: string) {
   return {
     connected,
     messages,
+    inboundTrace,
+    outboundTrace,
     urlUsed,
     lastError,
     netSimConfig,
@@ -349,6 +361,8 @@ export function useWsClient(token?: string) {
       }));
     },
     send: (msg: WsClientMessage) => {
+      const sentAt = Date.now();
+      setOutboundTrace((prev) => [...prev.slice(-80), { at: sentAt, message: msg }]);
       diagnosticsStore.log('WS', 'INFO', `send:${msg.type}`, {
         type: msg.type,
         preview: JSON.stringify(msg).slice(0, 1000),
