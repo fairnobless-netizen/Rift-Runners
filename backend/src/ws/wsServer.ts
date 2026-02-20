@@ -2,6 +2,7 @@ import { WebSocket } from 'ws';
 import type { RawData, Server as WebSocketServer } from 'ws';
 
 import type { MatchClientMessage, MatchServerMessage } from '../mp/protocol';
+import type { MatchState } from '../mp/types';
 import { startMatch, tryPlaceBomb } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 
@@ -102,6 +103,55 @@ function isSocketAttachedToRoom(ctx: ClientCtx, room: RoomState): boolean {
   return room.players.get(ctx.tgUserId) === ctx.socket;
 }
 
+function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, { type: 'match:snapshot' }>['snapshot'] {
+  return {
+    version: 'match_v1',
+    roomCode: match.roomId,
+    matchId: match.matchId,
+    tick: match.tick,
+    serverTime: Date.now(),
+    world: {
+      gridW: match.world.gridW,
+      gridH: match.world.gridH,
+      worldHash: match.world.worldHash,
+      bombs: Array.from(match.bombs.values()).map((bomb) => ({
+        id: bomb.id,
+        x: bomb.x,
+        y: bomb.y,
+        ownerId: bomb.ownerId,
+        tickPlaced: bomb.tickPlaced,
+        explodeAtTick: bomb.explodeAtTick,
+      })),
+    },
+    players: Array.from(match.players.values()).map((player) => ({
+      tgUserId: player.tgUserId,
+      displayName: player.displayName,
+      colorId: player.colorId,
+      skinId: player.skinId,
+      lastInputSeq: player.lastInputSeq,
+      x: player.x,
+      y: player.y,
+      lives: match.playerLives.get(player.tgUserId) ?? 0,
+      eliminated: match.eliminatedPlayers.has(player.tgUserId),
+    })),
+  };
+}
+
+function sendInitialSnapshot(roomId: string, match: MatchState) {
+  if (match.roomId !== roomId) {
+    return;
+  }
+
+  if (getMatch(match.matchId) !== match) {
+    return;
+  }
+
+  broadcastToRoomMatch(roomId, match.matchId, {
+    type: 'match:snapshot',
+    snapshot: buildSnapshotFromMatch(match),
+  });
+}
+
 function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerMessage) {
   const room = rooms.get(roomId);
   if (!room) {
@@ -119,16 +169,83 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
     return;
   }
 
+  const skippedByReason = new Map<string, number>();
+  let clientsConsidered = 0;
+  let sentCount = 0;
+  let clientMatchIdMismatchCount = 0;
+
+  const clientsBySocket = new Map<WebSocket, ClientCtx>();
   for (const client of clients) {
-    if (client.roomId !== roomId || client.matchId !== matchId) {
+    clientsBySocket.set(client.socket, client);
+  }
+
+  const addSkipReason = (reason: string) => {
+    skippedByReason.set(reason, (skippedByReason.get(reason) ?? 0) + 1);
+  };
+
+  for (const [tgUserId, socket] of room.players.entries()) {
+    clientsConsidered += 1;
+
+    if (socket.readyState !== WebSocket.OPEN) {
+      addSkipReason('socket_closed');
       continue;
+    }
+
+    const client = clientsBySocket.get(socket);
+    if (!client) {
+      addSkipReason('missing_client_ctx');
+      continue;
+    }
+
+    if (client.roomId !== roomId) {
+      addSkipReason('client_not_in_room');
+      continue;
+    }
+
+    if (client.matchId !== matchId) {
+      clientMatchIdMismatchCount += 1;
+      logWsEvent('ws_snapshot_recipient_mismatch', {
+        roomId,
+        roomCode: roomId,
+        matchId,
+        serverTick: msg.type === 'match:snapshot' ? msg.snapshot.tick : null,
+        tgUserId,
+        clientMatchId: client.matchId,
+      });
     }
 
     if (!isSocketAttachedToRoom(client, room)) {
+      addSkipReason('socket_not_attached_to_room_players');
       continue;
     }
 
-    send(client.socket, msg);
+    send(socket, msg);
+    sentCount += 1;
+  }
+
+  if (msg.type === 'match:snapshot') {
+    const skippedCount = clientsConsidered - sentCount;
+    logWsEvent('ws_snapshot_broadcast', {
+      roomId,
+      roomCode: roomId,
+      matchId,
+      serverTick: msg.snapshot.tick,
+      playersInRoom: room.players.size,
+      clientsConsidered,
+      sentCount,
+      skippedCount,
+      clientMatchIdMismatchCount,
+    });
+
+    if (skippedByReason.size > 0) {
+      logWsEvent('ws_snapshot_broadcast_skips', {
+        roomId,
+        roomCode: roomId,
+        matchId,
+        serverTick: msg.snapshot.tick,
+        reasons: Object.fromEntries(skippedByReason.entries()),
+      });
+    }
   }
 }
 
@@ -248,6 +365,11 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
       tiles: [...activeMatch.world.tiles],
       worldHash: activeMatch.world.worldHash,
     },
+  });
+
+  send(ctx.socket, {
+    type: 'match:snapshot',
+    snapshot: buildSnapshotFromMatch(activeMatch),
   });
 
   logWsEvent('ws_rejoin_sync_sent', {
@@ -432,6 +554,8 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
           worldHash: match.world.worldHash,
         },
       });
+
+      sendInitialSnapshot(room.roomId, match);
 
       startMatch(match, (snapshot, events) => {
         const activeRoom = rooms.get(room.roomId);
@@ -692,6 +816,8 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
           worldHash: match.world.worldHash,
         },
       });
+
+      sendInitialSnapshot(room.roomId, match);
 
       startMatch(match, (snapshot, events) => {
         const activeRoom = rooms.get(room.roomId);
