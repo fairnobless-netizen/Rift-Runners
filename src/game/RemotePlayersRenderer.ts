@@ -580,13 +580,25 @@ export class RemotePlayersRenderer {
       const progress = state.isMoving ? Phaser.Math.Clamp((now - state.moveStartedAtMs) / duration, 0, 1) : 1;
       const currentX = state.isMoving ? Phaser.Math.Linear(state.moveFromX, state.targetX, progress) : state.targetX;
       const currentY = state.isMoving ? Phaser.Math.Linear(state.moveFromY, state.targetY, progress) : state.targetY;
-      state.moveFromX = currentX;
-      state.moveFromY = currentY;
-      state.targetX = gridX;
-      state.targetY = gridY;
-      state.moveStartedAtMs = now;
-      state.moveDurationMs = Math.max(1, moveDurationMs);
-      state.isMoving = true;
+      const jumpDistance = Math.hypot(gridX - currentX, gridY - currentY);
+
+      if (jumpDistance > 1.5) {
+        state.moveFromX = gridX;
+        state.moveFromY = gridY;
+        state.targetX = gridX;
+        state.targetY = gridY;
+        state.moveStartedAtMs = 0;
+        state.moveDurationMs = Math.max(1, moveDurationMs);
+        state.isMoving = false;
+      } else {
+        state.moveFromX = currentX;
+        state.moveFromY = currentY;
+        state.targetX = gridX;
+        state.targetY = gridY;
+        state.moveStartedAtMs = now;
+        state.moveDurationMs = Math.max(1, moveDurationMs);
+        state.isMoving = true;
+      }
     }
 
     const progress = state.isMoving

@@ -141,6 +141,8 @@ export class GameScene extends Phaser.Scene {
   private currentRoomCode: string | null = null;
   private currentMatchId: string | null = null;
   private droppedWrongRoom = 0;
+  private droppedWrongMatch = 0;
+  private droppedDuplicateTick = 0;
   // MP local render smoothing (host jitter fix)
   private localRenderPos: { x: number; y: number } | null = null;
   private invalidPosDrops = 0;
@@ -2286,11 +2288,14 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.currentMatchId && snapshot.matchId !== this.currentMatchId) {
-      this.droppedWrongRoom += 1;
+      this.droppedWrongMatch += 1;
       return false;
     }
 
-    if (snapshot.tick <= this.lastSnapshotTick) return false;
+    if (snapshot.tick <= this.lastSnapshotTick) {
+      this.droppedDuplicateTick += 1;
+      return false;
+    }
 
     if (localTgUserId) {
       this.localTgUserId = localTgUserId;
@@ -2361,15 +2366,33 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    const localX = this.player.gridX;
+    const localY = this.player.gridY;
+    const driftTiles = Math.abs(me.x - localX) + Math.abs(me.y - localY);
+    const isActiveTileMove = this.player.isMoving || this.player.targetX !== null || this.player.targetY !== null;
+
+    if (driftTiles > 1 || this.needsNetResync) {
+      this.setLocalPlayerPosition(me.x, me.y);
+      this.localRenderPos = { x: me.x, y: me.y };
+      this.prediction.reset?.();
+      return;
+    }
+
     this.prediction.reconcile({
       serverX: me.x,
       serverY: me.y,
-      localX: this.player.gridX,
-      localY: this.player.gridY,
+      localX,
+      localY,
       lastInputSeq: me.lastInputSeq,
       setPosition: (x, y) => this.setLocalPlayerPosition(x, y),
       applyMove: (dx, dy) => this.applyLocalMove(dx, dy),
     });
+
+    if (isActiveTileMove && this.localRenderPos) {
+      const pullFactor = 0.2;
+      this.localRenderPos.x += (me.x - this.localRenderPos.x) * pullFactor;
+      this.localRenderPos.y += (me.y - this.localRenderPos.y) * pullFactor;
+    }
   }
 
 
@@ -2441,7 +2464,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.currentMatchId && payload.matchId !== this.currentMatchId) {
-      this.droppedWrongRoom += 1;
+      this.droppedWrongMatch += 1;
       return false;
     }
 
@@ -2582,6 +2605,8 @@ export class GameScene extends Phaser.Scene {
 
   public getSnapshotRoutingStats(): {
     droppedWrongRoom: number;
+    droppedWrongMatch: number;
+    droppedDuplicateTick: number;
     invalidPosDrops: number;
     lastSnapshotRoom: string | null;
     currentRoomCode: string | null;
@@ -2594,6 +2619,8 @@ export class GameScene extends Phaser.Scene {
   } {
     return {
       droppedWrongRoom: this.droppedWrongRoom,
+      droppedWrongMatch: this.droppedWrongMatch,
+      droppedDuplicateTick: this.droppedDuplicateTick,
       invalidPosDrops: this.invalidPosDrops,
       lastSnapshotRoom: this.lastSnapshotRoom,
       currentRoomCode: this.currentRoomCode,
