@@ -2215,8 +2215,7 @@ export class GameScene extends Phaser.Scene {
     const delayTicks = (this.remotePlayers as any)?.getDelayTicks?.() ?? 2;
     const renderTick = simulationTick - delayTicks;
 
-    const latest = this.snapshotBuffer[this.snapshotBuffer.length - 1];
-    const local = latest.players.find((p) => p.tgUserId === this.localTgUserId);
+    const local = this.getLocalRenderTarget(this.localTgUserId, renderTick);
     if (!local) return;
 
     if (!this.localRenderPos) {
@@ -2270,6 +2269,27 @@ export class GameScene extends Phaser.Scene {
     const cadenceRaw = (this.remotePlayers as any)?.getDebugStats?.()?.adaptiveEveryTicks;
     const raw = Number.isFinite(cadenceRaw) ? cadenceRaw : fallback;
     return Math.max(2, Math.min(6, Math.round(raw)));
+  }
+
+  private getLocalRenderTarget(localTgUserId: string, renderTick: number): { x: number; y: number } | null {
+    for (let i = this.snapshotBuffer.length - 1; i >= 0; i -= 1) {
+      const snapshot = this.snapshotBuffer[i];
+      if (snapshot.tick > renderTick) continue;
+
+      const local = snapshot.players.find((player) => player.tgUserId === localTgUserId);
+      if (local) {
+        return { x: local.x, y: local.y };
+      }
+    }
+
+    for (let i = this.snapshotBuffer.length - 1; i >= 0; i -= 1) {
+      const local = this.snapshotBuffer[i].players.find((player) => player.tgUserId === localTgUserId);
+      if (local) {
+        return { x: local.x, y: local.y };
+      }
+    }
+
+    return null;
   }
 
   private snapLocalRenderPosition(x: number, y: number): void {
