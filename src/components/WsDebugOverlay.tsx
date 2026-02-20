@@ -22,10 +22,13 @@ type PredictionStats = {
   historySize?: number;
   missingHistoryCount?: number;
   reconcileReason?: 'none' | 'soft' | 'hard';
+  ackLastInputSeq?: number;
 };
 
 function formatPredictionLine(localInputSeq: number, ps: PredictionStats): string {
-  return `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${ps.lastAckSeq}, unacked=${ps.pendingCount}, predErr=${(ps.predictionError ?? 0).toFixed(3)}, predErrEma=${(ps.predictionErrorEma ?? 0).toFixed(3)}, hardT=(${(ps.predHardEnter ?? 0).toFixed(2)}/${(ps.predHardExit ?? 0).toFixed(2)}), hist=${ps.historySize ?? 0}, missHist=${ps.missingHistoryCount ?? 0}, reason=${ps.reconcileReason ?? 'none'}, hardSnaps=${ps.correctionCount}, softCorrections=${ps.softCorrectionCount}, drift=${ps.drift.toFixed(3)}, bias=(${ps.biasX.toFixed(3)}, ${ps.biasY.toFixed(3)}), dropped=${ps.droppedInputCount}`;
+  const ackLastInputSeq = ps.ackLastInputSeq ?? ps.lastAckSeq;
+  const unacked = Math.max(0, localInputSeq - ackLastInputSeq);
+  return `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${ackLastInputSeq}, unacked=${unacked}, predErr=${(ps.predictionError ?? 0).toFixed(3)}, predErrEma=${(ps.predictionErrorEma ?? 0).toFixed(3)}, hardT=(${(ps.predHardEnter ?? 0).toFixed(2)}/${(ps.predHardExit ?? 0).toFixed(2)}), hist=${ps.historySize ?? 0}, missHist=${ps.missingHistoryCount ?? 0}, reason=${ps.reconcileReason ?? 'none'}, hardSnaps=${ps.correctionCount}, softCorrections=${ps.softCorrectionCount}, drift=${ps.drift.toFixed(3)}, bias=(${ps.biasX.toFixed(3)}, ${ps.biasY.toFixed(3)}), dropped=${ps.droppedInputCount}`;
 }
 
 
@@ -93,6 +96,7 @@ export function WsDebugOverlay({
   onStartMatch,
   onMove,
   localInputSeq,
+  ackLastInputSeq,
   getLocalPlayerPosition,
   inspectorEnabled,
   onToggleInspector,
@@ -117,6 +121,7 @@ export function WsDebugOverlay({
   onStartMatch: () => void;
   onMove: (dir: 'up' | 'down' | 'left' | 'right') => void;
   localInputSeq: number;
+  ackLastInputSeq: number;
   getLocalPlayerPosition?: () => { x: number; y: number } | null;
   inspectorEnabled: boolean;
   onToggleInspector: () => void;
@@ -263,8 +268,8 @@ export function WsDebugOverlay({
           moved,
           blocked,
           inputSeq: latestLocalInputSeqRef.current,
-          ack: ps?.lastAckSeq ?? null,
-          unacked: ps?.pendingCount ?? null,
+          ack: ackLastInputSeq,
+          unacked: Math.max(0, latestLocalInputSeqRef.current - ackLastInputSeq),
           predErr: ps?.predictionError ?? null,
           predErrEma: ps?.predictionErrorEma ?? null,
           reason: ps?.reconcileReason ?? null,
@@ -331,13 +336,16 @@ export function WsDebugOverlay({
   };
 
   const latestStatsRef = useRef<{ predictionStats: PredictionStats | null; tickDebugStats: WsDebugMetrics | null }>({
-    predictionStats,
+    predictionStats: predictionStats ? { ...predictionStats, ackLastInputSeq } : null,
     tickDebugStats,
   });
 
   useEffect(() => {
-    latestStatsRef.current = { predictionStats, tickDebugStats };
-  }, [predictionStats, tickDebugStats]);
+    latestStatsRef.current = {
+      predictionStats: predictionStats ? { ...predictionStats, ackLastInputSeq } : null,
+      tickDebugStats,
+    };
+  }, [predictionStats, tickDebugStats, ackLastInputSeq]);
 
   useEffect(() => {
     if (!isTelemetryRecording) return;
@@ -682,7 +690,9 @@ export function WsDebugOverlay({
           </div>
 
           <div style={{ marginTop: 8 }}>
-            {predictionStats ? formatPredictionLine(localInputSeq, predictionStats) : 'Prediction: —'}
+            {predictionStats
+              ? formatPredictionLine(localInputSeq, { ...predictionStats, ackLastInputSeq })
+              : 'Prediction: —'}
           </div>
 
           {import.meta.env.DEV && telemetrySummary && (

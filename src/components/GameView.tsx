@@ -298,6 +298,7 @@ export default function GameView(): JSX.Element {
   const [storeLoading, setStoreLoading] = useState(false);
   const [storeError, setStoreError] = useState<string | null>(null);
   const [predictionStats, setPredictionStats] = useState<PredictionStats | null>(null);
+  const [ackLastInputSeq, setAckLastInputSeq] = useState(0);
   const [tickDebugStats, setTickDebugStats] = useState<WsDebugMetrics | null>(null);
   const [bombGateReason, setBombGateReason] = useState<string | null>('phase_not_started');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1333,6 +1334,14 @@ export default function GameView(): JSX.Element {
         snapTick: snapshot.tick ?? null,
       });
       return;
+    }
+
+    if (localTgUserId) {
+      const players = Array.isArray(snapshot.players) ? snapshot.players : [];
+      const me = players.find((player) => String(player?.tgUserId) === String(localTgUserId));
+      if (typeof me?.lastInputSeq === 'number') {
+        setAckLastInputSeq(me.lastInputSeq);
+      }
     }
 
     if (snapshot.tick === lastAppliedSnapshotTickRef.current) {
@@ -2967,6 +2976,7 @@ export default function GameView(): JSX.Element {
         onToggleNetSim={ws.setNetSimEnabled}
         onSelectNetSimPreset={ws.setNetSimPreset}
         predictionStats={predictionStats}
+        ackLastInputSeq={ackLastInputSeq}
         tickDebugStats={tickDebugStats}
         rttMs={ws.rttMs}
         rttJitterMs={ws.rttJitterMs}
