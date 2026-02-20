@@ -33,6 +33,7 @@ import {
   GAME_CONFIG,
   DOOR_CONFIG,
   BOSS_CONFIG,
+  scaleMovementDurationMs,
 } from './config';
 import {
   campaignStateToLevelIndex,
@@ -97,7 +98,6 @@ interface FlameBeamModel {
 
 const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
 const LEVELS_PER_ZONE = BOSS_CONFIG.zonesPerStage;
-const MOVEMENT_SPEED_SCALE = 0.66;
 const TURN_BUFFER_MS = 220;
 const INITIAL_LIVES = 3;
 const MAX_LIVES = 6;
@@ -992,16 +992,11 @@ export class GameScene extends Phaser.Scene {
   }
 
 
-
-  private scaleMovementDuration(durationMs: number): number {
-    return Math.round(durationMs / MOVEMENT_SPEED_SCALE);
-  }
-
   private getScaledEnemyMoveInterval(kind: EnemyKind): number {
     const baseInterval = kind === 'elite'
       ? Math.max(GAME_CONFIG.enemyMoveIntervalMinMs, Math.floor(GAME_CONFIG.enemyMoveIntervalMs * 0.7))
       : GAME_CONFIG.enemyMoveIntervalMs;
-    return this.scaleMovementDuration(baseInterval);
+    return scaleMovementDurationMs(baseInterval);
   }
   private spawnPlayer(): void {
     this.player.gridX = 1;
@@ -1247,7 +1242,7 @@ export class GameScene extends Phaser.Scene {
   // on the first available tile decision point.
   private queueDirection(direction: Direction, time: number): void {
     this.queuedDirection = direction;
-    this.queuedDirectionUntilMs = time + this.scaleMovementDuration(TURN_BUFFER_MS);
+    this.queuedDirectionUntilMs = time + scaleMovementDurationMs(TURN_BUFFER_MS);
   }
 
   private getBufferedDirection(time: number): Direction | null {
@@ -1287,14 +1282,14 @@ export class GameScene extends Phaser.Scene {
       const heldSince = this.heldSince[dir];
       if (heldSince === undefined) {
         this.heldSince[dir] = time;
-        this.nextRepeatAt[dir] = time + this.scaleMovementDuration(GAME_CONFIG.moveRepeatDelayMs);
+        this.nextRepeatAt[dir] = time + scaleMovementDurationMs(GAME_CONFIG.moveRepeatDelayMs);
         intents.push({ dir, justPressed: true });
         continue;
       }
 
       const repeatAt = this.nextRepeatAt[dir] ?? Number.POSITIVE_INFINITY;
       if (time >= repeatAt) {
-        this.nextRepeatAt[dir] = repeatAt + this.scaleMovementDuration(GAME_CONFIG.moveRepeatIntervalMs);
+        this.nextRepeatAt[dir] = repeatAt + scaleMovementDurationMs(GAME_CONFIG.moveRepeatIntervalMs);
         intents.push({ dir, justPressed: false });
       }
     }
@@ -1319,7 +1314,7 @@ export class GameScene extends Phaser.Scene {
     this.player.gridX = nx;
     this.player.gridY = ny;
     this.player.moveStartedAtMs = time;
-    this.player.moveDurationMs = this.scaleMovementDuration(GAME_CONFIG.moveDurationMs);
+    this.player.moveDurationMs = scaleMovementDurationMs(GAME_CONFIG.moveDurationMs);
     this.player.isMoving = true;
     this.player.state = 'move';
     this.emitSimulation('player.move.start', time, { from: { x: this.player.moveFromX, y: this.player.moveFromY }, to: { x: nx, y: ny } });
@@ -2167,7 +2162,7 @@ export class GameScene extends Phaser.Scene {
     this.player.gridX = nextX;
     this.player.gridY = nextY;
     this.player.moveStartedAtMs = now;
-    this.player.moveDurationMs = this.scaleMovementDuration(GAME_CONFIG.moveDurationMs);
+    this.player.moveDurationMs = scaleMovementDurationMs(GAME_CONFIG.moveDurationMs);
     this.player.isMoving = true;
     this.player.state = 'move';
     return true;
@@ -2461,9 +2456,16 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  public applyAuthoritativeBombExploded(payload: { bombId: string; x: number; y: number }): void {
+  public applyAuthoritativeBombExploded(payload: { bombId: string; x: number; y: number; impacts: Array<{ x: number; y: number }> }): void {
     this.arena.bombs.delete(payload.bombId);
-    this.spawnFlame(payload.x, payload.y, this.time.now + GAME_CONFIG.flameLifetimeMs, 'center');
+    const expiresAt = this.time.now + GAME_CONFIG.flameLifetimeMs;
+    this.spawnFlameBeams(payload.bombId, payload.x, payload.y, payload.impacts, expiresAt);
+    for (const impact of payload.impacts) {
+      const isCenter = impact.x === payload.x && impact.y === payload.y;
+      const segment: FlameSegmentKind = isCenter ? 'center' : 'arm';
+      const axis: FlameArmAxis | undefined = !isCenter ? (impact.x === payload.x ? 'vertical' : 'horizontal') : undefined;
+      this.spawnFlame(impact.x, impact.y, expiresAt, segment, axis);
+    }
   }
 
   public applyAuthoritativeTilesDestroyed(payload: { tiles: Array<{ x: number; y: number }> }): void {

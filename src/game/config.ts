@@ -1,5 +1,12 @@
 import type { AssetRegistry } from './types';
 
+
+export const MOVEMENT_SPEED_SCALE = 0.66 as const;
+
+export function scaleMovementDurationMs(ms: number): number {
+  return Math.round(ms / MOVEMENT_SPEED_SCALE);
+}
+
 export const GAME_CONFIG = {
   gridWidth: 27,
   gridHeight: 14,

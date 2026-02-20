@@ -56,6 +56,7 @@ export type MatchBombExploded = {
   bombId: string;
   x: number;
   y: number;
+  impacts: Array<{ x: number; y: number }>;
 };
 
 export type MatchTilesDestroyed = {

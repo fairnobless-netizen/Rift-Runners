@@ -185,6 +185,7 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
       bombId: dueBomb.id,
       x: dueBomb.x,
       y: dueBomb.y,
+      impacts,
     });
 
     if (destroyedTiles.length > 0) {
