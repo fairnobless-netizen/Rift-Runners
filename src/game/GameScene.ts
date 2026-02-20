@@ -146,6 +146,15 @@ export class GameScene extends Phaser.Scene {
   private droppedDuplicateTick = 0;
   // MP local render smoothing (server-first local movement)
   private localRenderPos: { x: number; y: number } | null = null;
+  private localSegment?: {
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+    startTick: number;
+    durationTicks: number;
+  };
+  private lastLocalTarget?: { x: number; y: number };
   private localRenderSnapCount = 0;
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
@@ -2203,100 +2212,70 @@ export class GameScene extends Phaser.Scene {
     if (!this.localTgUserId) return;
     if (this.snapshotBuffer.length === 0) return;
 
-    // Keep local rendering on the same delayed playhead as remote players.
     const delayTicks = (this.remotePlayers as any)?.getDelayTicks?.() ?? 2;
     const renderTick = simulationTick - delayTicks;
 
-    const pos = this.getPlateauInterpolatedPos(this.snapshotBuffer, renderTick, this.localTgUserId);
-    if (!pos) return;
+    const latest = this.snapshotBuffer[this.snapshotBuffer.length - 1];
+    const local = latest.players.find((p) => p.tgUserId === this.localTgUserId);
+    if (!local) return;
 
     if (!this.localRenderPos) {
-      this.localRenderPos = { x: pos.x, y: pos.y };
+      this.localRenderPos = { x: local.x, y: local.y };
     }
 
-    const dx = pos.x - this.localRenderPos.x;
-    const dy = pos.y - this.localRenderPos.y;
+    if (!this.lastLocalTarget) {
+      this.lastLocalTarget = { x: local.x, y: local.y };
+    }
+
+    if (local.x !== this.lastLocalTarget.x || local.y !== this.lastLocalTarget.y) {
+      this.localSegment = {
+        fromX: this.localRenderPos.x,
+        fromY: this.localRenderPos.y,
+        toX: local.x,
+        toY: local.y,
+        startTick: renderTick,
+        durationTicks: this.getLocalStepDurationTicks(),
+      };
+      this.lastLocalTarget = { x: local.x, y: local.y };
+    }
+
+    if (this.localSegment) {
+      const duration = Math.max(1, this.localSegment.durationTicks);
+      const alpha = Phaser.Math.Clamp((renderTick - this.localSegment.startTick) / duration, 0, 1);
+      this.localRenderPos.x = Phaser.Math.Linear(this.localSegment.fromX, this.localSegment.toX, alpha);
+      this.localRenderPos.y = Phaser.Math.Linear(this.localSegment.fromY, this.localSegment.toY, alpha);
+      if (alpha >= 1) {
+        this.localSegment = undefined;
+      }
+    }
+
+    const dx = local.x - this.localRenderPos.x;
+    const dy = local.y - this.localRenderPos.y;
     const driftTiles = Math.hypot(dx, dy);
 
     if (this.needsNetResync || driftTiles > MP_RENDER_SNAP_DISTANCE_TILES) {
-      this.snapLocalRenderPosition(pos.x, pos.y);
+      this.snapLocalRenderPosition(local.x, local.y);
       return;
     }
 
-    // No exponential catch-up: pos is already time-interpolated (constant speed).
-    this.localRenderPos.x = pos.x;
-    this.localRenderPos.y = pos.y;
-
     const tileSize = GAME_CONFIG.tileSize;
     this.playerSprite.setPosition(
-      pos.x * tileSize + tileSize / 2,
-      pos.y * tileSize + tileSize / 2,
+      this.localRenderPos.x * tileSize + tileSize / 2,
+      this.localRenderPos.y * tileSize + tileSize / 2,
     );
   }
 
-  private getPlateauInterpolatedPos(buffer: MatchSnapshotV1[], renderTick: number, tgUserId: string): { x: number; y: number } | null {
-    if (buffer.length === 0) return null;
-
-    // Find last snapshot at/before renderTick where the player exists.
-    let i = -1;
-    for (let k = buffer.length - 1; k >= 0; k -= 1) {
-      const s = buffer[k];
-      if (s.tick > renderTick) continue;
-      if (s.players?.some((p) => p.tgUserId === tgUserId)) {
-        i = k;
-        break;
-      }
-    }
-    if (i < 0) {
-      const first = buffer[0];
-      const p0 = first.players?.find((p) => p.tgUserId === tgUserId);
-      return p0 ? { x: p0.x, y: p0.y } : null;
-    }
-
-    const posAt = (idx: number) => buffer[idx].players.find((p) => p.tgUserId === tgUserId);
-    const pHere = posAt(i);
-    if (!pHere) return null;
-
-    const curX = pHere.x;
-    const curY = pHere.y;
-
-    // Plateau start: walk backwards while position is unchanged.
-    let start = i;
-    while (start - 1 >= 0) {
-      const prev = posAt(start - 1);
-      if (!prev) break;
-      if (prev.x !== curX || prev.y !== curY) break;
-      start -= 1;
-    }
-
-    // Plateau end: walk forward while position is unchanged.
-    let end = i;
-    while (end + 1 < buffer.length) {
-      const next = posAt(end + 1);
-      if (!next) break;
-      if (next.x !== curX || next.y !== curY) break;
-      end += 1;
-    }
-
-    const nextIdx = end + 1;
-    if (nextIdx >= buffer.length) return { x: curX, y: curY };
-
-    const pNext = posAt(nextIdx);
-    if (!pNext) return { x: curX, y: curY };
-
-    const t0 = buffer[start].tick;
-    const t1 = buffer[nextIdx].tick;
-    if (t1 <= t0) return { x: pNext.x, y: pNext.y };
-
-    const alpha = Phaser.Math.Clamp((renderTick - t0) / (t1 - t0), 0, 1);
-    return {
-      x: Phaser.Math.Linear(curX, pNext.x, alpha),
-      y: Phaser.Math.Linear(curY, pNext.y, alpha),
-    };
+  private getLocalStepDurationTicks(): number {
+    const fallback = 3;
+    const cadenceRaw = (this.remotePlayers as any)?.getDebugStats?.()?.adaptiveEveryTicks;
+    const raw = Number.isFinite(cadenceRaw) ? cadenceRaw : fallback;
+    return Math.max(2, Math.min(6, Math.round(raw)));
   }
 
   private snapLocalRenderPosition(x: number, y: number): void {
     this.localRenderPos = { x, y };
+    this.localSegment = undefined;
+    this.lastLocalTarget = { x, y };
     this.localRenderSnapCount += 1;
     this.placeLocalPlayerSpriteAt(x, y);
   }
@@ -2351,6 +2330,8 @@ export class GameScene extends Phaser.Scene {
     this.prediction.reset?.();
     this.worldReady = false;
     this.localRenderPos = null;
+    this.localSegment = undefined;
+    this.lastLocalTarget = undefined;
     this.localRenderSnapCount = 0;
     this.remotePlayers?.resetNetState?.();
   }
