@@ -264,7 +264,8 @@ export class RemotePlayersRenderer {
       if (localTgUserId && to.tgUserId === localTgUserId) continue;
 
       alive.add(to.tgUserId);
-      this.upsertPlayer(to, to.x, to.y, renderTick, SNAPSHOT_INTERP_MIN_MS, deltaMs);
+      const target = this.getRenderTargetForPlayer(buffer, to.tgUserId, renderTick) ?? { x: to.x, y: to.y };
+      this.upsertPlayer(to, target.x, target.y, renderTick, SNAPSHOT_INTERP_MIN_MS, deltaMs);
     }
 
     this.destroyMissingPlayers(alive);
@@ -479,6 +480,31 @@ export class RemotePlayersRenderer {
         return buffer[i];
       }
     }
+    return undefined;
+  }
+
+  private getRenderTargetForPlayer(
+    buffer: MatchSnapshotV1[],
+    tgUserId: string,
+    renderTick: number,
+  ): { x: number; y: number } | undefined {
+    for (let i = buffer.length - 1; i >= 0; i -= 1) {
+      const snapshot = buffer[i];
+      if (snapshot.tick > renderTick) continue;
+
+      const player = snapshot.players.find((candidate) => candidate.tgUserId === tgUserId);
+      if (player) {
+        return { x: player.x, y: player.y };
+      }
+    }
+
+    for (let i = buffer.length - 1; i >= 0; i -= 1) {
+      const player = buffer[i].players.find((candidate) => candidate.tgUserId === tgUserId);
+      if (player) {
+        return { x: player.x, y: player.y };
+      }
+    }
+
     return undefined;
   }
 
