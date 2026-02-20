@@ -5,6 +5,7 @@ import type {
   WsClientMessage,
   WsInboundTraceEntry,
   WsOutboundTraceEntry,
+  WsSendDebugContext,
   WsServerMessage,
 } from './wsTypes';
 
@@ -360,11 +361,15 @@ export function useWsClient(token?: string) {
         dropRate: preset.dropRate,
       }));
     },
-    send: (msg: WsClientMessage) => {
+    send: (msg: WsClientMessage, debugContext?: WsSendDebugContext) => {
       const sentAt = Date.now();
-      setOutboundTrace((prev) => [...prev.slice(-80), { at: sentAt, message: msg }]);
+      const traceRoomCode = (msg as { roomCode?: string; roomId?: string }).roomCode ?? (msg as { roomId?: string }).roomId ?? debugContext?.roomCode ?? null;
+      const traceMatchId = (msg as { matchId?: string }).matchId ?? debugContext?.expectedMatchId ?? null;
+      setOutboundTrace((prev) => [...prev.slice(-80), { at: sentAt, message: msg, roomCode: traceRoomCode, matchId: traceMatchId }]);
       diagnosticsStore.log('WS', 'INFO', `send:${msg.type}`, {
         type: msg.type,
+        roomCode: traceRoomCode,
+        matchId: traceMatchId,
         preview: JSON.stringify(msg).slice(0, 1000),
       });
       const config = netSimConfigRef.current;

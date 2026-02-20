@@ -24,6 +24,13 @@ export type WsInboundTraceEntry = {
 export type WsOutboundTraceEntry = {
   at: number;
   message: WsClientMessage;
+  roomCode?: string | null;
+  matchId?: string | null;
+};
+
+export type WsSendDebugContext = {
+  roomCode?: string | null;
+  expectedMatchId?: string | null;
 };
 
 export type WsDebugMetrics = {

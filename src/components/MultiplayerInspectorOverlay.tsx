@@ -22,7 +22,7 @@ function fmtAgo(ts: number | null): string {
   return `${sec.toFixed(1)}s ago`;
 }
 
-function fmtMeta(msg: { type: string; [key: string]: unknown }): string {
+function fmtMeta(msg: { type: string; [key: string]: unknown }, trace?: { roomCode?: string | null; matchId?: string | null }): string {
   if (msg.type === 'match:snapshot') {
     const snap = (msg as any).snapshot;
     return `room=${snap?.roomCode ?? '—'} match=${snap?.matchId ?? '—'} tick=${snap?.tick ?? '—'}`;
@@ -30,7 +30,9 @@ function fmtMeta(msg: { type: string; [key: string]: unknown }): string {
   if (msg.type === 'match:world_init') {
     return `room=${(msg as any).roomCode ?? '—'} match=${(msg as any).matchId ?? '—'}`;
   }
-  return `room=${(msg as any).roomCode ?? (msg as any).roomId ?? '—'} match=${(msg as any).matchId ?? '—'} seq=${(msg as any).seq ?? '—'}`;
+  const roomCode = trace?.roomCode ?? (msg as any).roomCode ?? (msg as any).roomId ?? '—';
+  const matchId = trace?.matchId ?? (msg as any).matchId ?? '—';
+  return `room=${roomCode} match=${matchId} seq=${(msg as any).seq ?? '—'}`;
 }
 
 export function MultiplayerInspectorOverlay({
@@ -94,7 +96,7 @@ export function MultiplayerInspectorOverlay({
           {inbound.map((entry, i) => (
             <div key={`${entry.at}-${i}`} style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: 6 }}>
               <div>{((Date.now() - entry.at) / 1000).toFixed(1)}s · {entry.message.type}</div>
-              <div style={{ opacity: 0.85 }}>{fmtMeta(entry.message as any)}</div>
+              <div style={{ opacity: 0.85 }}>{fmtMeta(entry.message as any, entry)}</div>
             </div>
           ))}
         </div>
@@ -106,7 +108,7 @@ export function MultiplayerInspectorOverlay({
           {outbound.map((entry, i) => (
             <div key={`${entry.at}-${i}`} style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: 6 }}>
               <div>{((Date.now() - entry.at) / 1000).toFixed(1)}s · {entry.message.type}</div>
-              <div style={{ opacity: 0.85 }}>{fmtMeta(entry.message as any)}</div>
+              <div style={{ opacity: 0.85 }}>{fmtMeta(entry.message as any, entry)}</div>
             </div>
           ))}
         </div>
