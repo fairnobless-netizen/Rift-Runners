@@ -377,8 +377,14 @@ export default function GameView(): JSX.Element {
     const dy = dir === 'up' ? -1 : dir === 'down' ? 1 : 0;
 
     scene.onLocalMatchInput({ seq, dx, dy });
-    ws.send({ type: 'match:input', seq, payload: { kind: 'move', dir } });
-  }, [ws]);
+    ws.send(
+      { type: 'match:input', seq, payload: { kind: 'move', dir } },
+      {
+        roomCode: currentRoom?.roomCode ?? null,
+        expectedMatchId: expectedMatchIdRef.current,
+      },
+    );
+  }, [currentRoom?.roomCode, ws]);
 
   const isMultiplayerDebugEnabled = isDebugEnabled(window.location.search);
   const wsDiagnostics = {
