@@ -103,6 +103,7 @@ const INITIAL_LIVES = 3;
 const MAX_LIVES = 6;
 const EXTRA_LIFE_STEP_SCORE = 1000;
 const MP_RENDER_SNAP_DISTANCE_TILES = 1.5;
+const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / (1000 / 20)));
 
 export type SceneAudioSettings = {
   musicEnabled: boolean;
@@ -475,7 +476,7 @@ export class GameScene extends Phaser.Scene {
     let renderSimulationTick = 0;
     if (this.worldReady) {
       renderSimulationTick = this.simulationTick + this.accumulator / this.FIXED_DT;
-      this.remotePlayers?.update(renderSimulationTick, this.snapshotBuffer, this.localTgUserId, delta);
+      this.remotePlayers?.update(renderSimulationTick, this.snapshotBuffer, this.localTgUserId, delta, this.needsNetResync);
     }
 
     this.consumeKeyboard();
@@ -2218,6 +2219,11 @@ export class GameScene extends Phaser.Scene {
     const local = this.getLocalRenderTarget(this.localTgUserId, renderTick);
     if (!local) return;
 
+    if (this.needsNetResync) {
+      this.snapLocalRenderPosition(local.x, local.y);
+      return;
+    }
+
     if (!this.localRenderPos) {
       this.localRenderPos = { x: local.x, y: local.y };
     }
@@ -2228,11 +2234,11 @@ export class GameScene extends Phaser.Scene {
 
     if (local.x !== this.lastLocalTarget.x || local.y !== this.lastLocalTarget.y) {
       this.localSegment = {
-        fromX: this.localRenderPos.x,
-        fromY: this.localRenderPos.y,
+        fromX: this.lastLocalTarget.x,
+        fromY: this.lastLocalTarget.y,
         toX: local.x,
         toY: local.y,
-        startTick: renderTick,
+        startTick: local.targetTickUsed,
         durationTicks: this.getLocalStepDurationTicks(),
       };
       this.lastLocalTarget = { x: local.x, y: local.y };
@@ -2252,7 +2258,7 @@ export class GameScene extends Phaser.Scene {
     const dy = local.y - this.localRenderPos.y;
     const driftTiles = Math.hypot(dx, dy);
 
-    if (this.needsNetResync || driftTiles > MP_RENDER_SNAP_DISTANCE_TILES) {
+    if (driftTiles > MP_RENDER_SNAP_DISTANCE_TILES) {
       this.snapLocalRenderPosition(local.x, local.y);
       return;
     }
@@ -2265,27 +2271,24 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getLocalStepDurationTicks(): number {
-    const fallback = 3;
-    const cadenceRaw = (this.remotePlayers as any)?.getDebugStats?.()?.adaptiveEveryTicks;
-    const raw = Number.isFinite(cadenceRaw) ? cadenceRaw : fallback;
-    return Math.max(2, Math.min(6, Math.round(raw)));
+    return MP_MOVE_TICKS_CONST;
   }
 
-  private getLocalRenderTarget(localTgUserId: string, renderTick: number): { x: number; y: number } | null {
+  private getLocalRenderTarget(localTgUserId: string, renderTick: number): { x: number; y: number; targetTickUsed: number } | null {
     for (let i = this.snapshotBuffer.length - 1; i >= 0; i -= 1) {
       const snapshot = this.snapshotBuffer[i];
       if (snapshot.tick > renderTick) continue;
 
       const local = snapshot.players.find((player) => player.tgUserId === localTgUserId);
       if (local) {
-        return { x: local.x, y: local.y };
+        return { x: local.x, y: local.y, targetTickUsed: snapshot.tick };
       }
     }
 
     for (let i = this.snapshotBuffer.length - 1; i >= 0; i -= 1) {
       const local = this.snapshotBuffer[i].players.find((player) => player.tgUserId === localTgUserId);
       if (local) {
-        return { x: local.x, y: local.y };
+        return { x: local.x, y: local.y, targetTickUsed: this.snapshotBuffer[i].tick };
       }
     }
 
