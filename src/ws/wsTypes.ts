@@ -16,6 +16,16 @@ export type WsServerMessage =
   | MatchServerMessage
   | { type: 'error'; error: string };
 
+export type WsInboundTraceEntry = {
+  at: number;
+  message: WsServerMessage;
+};
+
+export type WsOutboundTraceEntry = {
+  at: number;
+  message: WsClientMessage;
+};
+
 export type WsDebugMetrics = {
   snapshotTick: number;
   lastAppliedSnapshotTick: number;

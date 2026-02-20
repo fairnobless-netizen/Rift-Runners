@@ -94,6 +94,8 @@ export function WsDebugOverlay({
   onMove,
   localInputSeq,
   getLocalPlayerPosition,
+  inspectorEnabled,
+  onToggleInspector,
 }: {
   connected: boolean;
   messages: any[];
@@ -116,6 +118,8 @@ export function WsDebugOverlay({
   onMove: (dir: 'up' | 'down' | 'left' | 'right') => void;
   localInputSeq: number;
   getLocalPlayerPosition?: () => { x: number; y: number } | null;
+  inspectorEnabled: boolean;
+  onToggleInspector: () => void;
 }) {
   const debugUiFlag = String(import.meta.env.VITE_DEBUG_UI ?? '').trim().toLowerCase();
   const probeModeFlag = String(import.meta.env.VITE_PROBE_MODE ?? '').trim().toLowerCase();
@@ -179,6 +183,10 @@ export function WsDebugOverlay({
       // ignore
     }
   }, [trayCollapsed]);
+
+  const [moveCollapsed, setMoveCollapsed] = useState(true);
+  const [snapshotCollapsed, setSnapshotCollapsed] = useState(true);
+
   const telemetrySamplesRef = useRef<TelemetrySample[]>([]);
   const telemetryTimeoutRef = useRef<number | null>(null);
 
@@ -520,6 +528,14 @@ export function WsDebugOverlay({
             >
               {trayCollapsed ? 'WS ▸' : 'WS ▾'}
             </button>
+            <button
+              type="button"
+              onClick={onToggleInspector}
+              aria-label={inspectorEnabled ? 'Hide multiplayer inspector' : 'Show multiplayer inspector'}
+              title={inspectorEnabled ? 'Hide multiplayer inspector' : 'Show multiplayer inspector'}
+            >
+              {inspectorEnabled ? 'MP ▾' : 'MP ▸'}
+            </button>
           </div>
 
           {showProbeUi && probeSummary && (
@@ -550,7 +566,7 @@ export function WsDebugOverlay({
             position: 'absolute',
             right: 10,
             top: 10,
-            width: 360,
+            width: 340,
             background: 'rgba(0,0,0,0.82)',
             color: '#0f0',
             fontSize: 12,
@@ -558,6 +574,8 @@ export function WsDebugOverlay({
             zIndex: 9999,
             borderRadius: 10,
             pointerEvents: 'auto', // interactive
+            maxHeight: '88vh',
+            overflow: 'auto',
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -734,27 +752,33 @@ export function WsDebugOverlay({
             </div>
           )}
 
-          <div style={{ marginTop: 10 }}>
-            <div style={{ marginBottom: 6 }}>Move:</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, width: 180 }}>
-              <div />
-              <button onClick={() => onMove('up')}>↑</button>
-              <div />
-              <button onClick={() => onMove('left')}>←</button>
-              <button onClick={() => onMove('down')}>↓</button>
-              <button onClick={() => onMove('right')}>→</button>
-            </div>
+          <div style={{ marginTop: 8 }}>
+            <button onClick={() => setMoveCollapsed((v) => !v)} style={{ marginBottom: 6 }}>
+              {moveCollapsed ? 'Move ▸' : 'Move ▾'}
+            </button>
+            {!moveCollapsed && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, width: 140 }}>
+                <div />
+                <button onClick={() => onMove('up')}>↑</button>
+                <div />
+                <button onClick={() => onMove('left')}>←</button>
+                <button onClick={() => onMove('down')}>↓</button>
+                <button onClick={() => onMove('right')}>→</button>
+              </div>
+            )}
           </div>
 
-          <div style={{ marginTop: 10 }}>
-            <div style={{ marginBottom: 6 }}>Snapshot preview:</div>
-            <MiniGrid snapshot={lastSnapshot} />
+          <div style={{ marginTop: 8 }}>
+            <button onClick={() => setSnapshotCollapsed((v) => !v)} style={{ marginBottom: 6 }}>
+              {snapshotCollapsed ? 'Snapshot preview ▸' : 'Snapshot preview ▾'}
+            </button>
+            {!snapshotCollapsed && <MiniGrid snapshot={lastSnapshot} compact />}
           </div>
 
           <div style={{ marginTop: 8 }}>
             <div style={{ marginBottom: 6 }}>Last messages:</div>
-            <pre style={{ maxHeight: 120, overflow: 'auto', margin: 0 }}>
-              {JSON.stringify(messages.slice(-3), null, 2)}
+            <pre style={{ maxHeight: 240, overflow: 'auto', margin: 0 }}>
+              {JSON.stringify(messages.slice(-20), null, 2)}
             </pre>
           </div>
         </div>
@@ -763,12 +787,12 @@ export function WsDebugOverlay({
   );
 }
 
-function MiniGrid({ snapshot }: { snapshot: any }) {
+function MiniGrid({ snapshot, compact = false }: { snapshot: any; compact?: boolean }) {
   if (!snapshot?.world) return <div style={{ opacity: 0.6 }}>No match snapshot yet.</div>;
 
   const gridW = snapshot.world.gridW ?? 15;
   const gridH = snapshot.world.gridH ?? 15;
-  const cell = 10;
+  const cell = compact ? 2 : 10;
 
   const players = Array.isArray(snapshot.players) ? snapshot.players : [];
 
