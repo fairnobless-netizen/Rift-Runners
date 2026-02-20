@@ -827,8 +827,7 @@ export class GameScene extends Phaser.Scene {
   public setGameMode(mode: GameMode): void {
     this.gameMode = mode;
     if (mode === 'multiplayer') {
-      this.needsNetResync = true;
-      this.netResyncReason = 'reset_state';
+      this.triggerNetResync('reset_state');
     }
     this.awaitingSoloContinue = false;
     this.soloGameOver = false;
@@ -2260,21 +2259,25 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  public resetMultiplayerNetState(): void {
+  public triggerNetResync(reason: string): void {
     this.needsNetResync = true;
-    this.netResyncReason = 'reset_state';
+    this.netResyncReason = reason;
+    this.snapshotBuffer = [];
     this.lastSnapshotTick = -1;
     this.lastAppliedSnapshotTick = -1;
-    this.snapshotBuffer = [];
     this.localInputQueue = [];
     this.inputSeq = 0;
     this.accumulator = 0;
     this.prediction.reset?.();
-    this.remotePlayers?.resetNetState?.();
     this.worldReady = false;
+    this.localRenderPos = null;
+    this.remotePlayers?.resetNetState?.();
+  }
+
+  public resetMultiplayerNetState(): void {
+    this.triggerNetResync('reset_state');
     this.worldHashServer = null;
     this.worldHashClient = null;
-    this.localRenderPos = null;
   }
 
   public pushMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
