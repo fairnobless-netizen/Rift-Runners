@@ -36,6 +36,8 @@ const INTERP_TUNING = {
 
 const SNAPSHOT_INTERP_MIN_MS = 80;
 const SNAPSHOT_INTERP_MAX_MS = 140;
+const REMOTE_RENDER_SMOOTHING_K = 20;
+const REMOTE_RENDER_SNAP_DISTANCE_TILES = 1.5;
 
 type RemotePlayerView = {
   container: Phaser.GameObjects.Container;
@@ -48,7 +50,8 @@ export class RemotePlayersRenderer {
   private players = new Map<string, RemotePlayerView>();
   private velocities = new Map<string, { vx: number; vy: number }>();
   private lastRenderedGridPos = new Map<string, { x: number; y: number }>();
-  private interpState = new Map<string, { moveFromX: number; moveFromY: number; targetX: number; targetY: number; moveStartedAtMs: number; moveDurationMs: number; isMoving: boolean }>();
+  private remoteRenderTargets = new Map<string, { x: number; y: number }>();
+  private remoteRenderSnapCount = new Map<string, number>();
 
   private readonly maxExtrapolationTicks = 3;
   private stallAfterTicks = 7;
@@ -131,7 +134,8 @@ export class RemotePlayersRenderer {
 
     this.velocities.clear();
     this.lastRenderedGridPos.clear();
-    this.interpState.clear();
+    this.remoteRenderTargets.clear();
+    this.remoteRenderSnapCount.clear();
   }
 
   setNetworkRtt(rttMs: number | null, rttJitterMs: number, tickMs: number): void {
@@ -191,7 +195,7 @@ export class RemotePlayersRenderer {
     this.minDelayTicks = Math.max(INTERP_TUNING.baseDelay.minTicks, this.baseDelayTicks - 1);
   }
 
-  update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string): void {
+  update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string, deltaMs: number = 0): void {
     const controlTick = Math.floor(simulationTick);
     this.updateAdaptiveDelay(controlTick, buffer.length);
     this.stallAfterTicks = this.delayTicks + this.maxExtrapolationTicks + 2;
@@ -228,7 +232,7 @@ export class RemotePlayersRenderer {
       if (extrapolationTicks > 0 && extrapolationTicks <= this.maxExtrapolationTicks) {
         this.recordExtrapolation();
         this.extrapolatingTicks = extrapolationTicks;
-        this.renderExtrapolated(anchorSnapshot, extrapolationTicks, localTgUserId);
+        this.renderExtrapolated(anchorSnapshot, extrapolationTicks, localTgUserId, deltaMs);
         return;
       }
 
@@ -239,11 +243,11 @@ export class RemotePlayersRenderer {
         if (this.stalled) {
           this.recordStall();
         }
-        this.renderFrozen(anchorSnapshot, localTgUserId);
+        this.renderFrozen(anchorSnapshot, localTgUserId, deltaMs);
         return;
       }
 
-      this.renderFromSnapshot(anchorSnapshot, localTgUserId);
+      this.renderFromSnapshot(anchorSnapshot, localTgUserId, deltaMs);
       return;
     }
 
@@ -261,7 +265,7 @@ export class RemotePlayersRenderer {
       const from = fromPlayers.get(to.tgUserId) ?? to;
       const x = Phaser.Math.Linear(from.x, to.x, alpha);
       const y = Phaser.Math.Linear(from.y, to.y, alpha);
-      this.upsertPlayer(to, x, y, interpMs);
+      this.upsertPlayer(to, x, y, interpMs, deltaMs);
     }
 
     this.destroyMissingPlayers(alive);
@@ -436,17 +440,17 @@ export class RemotePlayersRenderer {
     this.addEventSample('extrap');
   }
 
-  private renderFromSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): void {
+  private renderFromSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string, deltaMs: number = 0): void {
     const alive = new Set<string>();
     for (const player of snapshot.players) {
       if (localTgUserId && player.tgUserId === localTgUserId) continue;
       alive.add(player.tgUserId);
-      this.upsertPlayer(player, player.x, player.y, SNAPSHOT_INTERP_MIN_MS);
+      this.upsertPlayer(player, player.x, player.y, SNAPSHOT_INTERP_MIN_MS, deltaMs);
     }
     this.destroyMissingPlayers(alive);
   }
 
-  private renderExtrapolated(snapshot: MatchSnapshotV1, extrapolationTicks: number, localTgUserId?: string): void {
+  private renderExtrapolated(snapshot: MatchSnapshotV1, extrapolationTicks: number, localTgUserId?: string, deltaMs: number = 0): void {
     const alive = new Set<string>();
     for (const player of snapshot.players) {
       if (localTgUserId && player.tgUserId === localTgUserId) continue;
@@ -454,18 +458,18 @@ export class RemotePlayersRenderer {
       const velocity = this.velocities.get(player.tgUserId);
       const x = player.x + (velocity?.vx ?? 0) * extrapolationTicks;
       const y = player.y + (velocity?.vy ?? 0) * extrapolationTicks;
-      this.upsertPlayer(player, x, y, SNAPSHOT_INTERP_MIN_MS);
+      this.upsertPlayer(player, x, y, SNAPSHOT_INTERP_MIN_MS, deltaMs);
     }
     this.destroyMissingPlayers(alive);
   }
 
-  private renderFrozen(snapshot: MatchSnapshotV1, localTgUserId?: string): void {
+  private renderFrozen(snapshot: MatchSnapshotV1, localTgUserId?: string, deltaMs: number = 0): void {
     const alive = new Set<string>();
     for (const player of snapshot.players) {
       if (localTgUserId && player.tgUserId === localTgUserId) continue;
       alive.add(player.tgUserId);
       const frozenPos = this.lastRenderedGridPos.get(player.tgUserId);
-      this.upsertPlayer(player, frozenPos?.x ?? player.x, frozenPos?.y ?? player.y, SNAPSHOT_INTERP_MIN_MS);
+      this.upsertPlayer(player, frozenPos?.x ?? player.x, frozenPos?.y ?? player.y, SNAPSHOT_INTERP_MIN_MS, deltaMs);
     }
     this.destroyMissingPlayers(alive);
   }
@@ -568,52 +572,40 @@ export class RemotePlayersRenderer {
     };
   }
 
-  private upsertPlayer(player: { tgUserId: string; displayName: string; colorId: number }, gridX: number, gridY: number, moveDurationMs: number): void {
-    const now = this.scene.time.now;
-    let state = this.interpState.get(player.tgUserId);
-    if (!state) {
-      state = { moveFromX: gridX, moveFromY: gridY, targetX: gridX, targetY: gridY, moveStartedAtMs: 0, moveDurationMs: Math.max(1, moveDurationMs), isMoving: false };
-      this.interpState.set(player.tgUserId, state);
+  private upsertPlayer(player: { tgUserId: string; displayName: string; colorId: number }, gridX: number, gridY: number, _moveDurationMs: number, deltaMs: number): void {
+    const target = this.remoteRenderTargets.get(player.tgUserId);
+    if (!target) {
+      this.remoteRenderTargets.set(player.tgUserId, { x: gridX, y: gridY });
+    } else {
+      target.x = gridX;
+      target.y = gridY;
     }
 
-    if (state.targetX !== gridX || state.targetY !== gridY) {
-      const duration = Math.max(1, state.moveDurationMs);
-      const progress = state.isMoving ? Phaser.Math.Clamp((now - state.moveStartedAtMs) / duration, 0, 1) : 1;
-      const currentX = state.isMoving ? Phaser.Math.Linear(state.moveFromX, state.targetX, progress) : state.targetX;
-      const currentY = state.isMoving ? Phaser.Math.Linear(state.moveFromY, state.targetY, progress) : state.targetY;
-      const jumpDistance = Math.hypot(gridX - currentX, gridY - currentY);
-
-      if (jumpDistance > 1.5) {
-        state.moveFromX = gridX;
-        state.moveFromY = gridY;
-        state.targetX = gridX;
-        state.targetY = gridY;
-        state.moveStartedAtMs = 0;
-        state.moveDurationMs = Math.max(1, moveDurationMs);
-        state.isMoving = false;
-      } else {
-        state.moveFromX = currentX;
-        state.moveFromY = currentY;
-        state.targetX = gridX;
-        state.targetY = gridY;
-        state.moveStartedAtMs = now;
-        state.moveDurationMs = Math.max(1, moveDurationMs);
-        state.isMoving = true;
-      }
+    let renderPos = this.lastRenderedGridPos.get(player.tgUserId);
+    if (!renderPos) {
+      renderPos = { x: gridX, y: gridY };
+      this.lastRenderedGridPos.set(player.tgUserId, renderPos);
     }
 
-    const progress = state.isMoving
-      ? Phaser.Math.Clamp((now - state.moveStartedAtMs) / Math.max(1, state.moveDurationMs), 0, 1)
-      : 1;
-    const renderGX = state.isMoving ? Phaser.Math.Linear(state.moveFromX, state.targetX, progress) : state.targetX;
-    const renderGY = state.isMoving ? Phaser.Math.Linear(state.moveFromY, state.targetY, progress) : state.targetY;
-    if (state.isMoving && progress >= 1) {
-      state.isMoving = false;
-      state.moveStartedAtMs = 0;
+    const dx = gridX - renderPos.x;
+    const dy = gridY - renderPos.y;
+    const driftTiles = Math.hypot(dx, dy);
+    const shouldSnap = driftTiles > REMOTE_RENDER_SNAP_DISTANCE_TILES;
+
+    if (shouldSnap) {
+      renderPos.x = gridX;
+      renderPos.y = gridY;
+      const snapCount = this.remoteRenderSnapCount.get(player.tgUserId) ?? 0;
+      this.remoteRenderSnapCount.set(player.tgUserId, snapCount + 1);
+    } else {
+      const dtSec = Math.max(0, deltaMs) / 1000;
+      const alpha = 1 - Math.exp(-REMOTE_RENDER_SMOOTHING_K * dtSec);
+      renderPos.x += dx * alpha;
+      renderPos.y += dy * alpha;
     }
 
-    const px = this.offsetX + renderGX * this.tileSize + this.tileSize / 2;
-    const py = this.offsetY + renderGY * this.tileSize + this.tileSize / 2;
+    const px = this.offsetX + renderPos.x * this.tileSize + this.tileSize / 2;
+    const py = this.offsetY + renderPos.y * this.tileSize + this.tileSize / 2;
     let view = this.players.get(player.tgUserId);
     if (!view) {
       view = this.createPlayer(player, px, py);
@@ -621,8 +613,6 @@ export class RemotePlayersRenderer {
     } else {
       view.container.setPosition(px, py);
     }
-
-    this.lastRenderedGridPos.set(player.tgUserId, { x: renderGX, y: renderGY });
 
     view.nameText.setText(player.displayName);
     view.body.setFillStyle(colorFromId(player.colorId), 0.75);
@@ -635,7 +625,8 @@ export class RemotePlayersRenderer {
       this.players.delete(id);
       this.lastRenderedGridPos.delete(id);
       this.velocities.delete(id);
-      this.interpState.delete(id);
+      this.remoteRenderTargets.delete(id);
+      this.remoteRenderSnapCount.delete(id);
     }
   }
 
