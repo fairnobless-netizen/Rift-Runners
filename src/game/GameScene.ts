@@ -141,6 +141,8 @@ export class GameScene extends Phaser.Scene {
   private currentRoomCode: string | null = null;
   private currentMatchId: string | null = null;
   private droppedWrongRoom = 0;
+  // MP local render smoothing (host jitter fix)
+  private localRenderPos: { x: number; y: number } | null = null;
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
   private needsNetResync = false;
@@ -2171,11 +2173,58 @@ export class GameScene extends Phaser.Scene {
   private placeLocalPlayerSpriteAt(x: number, y: number) {
     if (!this.playerSprite) return;
 
+    // In solo mode we keep the original direct placement (already smooth via tickPlayerMovement).
+    // In multiplayer we smooth local sprite rendering to avoid micro-snaps after reconcile.
     const tileSize = GAME_CONFIG.tileSize;
     const bias = this.prediction.getVisualBias();
+
+    const targetX = x + bias.x;
+    const targetY = y + bias.y;
+
+    // Initialize render pos on first use or after net reset.
+    if (!this.localRenderPos) {
+      this.localRenderPos = { x: targetX, y: targetY };
+    }
+
+    // If player is currently moving via local tile interpolation, do not add extra smoothing,
+    // otherwise we introduce input lag. Just follow the interpolated target directly.
+    const isInterpolatingMove = this.player.targetX !== null || this.player.targetY !== null;
+
+    if (this.gameMode !== 'multiplayer' || isInterpolatingMove) {
+      this.localRenderPos.x = targetX;
+      this.localRenderPos.y = targetY;
+      this.playerSprite.setPosition(
+        targetX * tileSize + tileSize / 2,
+        targetY * tileSize + tileSize / 2,
+      );
+      return;
+    }
+
+    // Multiplayer + not currently in tile-move interpolation:
+    // Smooth small reconcile corrections, snap only if large divergence.
+    const dx = targetX - this.localRenderPos.x;
+    const dy = targetY - this.localRenderPos.y;
+
+    const distSq = dx * dx + dy * dy;
+
+    // In grid units (tiles). Snap if correction is "large" (e.g., > ~1.25 tiles).
+    const SNAP_DIST = 1.25;
+    const SNAP_DIST_SQ = SNAP_DIST * SNAP_DIST;
+
+    if (distSq > SNAP_DIST_SQ) {
+      // Hard snap to prevent wall-pass visuals on big corrections.
+      this.localRenderPos.x = targetX;
+      this.localRenderPos.y = targetY;
+    } else {
+      // Soft correction (tune factor for “no jitter” but also “no lag”).
+      const LERP = 0.35;
+      this.localRenderPos.x += dx * LERP;
+      this.localRenderPos.y += dy * LERP;
+    }
+
     this.playerSprite.setPosition(
-      (x + bias.x) * tileSize + tileSize / 2,
-      (y + bias.y) * tileSize + tileSize / 2,
+      this.localRenderPos.x * tileSize + tileSize / 2,
+      this.localRenderPos.y * tileSize + tileSize / 2,
     );
   }
 
@@ -2223,6 +2272,7 @@ export class GameScene extends Phaser.Scene {
     this.worldReady = false;
     this.worldHashServer = null;
     this.worldHashClient = null;
+    this.localRenderPos = null;
   }
 
   public pushMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
