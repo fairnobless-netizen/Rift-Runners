@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, type FormEvent } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
-import { GAME_CONFIG } from '../game/config';
+import { GAME_CONFIG, scaleMovementDurationMs } from '../game/config';
 
 import {
   EVENT_ASSET_PROGRESS,
@@ -638,8 +638,8 @@ export default function GameView(): JSX.Element {
         moveRepeatTimerRef.current = window.setInterval(() => {
           if (activeMoveDirRef.current !== direction) return;
           sendMatchMove(direction);
-        }, GAME_CONFIG.moveRepeatIntervalMs);
-      }, GAME_CONFIG.moveRepeatDelayMs);
+        }, scaleMovementDurationMs(GAME_CONFIG.moveRepeatIntervalMs));
+      }, scaleMovementDurationMs(GAME_CONFIG.moveRepeatDelayMs));
     }
   };
 
@@ -1193,12 +1193,18 @@ export default function GameView(): JSX.Element {
 
 
   useEffect(() => {
-    const last = [...ws.messages].reverse().find((m): m is Extract<MatchServerMessage, { type: 'match:snapshot' }> => m.type === 'match:snapshot');
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+
+    const last = [...ws.messages].reverse().find((m): m is Extract<MatchServerMessage, { type: 'match:snapshot' }> => {
+      if (m.type !== 'match:snapshot') return false;
+      const snapshot = m.snapshot;
+      if (!expectedRoomCode || !expectedMatchId) return true;
+      return snapshot.roomCode === expectedRoomCode && snapshot.matchId === expectedMatchId;
+    });
     if (!last) return;
 
     const snapshot = last.snapshot;
-    const expectedRoomCode = expectedRoomCodeRef.current;
-    const expectedMatchId = expectedMatchIdRef.current;
     if (!expectedRoomCode) {
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot_no_expected_room', {
         expectedRoomCode,
