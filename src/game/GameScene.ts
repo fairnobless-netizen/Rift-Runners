@@ -1721,7 +1721,7 @@ export class GameScene extends Phaser.Scene {
     const { tileSize } = GAME_CONFIG;
 
     const playerStyle = this.getAssetStyle('player', this.player.state, this.player.facing);
-    if (this.player.targetX === null || this.player.targetY === null) {
+    if (this.gameMode !== 'multiplayer' && (this.player.targetX === null || this.player.targetY === null)) {
       this.placeLocalPlayerSpriteAt(this.player.gridX, this.player.gridY);
     }
     this.playerSprite
@@ -2208,7 +2208,7 @@ export class GameScene extends Phaser.Scene {
     const dy = targetY - this.localRenderPos.y;
     const driftTiles = Math.hypot(dx, dy);
 
-    if (driftTiles > MP_RENDER_SNAP_DISTANCE_TILES) {
+    if (this.needsNetResync || driftTiles > MP_RENDER_SNAP_DISTANCE_TILES) {
       this.snapLocalRenderPosition(targetX, targetY);
       return;
     }
