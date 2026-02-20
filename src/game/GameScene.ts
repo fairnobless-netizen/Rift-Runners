@@ -2277,6 +2277,20 @@ export class GameScene extends Phaser.Scene {
     this.localRenderPos = null;
   }
 
+
+
+  public triggerNetResync(reason: string): void {
+    this.needsNetResync = true;
+    this.netResyncReason = reason;
+    this.snapshotBuffer = [];
+    this.localInputQueue = [];
+    this.inputSeq = 0;
+    this.prediction.reset?.();
+    this.remotePlayers?.resetNetState?.();
+    this.worldReady = false;
+    this.lastSnapshotTick = -1;
+    this.lastAppliedSnapshotTick = -1;
+  }
   public pushMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
     if (snapshot?.version !== 'match_v1') return false;
 
