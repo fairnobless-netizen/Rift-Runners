@@ -17,6 +17,7 @@ export function triggerDebugDrift(ticks: number) {
 }
 
 export class LocalPredictionController {
+  private serverFirstMode = false;
   private pending: PendingInput[] = [];
   private lastAckSeq = 0;
 
@@ -55,6 +56,10 @@ export class LocalPredictionController {
       this.droppedInputCount += 1;
     }
     this.pending.push(input);
+  }
+
+  setServerFirstMode(enabled: boolean) {
+    this.serverFirstMode = enabled;
   }
 
   /**
@@ -117,6 +122,17 @@ export class LocalPredictionController {
 
     this.lastAckSeq = lastInputSeq;
     this.reconcileReason = 'none';
+
+    if (this.serverFirstMode) {
+      this.pending = this.pending.filter((p) => p.seq > lastInputSeq);
+      this.pruneHistoryByAck(lastInputSeq);
+      this.drift = Math.hypot(serverX - localX, serverY - localY);
+      this.biasX = 0;
+      this.biasY = 0;
+      this.inSoftCorrection = false;
+      this.inHardCorrection = false;
+      return;
+    }
 
     // Canonical reconciliation for simulation:
     // authoritative server base first, then replay unacknowledged inputs.
@@ -199,6 +215,7 @@ export class LocalPredictionController {
 
   getStats() {
     return {
+      localMode: this.serverFirstMode ? 'server_first' : 'predicted',
       correctionCount: this.correctionCount,
       softCorrectionCount: this.softCorrectionCount,
       droppedInputCount: this.droppedInputCount,

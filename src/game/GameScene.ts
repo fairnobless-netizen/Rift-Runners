@@ -143,8 +143,9 @@ export class GameScene extends Phaser.Scene {
   private droppedWrongRoom = 0;
   private droppedWrongMatch = 0;
   private droppedDuplicateTick = 0;
-  // MP local render smoothing (host jitter fix)
+  // MP local render smoothing (server-first local movement)
   private localRenderPos: { x: number; y: number } | null = null;
+  private localRenderSnapCount = 0;
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
   private needsNetResync = false;
@@ -498,6 +499,11 @@ export class GameScene extends Phaser.Scene {
     const input = this.localInputQueue.shift();
     if (!input) return;
 
+    if (this.gameMode === 'multiplayer') {
+      // Server-first mode in multiplayer: keep sending/acking input, but do not move local grid by prediction.
+      return;
+    }
+
     this.applyLocalMove(input.dx, input.dy);
 
     // M16.2.1: record predicted state after local simulation applies the seq
@@ -826,6 +832,7 @@ export class GameScene extends Phaser.Scene {
 
   public setGameMode(mode: GameMode): void {
     this.gameMode = mode;
+    this.prediction.setServerFirstMode(mode === 'multiplayer');
     if (mode === 'multiplayer') {
       this.triggerNetResync('reset_state');
     }
@@ -851,6 +858,7 @@ export class GameScene extends Phaser.Scene {
 
   public restartSoloRun(): void {
     this.gameMode = 'solo';
+    this.prediction.setServerFirstMode(false);
     this.awaitingSoloContinue = false;
     this.soloGameOver = false;
     this.multiplayerEliminated = false;
@@ -2138,7 +2146,9 @@ export class GameScene extends Phaser.Scene {
   public onLocalMatchInput(input: { seq: number; dx: number; dy: number }) {
     this.inputSeq = Math.max(this.inputSeq, input.seq);
     this.prediction.pushInput(input);
-    this.enqueueLocalInput(input);
+    if (this.gameMode !== 'multiplayer') {
+      this.enqueueLocalInput(input);
+    }
   }
 
   public setLocalTgUserId(id?: string) {
@@ -2174,51 +2184,33 @@ export class GameScene extends Phaser.Scene {
   private placeLocalPlayerSpriteAt(x: number, y: number) {
     if (!this.playerSprite) return;
 
-    // In solo mode we keep the original direct placement (already smooth via tickPlayerMovement).
-    // In multiplayer we smooth local sprite rendering to avoid micro-snaps after reconcile.
     const tileSize = GAME_CONFIG.tileSize;
-    const bias = this.prediction.getVisualBias();
 
-    const targetX = x + bias.x;
-    const targetY = y + bias.y;
-
-    // Initialize render pos on first use or after net reset.
-    if (!this.localRenderPos) {
-      this.localRenderPos = { x: targetX, y: targetY };
-    }
-
-    // If player is currently moving via local tile interpolation, do not add extra smoothing,
-    // otherwise we introduce input lag. Just follow the interpolated target directly.
-    const isInterpolatingMove = this.player.targetX !== null || this.player.targetY !== null;
-
-    if (this.gameMode !== 'multiplayer' || isInterpolatingMove) {
-      this.localRenderPos.x = targetX;
-      this.localRenderPos.y = targetY;
+    if (this.gameMode !== 'multiplayer') {
+      this.localRenderPos = { x, y };
       this.playerSprite.setPosition(
-        targetX * tileSize + tileSize / 2,
-        targetY * tileSize + tileSize / 2,
+        x * tileSize + tileSize / 2,
+        y * tileSize + tileSize / 2,
       );
       return;
     }
 
-    // Multiplayer + not currently in tile-move interpolation:
-    // Smooth small reconcile corrections, snap only if large divergence.
-    const dx = targetX - this.localRenderPos.x;
-    const dy = targetY - this.localRenderPos.y;
+    if (!this.localRenderPos) {
+      this.localRenderPos = { x, y };
+    }
 
+    const dx = x - this.localRenderPos.x;
+    const dy = y - this.localRenderPos.y;
     const distSq = dx * dx + dy * dy;
-
-    // In grid units (tiles). Snap if correction is "large" (e.g., > ~1.25 tiles).
     const SNAP_DIST = 1.25;
     const SNAP_DIST_SQ = SNAP_DIST * SNAP_DIST;
 
     if (distSq > SNAP_DIST_SQ) {
-      // Hard snap to prevent wall-pass visuals on big corrections.
-      this.localRenderPos.x = targetX;
-      this.localRenderPos.y = targetY;
+      this.localRenderPos.x = x;
+      this.localRenderPos.y = y;
+      this.localRenderSnapCount += 1;
     } else {
-      // Soft correction (tune factor for “no jitter” but also “no lag”).
-      const LERP = 0.35;
+      const LERP = 0.3;
       this.localRenderPos.x += dx * LERP;
       this.localRenderPos.y += dy * LERP;
     }
@@ -2228,6 +2220,7 @@ export class GameScene extends Phaser.Scene {
       this.localRenderPos.y * tileSize + tileSize / 2,
     );
   }
+
 
   public getLocalPlayerPosition(): { x: number; y: number } {
     return { x: this.player.gridX, y: this.player.gridY };
@@ -2241,6 +2234,10 @@ export class GameScene extends Phaser.Scene {
     this.player.isMoving = false;
     this.player.moveDurationMs = 0;
     this.player.moveStartedAtMs = 0;
+
+    if (this.gameMode !== 'multiplayer') {
+      this.localRenderPos = { x, y };
+    }
 
     this.placeLocalPlayerSpriteAt(x, y);
   }
@@ -2271,6 +2268,7 @@ export class GameScene extends Phaser.Scene {
     this.prediction.reset?.();
     this.worldReady = false;
     this.localRenderPos = null;
+    this.localRenderSnapCount = 0;
     this.remotePlayers?.resetNetState?.();
   }
 
@@ -2372,30 +2370,27 @@ export class GameScene extends Phaser.Scene {
     const localX = this.player.gridX;
     const localY = this.player.gridY;
     const driftTiles = Math.abs(me.x - localX) + Math.abs(me.y - localY);
-    const isActiveTileMove = this.player.isMoving || this.player.targetX !== null || this.player.targetY !== null;
 
     if (driftTiles > 1 || this.needsNetResync) {
       this.setLocalPlayerPosition(me.x, me.y);
       this.localRenderPos = { x: me.x, y: me.y };
+      this.localRenderSnapCount += 1;
       this.prediction.reset?.();
+      this.prediction.setServerFirstMode(this.gameMode === 'multiplayer');
       return;
     }
 
+    // Multiplayer local player is server-first: authoritative position from snapshots only.
+    this.setLocalPlayerPosition(me.x, me.y);
     this.prediction.reconcile({
       serverX: me.x,
       serverY: me.y,
       localX,
       localY,
       lastInputSeq: me.lastInputSeq,
-      setPosition: (x, y) => this.setLocalPlayerPosition(x, y),
-      applyMove: (dx, dy) => this.applyLocalMove(dx, dy),
+      setPosition: () => undefined,
+      applyMove: () => undefined,
     });
-
-    if (isActiveTileMove && this.localRenderPos) {
-      const pullFactor = 0.2;
-      this.localRenderPos.x += (me.x - this.localRenderPos.x) * pullFactor;
-      this.localRenderPos.y += (me.y - this.localRenderPos.y) * pullFactor;
-    }
   }
 
 
@@ -2586,7 +2581,21 @@ export class GameScene extends Phaser.Scene {
   }
 
   public getPredictionStats() {
-    return this.prediction?.getStats?.() ?? null;
+    const stats = this.prediction?.getStats?.();
+    if (!stats) return null;
+
+    const authoritativeX = this.player.gridX;
+    const authoritativeY = this.player.gridY;
+    const renderX = this.localRenderPos?.x ?? authoritativeX;
+    const renderY = this.localRenderPos?.y ?? authoritativeY;
+    const localRenderDriftTiles = Math.hypot(authoritativeX - renderX, authoritativeY - renderY);
+
+    return {
+      ...stats,
+      localMode: this.gameMode === 'multiplayer' ? 'server_first' : 'predicted',
+      localRenderDriftTiles,
+      localSnapCount: this.localRenderSnapCount,
+    };
   }
 
   public getSimulationTick(): number {

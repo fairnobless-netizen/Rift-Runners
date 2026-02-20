@@ -95,6 +95,9 @@ type PredictionStats = {
   drift: number;
   biasX: number;
   biasY: number;
+  localMode?: string;
+  localRenderDriftTiles?: number;
+  localSnapCount?: number;
 };
 
 type AudioSettings = {

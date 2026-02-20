@@ -23,12 +23,15 @@ type PredictionStats = {
   missingHistoryCount?: number;
   reconcileReason?: 'none' | 'soft' | 'hard';
   ackLastInputSeq?: number;
+  localMode?: string;
+  localRenderDriftTiles?: number;
+  localSnapCount?: number;
 };
 
 function formatPredictionLine(localInputSeq: number, ps: PredictionStats): string {
   const ackLastInputSeq = ps.ackLastInputSeq ?? ps.lastAckSeq;
   const unacked = Math.max(0, localInputSeq - ackLastInputSeq);
-  return `Prediction: inputSeq=${localInputSeq}, ack(lastInputSeq)=${ackLastInputSeq}, unacked=${unacked}, predErr=${(ps.predictionError ?? 0).toFixed(3)}, predErrEma=${(ps.predictionErrorEma ?? 0).toFixed(3)}, hardT=(${(ps.predHardEnter ?? 0).toFixed(2)}/${(ps.predHardExit ?? 0).toFixed(2)}), hist=${ps.historySize ?? 0}, missHist=${ps.missingHistoryCount ?? 0}, reason=${ps.reconcileReason ?? 'none'}, hardSnaps=${ps.correctionCount}, softCorrections=${ps.softCorrectionCount}, drift=${ps.drift.toFixed(3)}, bias=(${ps.biasX.toFixed(3)}, ${ps.biasY.toFixed(3)}), dropped=${ps.droppedInputCount}`;
+  return `Prediction: mode=${ps.localMode ?? 'predicted'}, inputSeq=${localInputSeq}, ack(lastInputSeq)=${ackLastInputSeq}, unacked=${unacked}, predErr=${(ps.predictionError ?? 0).toFixed(3)}, predErrEma=${(ps.predictionErrorEma ?? 0).toFixed(3)}, hardT=(${(ps.predHardEnter ?? 0).toFixed(2)}/${(ps.predHardExit ?? 0).toFixed(2)}), hist=${ps.historySize ?? 0}, missHist=${ps.missingHistoryCount ?? 0}, reason=${ps.reconcileReason ?? 'none'}, hardSnaps=${ps.correctionCount}, softCorrections=${ps.softCorrectionCount}, drift=${ps.drift.toFixed(3)}, renderDrift=${(ps.localRenderDriftTiles ?? 0).toFixed(3)}, localSnaps=${ps.localSnapCount ?? 0}, bias=(${ps.biasX.toFixed(3)}, ${ps.biasY.toFixed(3)}), dropped=${ps.droppedInputCount}`;
 }
 
 
