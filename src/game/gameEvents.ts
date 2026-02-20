@@ -60,6 +60,7 @@ export interface LifeStatePayload {
   awaitingContinue: boolean;
   gameOver: boolean;
   eliminated: boolean;
+  respawning: boolean;
 }
 
 export function emitLifeState(payload: LifeStatePayload): void {

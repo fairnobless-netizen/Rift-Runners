@@ -130,6 +130,7 @@ export class GameScene extends Phaser.Scene {
   private awaitingSoloContinue = false;
   private soloGameOver = false;
   private multiplayerEliminated = false;
+  private multiplayerRespawning = false;
   private readonly baseSeed = 0x52494654;
   private readonly runId = 1;
   private rng: DeterministicRng = createDeterministicRng(this.baseSeed);
@@ -741,6 +742,7 @@ export class GameScene extends Phaser.Scene {
     if (this.gameMode === 'multiplayer') {
       if (this.lives <= 0) {
         this.multiplayerEliminated = true;
+        this.multiplayerRespawning = false;
         this.clearMovementInputs();
         this.playerSprite?.setVisible(false);
         this.emitLifeState();
@@ -749,7 +751,9 @@ export class GameScene extends Phaser.Scene {
         return;
       }
 
-      this.spawnPlayer();
+      this.multiplayerRespawning = true;
+      this.clearMovementInputs();
+      this.playerSprite?.setVisible(false);
       this.emitLifeState();
       emitStats(this.stats);
       this.syncCampaignAndPersist();
@@ -794,6 +798,7 @@ export class GameScene extends Phaser.Scene {
       awaitingContinue: this.awaitingSoloContinue,
       gameOver: this.soloGameOver,
       eliminated: this.multiplayerEliminated,
+      respawning: this.multiplayerRespawning,
     });
   }
 
@@ -824,6 +829,7 @@ export class GameScene extends Phaser.Scene {
     this.awaitingSoloContinue = false;
     this.soloGameOver = false;
     this.multiplayerEliminated = false;
+    this.multiplayerRespawning = false;
     this.playerSprite?.setVisible(true);
     this.emitLifeState();
   }
@@ -845,6 +851,7 @@ export class GameScene extends Phaser.Scene {
     this.awaitingSoloContinue = false;
     this.soloGameOver = false;
     this.multiplayerEliminated = false;
+    this.multiplayerRespawning = false;
     this.playerSprite?.setVisible(true);
     this.lives = INITIAL_LIVES;
     this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
@@ -1646,6 +1653,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private hitPlayerAt(x: number, y: number): void {
+    if (this.gameMode === 'multiplayer') return;
     const playerOnCell =
       this.player.targetX === null
         ? this.player.gridX === x && this.player.gridY === y
@@ -1655,6 +1663,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private checkPlayerEnemyCollision(): void {
+    if (this.gameMode === 'multiplayer') return;
     if (this.player.targetX !== null || this.player.targetY !== null) return;
     for (const enemy of this.enemies.values()) {
       if (enemy.gridX === this.player.gridX && enemy.gridY === this.player.gridY) {
@@ -2469,6 +2478,7 @@ export class GameScene extends Phaser.Scene {
     if (payload.tgUserId !== localTgUserId) return;
     this.lives = Math.max(0, payload.lives);
     this.stats.lives = this.lives;
+    this.multiplayerRespawning = this.lives > 0;
     this.emitLifeState();
     emitStats(this.stats);
   }
@@ -2476,6 +2486,7 @@ export class GameScene extends Phaser.Scene {
   public applyAuthoritativePlayerRespawned(payload: { tgUserId: string; x: number; y: number }, localTgUserId?: string): void {
     if (payload.tgUserId !== localTgUserId) return;
     this.multiplayerEliminated = false;
+    this.multiplayerRespawning = false;
     this.setLocalPlayerPosition(payload.x, payload.y);
     this.playerSprite?.setVisible(true);
     this.emitLifeState();
@@ -2484,6 +2495,7 @@ export class GameScene extends Phaser.Scene {
   public applyAuthoritativePlayerEliminated(payload: { tgUserId: string }, localTgUserId?: string): void {
     if (payload.tgUserId !== localTgUserId) return;
     this.multiplayerEliminated = true;
+    this.multiplayerRespawning = false;
     this.playerSprite?.setVisible(false);
     this.emitLifeState();
   }
