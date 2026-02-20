@@ -6,6 +6,7 @@ import type {
   WsInboundTraceEntry,
   WsOutboundTraceEntry,
   WsServerMessage,
+  WsTraceContext,
 } from './wsTypes';
 
 export type NetSimPresetId = 'good-wifi' | '4g-ok' | 'bad-4g' | 'train';
@@ -288,7 +289,7 @@ export function useWsClient(token?: string) {
         }
 
         const recvAt = Date.now();
-        setInboundTrace((prev) => [...prev.slice(-80), { at: recvAt, message: msg }]);
+        setInboundTrace((prev) => [...prev.slice(-80), { at: recvAt, message_type: msg.type, message: msg }]);
 
         const config = netSimConfigRef.current;
         const shouldSimulateSnapshot = import.meta.env.DEV && msg.type === 'match:snapshot' && config.enabled;
@@ -360,9 +361,9 @@ export function useWsClient(token?: string) {
         dropRate: preset.dropRate,
       }));
     },
-    send: (msg: WsClientMessage) => {
+    send: (msg: WsClientMessage, debugContext?: WsTraceContext) => {
       const sentAt = Date.now();
-      setOutboundTrace((prev) => [...prev.slice(-80), { at: sentAt, message: msg }]);
+      setOutboundTrace((prev) => [...prev.slice(-80), { at: sentAt, message_type: msg.type, message: msg, traceContext: debugContext }]);
       diagnosticsStore.log('WS', 'INFO', `send:${msg.type}`, {
         type: msg.type,
         preview: JSON.stringify(msg).slice(0, 1000),

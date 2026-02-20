@@ -22,13 +22,24 @@ function fmtAgo(ts: number | null): string {
   return `${sec.toFixed(1)}s ago`;
 }
 
-function fmtMeta(msg: { type: string; [key: string]: unknown }): string {
+function fmtInboundMeta(entry: WsInboundTraceEntry): string {
+  const msg = entry.message as { type: string; [key: string]: unknown };
   if (msg.type === 'match:snapshot') {
     const snap = (msg as any).snapshot;
     return `room=${snap?.roomCode ?? '—'} match=${snap?.matchId ?? '—'} tick=${snap?.tick ?? '—'}`;
   }
   if (msg.type === 'match:world_init') {
     return `room=${(msg as any).roomCode ?? '—'} match=${(msg as any).matchId ?? '—'}`;
+  }
+  return `room=${(msg as any).roomCode ?? (msg as any).roomId ?? '—'} match=${(msg as any).matchId ?? '—'} seq=${(msg as any).seq ?? '—'}`;
+}
+
+function fmtOutboundMeta(entry: WsOutboundTraceEntry): string {
+  const msg = entry.message as { type: string; [key: string]: unknown };
+  if (msg.type === 'match:input') {
+    const roomCode = entry.traceContext?.roomCode ?? (msg as any).roomCode ?? (msg as any).roomId ?? '—';
+    const matchId = entry.traceContext?.expectedMatchId ?? entry.traceContext?.matchId ?? (msg as any).matchId ?? '—';
+    return `room=${roomCode} match=${matchId} seq=${(msg as any).seq ?? '—'}`;
   }
   return `room=${(msg as any).roomCode ?? (msg as any).roomId ?? '—'} match=${(msg as any).matchId ?? '—'} seq=${(msg as any).seq ?? '—'}`;
 }
@@ -93,8 +104,8 @@ export function MultiplayerInspectorOverlay({
         <div style={{ display: 'grid', gap: 4 }}>
           {inbound.map((entry, i) => (
             <div key={`${entry.at}-${i}`} style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: 6 }}>
-              <div>{((Date.now() - entry.at) / 1000).toFixed(1)}s · {entry.message.type}</div>
-              <div style={{ opacity: 0.85 }}>{fmtMeta(entry.message as any)}</div>
+              <div>{((Date.now() - entry.at) / 1000).toFixed(1)}s · {entry.message_type}</div>
+              <div style={{ opacity: 0.85 }}>{fmtInboundMeta(entry)}</div>
             </div>
           ))}
         </div>
@@ -105,8 +116,8 @@ export function MultiplayerInspectorOverlay({
         <div style={{ display: 'grid', gap: 4 }}>
           {outbound.map((entry, i) => (
             <div key={`${entry.at}-${i}`} style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: 6 }}>
-              <div>{((Date.now() - entry.at) / 1000).toFixed(1)}s · {entry.message.type}</div>
-              <div style={{ opacity: 0.85 }}>{fmtMeta(entry.message as any)}</div>
+              <div>{((Date.now() - entry.at) / 1000).toFixed(1)}s · {entry.message_type}</div>
+              <div style={{ opacity: 0.85 }}>{fmtOutboundMeta(entry)}</div>
             </div>
           ))}
         </div>

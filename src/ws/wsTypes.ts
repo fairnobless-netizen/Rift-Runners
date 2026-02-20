@@ -16,15 +16,26 @@ export type WsServerMessage =
   | MatchServerMessage
   | { type: 'error'; error: string };
 
-export type WsInboundTraceEntry = {
-  at: number;
-  message: WsServerMessage;
+export type WsTraceContext = {
+  roomCode?: string | null;
+  matchId?: string | null;
+  expectedMatchId?: string | null;
 };
 
-export type WsOutboundTraceEntry = {
-  at: number;
-  message: WsClientMessage;
+type WithType = {
+  type: string;
 };
+
+export type WsTrafficEntryBase<TMessage extends WithType> = {
+  at: number;
+  message_type: TMessage['type'];
+  message: TMessage;
+  traceContext?: WsTraceContext;
+};
+
+export type WsInboundTraceEntry = WsTrafficEntryBase<WsServerMessage>;
+
+export type WsOutboundTraceEntry = WsTrafficEntryBase<WsClientMessage>;
 
 export type WsDebugMetrics = {
   snapshotTick: number;
