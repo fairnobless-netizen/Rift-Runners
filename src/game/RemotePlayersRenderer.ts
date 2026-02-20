@@ -35,8 +35,6 @@ const INTERP_TUNING = {
 } as const;
 
 const SNAPSHOT_INTERP_MIN_MS = 80;
-const SNAPSHOT_INTERP_MAX_MS = 140;
-const REMOTE_RENDER_SMOOTHING_K = 20;
 const REMOTE_RENDER_SNAP_DISTANCE_TILES = 1.5;
 
 type RemotePlayerView = {
@@ -199,6 +197,7 @@ export class RemotePlayersRenderer {
     const controlTick = Math.floor(simulationTick);
     this.updateAdaptiveDelay(controlTick, buffer.length);
     this.stallAfterTicks = this.delayTicks + this.maxExtrapolationTicks + 2;
+
     const renderTick = simulationTick - this.delayTicks;
     this.renderTick = renderTick;
     this.bufferSize = buffer.length;
@@ -212,19 +211,10 @@ export class RemotePlayersRenderer {
       return;
     }
 
-    let snapshotA: MatchSnapshotV1 | undefined;
-    let snapshotB: MatchSnapshotV1 | undefined;
-    for (let i = 1; i < buffer.length; i += 1) {
-      const prev = buffer[i - 1];
-      const next = buffer[i];
-      if (prev.tick <= renderTick && renderTick <= next.tick) {
-        snapshotA = prev;
-        snapshotB = next;
-        break;
-      }
-    }
-
-    if (!snapshotA || !snapshotB) {
+    // If renderTick is outside the buffered tick range, fall back to extrapolation/freeze.
+    const firstTick = buffer[0].tick;
+    const lastTick = buffer[buffer.length - 1].tick;
+    if (renderTick < firstTick || renderTick > lastTick) {
       this.recordUnderrun();
       const anchorSnapshot = this.findAnchorSnapshot(buffer, renderTick) ?? buffer[buffer.length - 1];
       const extrapolationTicks = Math.max(0, renderTick - anchorSnapshot.tick);
@@ -251,21 +241,22 @@ export class RemotePlayersRenderer {
       return;
     }
 
-    const tickSpan = snapshotB.tick - snapshotA.tick;
-    const alpha = tickSpan <= 0 ? 1 : Phaser.Math.Clamp((renderTick - snapshotA.tick) / tickSpan, 0, 1);
-    const snapshotIntervalMs = tickSpan > 0 ? tickSpan * (1000 / 20) : 100;
-    const interpMs = Phaser.Math.Clamp(snapshotIntervalMs, SNAPSHOT_INTERP_MIN_MS, SNAPSHOT_INTERP_MAX_MS);
-    const fromPlayers = new Map(snapshotA.players.map((p) => [p.tgUserId, p]));
+    // Normal case: plateau-aware interpolation per player.
+    // The server sends tile centers (discrete steps). We reconstruct continuous motion between
+    // the last confirmed tile (plateau start) and the next tile change, with constant speed.
+    const latest = buffer[buffer.length - 1];
     const alive = new Set<string>();
 
-    for (const to of snapshotB.players) {
+    for (const to of latest.players) {
       if (localTgUserId && to.tgUserId === localTgUserId) continue;
 
       alive.add(to.tgUserId);
-      const from = fromPlayers.get(to.tgUserId) ?? to;
-      const x = Phaser.Math.Linear(from.x, to.x, alpha);
-      const y = Phaser.Math.Linear(from.y, to.y, alpha);
-      this.upsertPlayer(to, x, y, interpMs, deltaMs);
+      const pos = getPlateauInterpolatedPos(buffer, renderTick, to.tgUserId);
+      if (!pos) {
+        this.upsertPlayer(to, to.x, to.y, SNAPSHOT_INTERP_MIN_MS, deltaMs);
+        continue;
+      }
+      this.upsertPlayer(to, pos.x, pos.y, SNAPSHOT_INTERP_MIN_MS, deltaMs);
     }
 
     this.destroyMissingPlayers(alive);
@@ -572,7 +563,11 @@ export class RemotePlayersRenderer {
     };
   }
 
-  private upsertPlayer(player: { tgUserId: string; displayName: string; colorId: number }, gridX: number, gridY: number, _moveDurationMs: number, deltaMs: number): void {
+  getDelayTicks(): number {
+    return this.delayTicks;
+  }
+
+  private upsertPlayer(player: { tgUserId: string; displayName: string; colorId: number }, gridX: number, gridY: number, _moveDurationMs: number, _deltaMs: number): void {
     const target = this.remoteRenderTargets.get(player.tgUserId);
     if (!target) {
       this.remoteRenderTargets.set(player.tgUserId, { x: gridX, y: gridY });
@@ -593,16 +588,13 @@ export class RemotePlayersRenderer {
     const shouldSnap = driftTiles > REMOTE_RENDER_SNAP_DISTANCE_TILES;
 
     if (shouldSnap) {
-      renderPos.x = gridX;
-      renderPos.y = gridY;
       const snapCount = this.remoteRenderSnapCount.get(player.tgUserId) ?? 0;
       this.remoteRenderSnapCount.set(player.tgUserId, snapCount + 1);
-    } else {
-      const dtSec = Math.max(0, deltaMs) / 1000;
-      const alpha = 1 - Math.exp(-REMOTE_RENDER_SMOOTHING_K * dtSec);
-      renderPos.x += dx * alpha;
-      renderPos.y += dy * alpha;
     }
+
+    // No exponential catch-up: position is already time-interpolated (constant speed).
+    renderPos.x = gridX;
+    renderPos.y = gridY;
 
     const px = this.offsetX + renderPos.x * this.tileSize + this.tileSize / 2;
     const py = this.offsetY + renderPos.y * this.tileSize + this.tileSize / 2;
@@ -652,6 +644,68 @@ export class RemotePlayersRenderer {
       nameText,
     };
   }
+}
+
+
+function getPlateauInterpolatedPos(buffer: MatchSnapshotV1[], renderTick: number, tgUserId: string): { x: number; y: number } | null {
+  if (buffer.length === 0) return null;
+
+  // Find the last snapshot at/before renderTick where the player exists.
+  let i = -1;
+  for (let k = buffer.length - 1; k >= 0; k -= 1) {
+    const s = buffer[k];
+    if (s.tick > renderTick) continue;
+    if (s.players?.some((p) => p.tgUserId === tgUserId)) {
+      i = k;
+      break;
+    }
+  }
+  if (i < 0) {
+    const first = buffer[0];
+    const p0 = first.players?.find((p) => p.tgUserId === tgUserId);
+    return p0 ? { x: p0.x, y: p0.y } : null;
+  }
+
+  const posAt = (idx: number) => buffer[idx].players.find((p) => p.tgUserId === tgUserId);
+  const pHere = posAt(i);
+  if (!pHere) return null;
+
+  const curX = pHere.x;
+  const curY = pHere.y;
+
+  // Plateau start: walk backwards while position is the same.
+  let start = i;
+  while (start - 1 >= 0) {
+    const prev = posAt(start - 1);
+    if (!prev) break;
+    if (prev.x !== curX || prev.y !== curY) break;
+    start -= 1;
+  }
+
+  // Plateau end: walk forward while position is the same.
+  let end = i;
+  while (end + 1 < buffer.length) {
+    const next = posAt(end + 1);
+    if (!next) break;
+    if (next.x !== curX || next.y !== curY) break;
+    end += 1;
+  }
+
+  const nextIdx = end + 1;
+  if (nextIdx >= buffer.length) return { x: curX, y: curY };
+
+  const pNext = posAt(nextIdx);
+  if (!pNext) return { x: curX, y: curY };
+
+  const t0 = buffer[start].tick;
+  const t1 = buffer[nextIdx].tick;
+  if (t1 <= t0) return { x: pNext.x, y: pNext.y };
+
+  const alpha = Phaser.Math.Clamp((renderTick - t0) / (t1 - t0), 0, 1);
+  return {
+    x: Phaser.Math.Linear(curX, pNext.x, alpha),
+    y: Phaser.Math.Linear(curY, pNext.y, alpha),
+  };
 }
 
 function colorFromId(id: number): number {
