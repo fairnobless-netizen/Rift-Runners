@@ -102,6 +102,8 @@ const TURN_BUFFER_MS = 220;
 const INITIAL_LIVES = 3;
 const MAX_LIVES = 6;
 const EXTRA_LIFE_STEP_SCORE = 1000;
+const MP_RENDER_SMOOTHING_K = 20;
+const MP_RENDER_SNAP_DISTANCE_TILES = 1.5;
 
 export type SceneAudioSettings = {
   musicEnabled: boolean;
@@ -462,8 +464,14 @@ export class GameScene extends Phaser.Scene {
       this.accumulator -= this.FIXED_DT;
     }
 
+    if (this.worldReady) {
+      const renderSimulationTick = this.simulationTick + this.accumulator / this.FIXED_DT;
+      this.remotePlayers?.update(renderSimulationTick, this.snapshotBuffer, this.localTgUserId);
+    }
+
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
+    this.tickMultiplayerRenderSmoothing(delta);
     this.consumeMovementIntent(time);
     if (this.gameMode !== 'multiplayer') {
       this.tryPlaceBomb(time);
@@ -487,12 +495,6 @@ export class GameScene extends Phaser.Scene {
     this.simulationTick += 1;
     this.processLocalInputQueue();
     this.prediction.updateFixed();
-
-    if (!this.worldReady) {
-      return;
-    }
-
-    this.remotePlayers?.update(this.simulationTick, this.snapshotBuffer, this.localTgUserId);
   }
 
   private processLocalInputQueue(): void {
@@ -2185,40 +2187,48 @@ export class GameScene extends Phaser.Scene {
     if (!this.playerSprite) return;
 
     const tileSize = GAME_CONFIG.tileSize;
+    this.localRenderPos = { x, y };
 
-    if (this.gameMode !== 'multiplayer') {
-      this.localRenderPos = { x, y };
-      this.playerSprite.setPosition(
-        x * tileSize + tileSize / 2,
-        y * tileSize + tileSize / 2,
-      );
+    this.playerSprite.setPosition(
+      x * tileSize + tileSize / 2,
+      y * tileSize + tileSize / 2,
+    );
+  }
+
+  private tickMultiplayerRenderSmoothing(deltaMs: number): void {
+    if (this.gameMode !== 'multiplayer' || !this.playerSprite) return;
+
+    const targetX = this.player.gridX;
+    const targetY = this.player.gridY;
+    if (!this.localRenderPos) {
+      this.localRenderPos = { x: targetX, y: targetY };
+    }
+
+    const dx = targetX - this.localRenderPos.x;
+    const dy = targetY - this.localRenderPos.y;
+    const driftTiles = Math.hypot(dx, dy);
+
+    if (driftTiles > MP_RENDER_SNAP_DISTANCE_TILES) {
+      this.snapLocalRenderPosition(targetX, targetY);
       return;
     }
 
-    if (!this.localRenderPos) {
-      this.localRenderPos = { x, y };
-    }
+    const dtSec = Math.max(0, deltaMs) / 1000;
+    const alpha = 1 - Math.exp(-MP_RENDER_SMOOTHING_K * dtSec);
+    this.localRenderPos.x += dx * alpha;
+    this.localRenderPos.y += dy * alpha;
 
-    const dx = x - this.localRenderPos.x;
-    const dy = y - this.localRenderPos.y;
-    const distSq = dx * dx + dy * dy;
-    const SNAP_DIST = 1.25;
-    const SNAP_DIST_SQ = SNAP_DIST * SNAP_DIST;
-
-    if (distSq > SNAP_DIST_SQ) {
-      this.localRenderPos.x = x;
-      this.localRenderPos.y = y;
-      this.localRenderSnapCount += 1;
-    } else {
-      const LERP = 0.3;
-      this.localRenderPos.x += dx * LERP;
-      this.localRenderPos.y += dy * LERP;
-    }
-
+    const tileSize = GAME_CONFIG.tileSize;
     this.playerSprite.setPosition(
       this.localRenderPos.x * tileSize + tileSize / 2,
       this.localRenderPos.y * tileSize + tileSize / 2,
     );
+  }
+
+  private snapLocalRenderPosition(x: number, y: number): void {
+    this.localRenderPos = { x, y };
+    this.localRenderSnapCount += 1;
+    this.placeLocalPlayerSpriteAt(x, y);
   }
 
 
@@ -2236,10 +2246,13 @@ export class GameScene extends Phaser.Scene {
     this.player.moveStartedAtMs = 0;
 
     if (this.gameMode !== 'multiplayer') {
-      this.localRenderPos = { x, y };
+      this.placeLocalPlayerSpriteAt(x, y);
+      return;
     }
 
-    this.placeLocalPlayerSpriteAt(x, y);
+    if (!this.localRenderPos) {
+      this.placeLocalPlayerSpriteAt(x, y);
+    }
   }
 
 
@@ -2373,8 +2386,7 @@ export class GameScene extends Phaser.Scene {
 
     if (driftTiles > 1 || this.needsNetResync) {
       this.setLocalPlayerPosition(me.x, me.y);
-      this.localRenderPos = { x: me.x, y: me.y };
-      this.localRenderSnapCount += 1;
+      this.snapLocalRenderPosition(me.x, me.y);
       this.prediction.reset?.();
       this.prediction.setServerFirstMode(this.gameMode === 'multiplayer');
       return;

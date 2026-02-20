@@ -192,7 +192,8 @@ export class RemotePlayersRenderer {
   }
 
   update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string): void {
-    this.updateAdaptiveDelay(simulationTick, buffer.length);
+    const controlTick = Math.floor(simulationTick);
+    this.updateAdaptiveDelay(controlTick, buffer.length);
     this.stallAfterTicks = this.delayTicks + this.maxExtrapolationTicks + 2;
     const renderTick = simulationTick - this.delayTicks;
     this.renderTick = renderTick;
