@@ -102,7 +102,6 @@ const TURN_BUFFER_MS = 220;
 const INITIAL_LIVES = 3;
 const MAX_LIVES = 6;
 const EXTRA_LIFE_STEP_SCORE = 1000;
-const MP_RENDER_SMOOTHING_K = 20;
 const MP_RENDER_SNAP_DISTANCE_TILES = 1.5;
 
 export type SceneAudioSettings = {
@@ -464,14 +463,18 @@ export class GameScene extends Phaser.Scene {
       this.accumulator -= this.FIXED_DT;
     }
 
+    let renderSimulationTick = 0;
     if (this.worldReady) {
-      const renderSimulationTick = this.simulationTick + this.accumulator / this.FIXED_DT;
+      renderSimulationTick = this.simulationTick + this.accumulator / this.FIXED_DT;
       this.remotePlayers?.update(renderSimulationTick, this.snapshotBuffer, this.localTgUserId, delta);
     }
 
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
-    this.tickMultiplayerRenderSmoothing(delta);
+
+    // Multiplayer: render local player from the same delayed playhead as remotes (no easing).
+    this.tickMultiplayerRenderInterpolation(renderSimulationTick);
+
     this.consumeMovementIntent(time);
     if (this.gameMode !== 'multiplayer') {
       this.tryPlaceBomb(time);
@@ -2195,34 +2198,101 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
-  private tickMultiplayerRenderSmoothing(deltaMs: number): void {
+  private tickMultiplayerRenderInterpolation(simulationTick: number): void {
     if (this.gameMode !== 'multiplayer' || !this.playerSprite) return;
+    if (!this.localTgUserId) return;
+    if (this.snapshotBuffer.length === 0) return;
 
-    const targetX = this.player.gridX;
-    const targetY = this.player.gridY;
+    // Keep local rendering on the same delayed playhead as remote players.
+    const delayTicks = (this.remotePlayers as any)?.getDelayTicks?.() ?? 2;
+    const renderTick = simulationTick - delayTicks;
+
+    const pos = this.getPlateauInterpolatedPos(this.snapshotBuffer, renderTick, this.localTgUserId);
+    if (!pos) return;
+
     if (!this.localRenderPos) {
-      this.localRenderPos = { x: targetX, y: targetY };
+      this.localRenderPos = { x: pos.x, y: pos.y };
     }
 
-    const dx = targetX - this.localRenderPos.x;
-    const dy = targetY - this.localRenderPos.y;
+    const dx = pos.x - this.localRenderPos.x;
+    const dy = pos.y - this.localRenderPos.y;
     const driftTiles = Math.hypot(dx, dy);
 
     if (this.needsNetResync || driftTiles > MP_RENDER_SNAP_DISTANCE_TILES) {
-      this.snapLocalRenderPosition(targetX, targetY);
+      this.snapLocalRenderPosition(pos.x, pos.y);
       return;
     }
 
-    const dtSec = Math.max(0, deltaMs) / 1000;
-    const alpha = 1 - Math.exp(-MP_RENDER_SMOOTHING_K * dtSec);
-    this.localRenderPos.x += dx * alpha;
-    this.localRenderPos.y += dy * alpha;
+    // No exponential catch-up: pos is already time-interpolated (constant speed).
+    this.localRenderPos.x = pos.x;
+    this.localRenderPos.y = pos.y;
 
     const tileSize = GAME_CONFIG.tileSize;
     this.playerSprite.setPosition(
-      this.localRenderPos.x * tileSize + tileSize / 2,
-      this.localRenderPos.y * tileSize + tileSize / 2,
+      pos.x * tileSize + tileSize / 2,
+      pos.y * tileSize + tileSize / 2,
     );
+  }
+
+  private getPlateauInterpolatedPos(buffer: MatchSnapshotV1[], renderTick: number, tgUserId: string): { x: number; y: number } | null {
+    if (buffer.length === 0) return null;
+
+    // Find last snapshot at/before renderTick where the player exists.
+    let i = -1;
+    for (let k = buffer.length - 1; k >= 0; k -= 1) {
+      const s = buffer[k];
+      if (s.tick > renderTick) continue;
+      if (s.players?.some((p) => p.tgUserId === tgUserId)) {
+        i = k;
+        break;
+      }
+    }
+    if (i < 0) {
+      const first = buffer[0];
+      const p0 = first.players?.find((p) => p.tgUserId === tgUserId);
+      return p0 ? { x: p0.x, y: p0.y } : null;
+    }
+
+    const posAt = (idx: number) => buffer[idx].players.find((p) => p.tgUserId === tgUserId);
+    const pHere = posAt(i);
+    if (!pHere) return null;
+
+    const curX = pHere.x;
+    const curY = pHere.y;
+
+    // Plateau start: walk backwards while position is unchanged.
+    let start = i;
+    while (start - 1 >= 0) {
+      const prev = posAt(start - 1);
+      if (!prev) break;
+      if (prev.x !== curX || prev.y !== curY) break;
+      start -= 1;
+    }
+
+    // Plateau end: walk forward while position is unchanged.
+    let end = i;
+    while (end + 1 < buffer.length) {
+      const next = posAt(end + 1);
+      if (!next) break;
+      if (next.x !== curX || next.y !== curY) break;
+      end += 1;
+    }
+
+    const nextIdx = end + 1;
+    if (nextIdx >= buffer.length) return { x: curX, y: curY };
+
+    const pNext = posAt(nextIdx);
+    if (!pNext) return { x: curX, y: curY };
+
+    const t0 = buffer[start].tick;
+    const t1 = buffer[nextIdx].tick;
+    if (t1 <= t0) return { x: pNext.x, y: pNext.y };
+
+    const alpha = Phaser.Math.Clamp((renderTick - t0) / (t1 - t0), 0, 1);
+    return {
+      x: Phaser.Math.Linear(curX, pNext.x, alpha),
+      y: Phaser.Math.Linear(curY, pNext.y, alpha),
+    };
   }
 
   private snapLocalRenderPosition(x: number, y: number): void {
