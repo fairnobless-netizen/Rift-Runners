@@ -266,6 +266,7 @@ export default function GameView(): JSX.Element {
     awaitingContinue: false,
     gameOver: false,
     eliminated: false,
+    respawning: false,
   });
   const [campaign, setCampaign] = useState<CampaignState>(() => loadCampaignState());
   const [zoomBounds, setZoomBounds] = useState<{ min: number; max: number }>({ min: GAME_CONFIG.minZoom, max: GAME_CONFIG.maxZoom });
@@ -421,7 +422,7 @@ export default function GameView(): JSX.Element {
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
   const deathOverlayVisible = lifeState.awaitingContinue || lifeState.gameOver;
-  const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay || deathOverlayVisible || lifeState.eliminated;
+  const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay || deathOverlayVisible || lifeState.eliminated || lifeState.respawning;
   const shellSizeRef = useRef<{ width: number; height: number }>({ width: window.innerWidth, height: window.innerHeight });
 
   useEffect(() => {
@@ -1028,6 +1029,7 @@ export default function GameView(): JSX.Element {
       setCurrentMatchId(null);
       setRestartVote(null);
       setMatchEndState(null);
+      setRoomsError(null);
       handledMatchEventIdsRef.current.clear();
     }
   }, [currentRoom?.roomCode]);
@@ -1332,6 +1334,8 @@ export default function GameView(): JSX.Element {
       if (message.type === 'room:restart_accepted') {
         setRestartVote(null);
         setMatchEndState(null);
+        setRoomsError(null);
+        setCurrentRoom((prev) => (prev ? { ...prev, phase: 'STARTED' } : prev));
         worldReadyRef.current = false;
         firstSnapshotReadyRef.current = false;
         handledMatchEventIdsRef.current.clear();
