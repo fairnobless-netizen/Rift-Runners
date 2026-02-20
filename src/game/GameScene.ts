@@ -466,7 +466,7 @@ export class GameScene extends Phaser.Scene {
 
     if (this.worldReady) {
       const renderSimulationTick = this.simulationTick + this.accumulator / this.FIXED_DT;
-      this.remotePlayers?.update(renderSimulationTick, this.snapshotBuffer, this.localTgUserId);
+      this.remotePlayers?.update(renderSimulationTick, this.snapshotBuffer, this.localTgUserId, delta);
     }
 
     this.consumeKeyboard();
