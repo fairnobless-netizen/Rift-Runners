@@ -1235,13 +1235,32 @@ export default function GameView(): JSX.Element {
     const expectedRoomCode = expectedRoomCodeRef.current;
     const expectedMatchId = expectedMatchIdRef.current;
 
+    if (expectedRoomCode && !expectedMatchId) {
+      const worldInitForRoom = [...ws.messages].reverse().find((m): m is MatchWorldInitMessage => {
+        if (!isMatchWorldInit(m)) return false;
+        return m.roomCode === expectedRoomCode;
+      });
+
+      if (worldInitForRoom?.matchId) {
+        expectedMatchIdRef.current = worldInitForRoom.matchId;
+        setCurrentMatchId(worldInitForRoom.matchId);
+        sceneRef.current?.setActiveMultiplayerSession(expectedRoomCode, worldInitForRoom.matchId);
+        diagnosticsStore.log('ROOM', 'INFO', 'firewall:bind_expected_match_from_world_init_for_snapshot', {
+          expectedRoomCode,
+          gotMatchId: worldInitForRoom.matchId,
+        });
+      }
+    }
+
+    const activeExpectedMatchId = expectedMatchIdRef.current;
+
     const last = [...ws.messages].reverse().find((m): m is MatchSnapshotMessage => {
       if (m.type !== 'match:snapshot') return false;
       const snapshot = m.snapshot;
       if (!expectedRoomCode) return true;
       if (snapshot.roomCode !== expectedRoomCode) return false;
-      if (!expectedMatchId) return true;
-      return snapshot.matchId === expectedMatchId;
+      if (!activeExpectedMatchId) return true;
+      return snapshot.matchId === activeExpectedMatchId;
     });
     if (!last) return;
 
@@ -1249,7 +1268,7 @@ export default function GameView(): JSX.Element {
     if (!expectedRoomCode) {
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot_no_expected_room', {
         expectedRoomCode,
-        expectedMatchId,
+        expectedMatchId: activeExpectedMatchId,
         gotRoomCode: snapshot.roomCode ?? null,
         gotMatchId: snapshot.matchId ?? null,
       });
@@ -1262,14 +1281,14 @@ export default function GameView(): JSX.Element {
     if (gotRoomCode !== expectedRoomCode) {
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot', {
         expectedRoomCode,
-        expectedMatchId,
+        expectedMatchId: activeExpectedMatchId,
         gotRoomCode,
         gotMatchId,
       });
       return;
     }
 
-    if (!expectedMatchId && gotMatchId) {
+    if (!activeExpectedMatchId && gotMatchId) {
       expectedMatchIdRef.current = gotMatchId;
       setCurrentMatchId(gotMatchId);
       sceneRef.current?.setActiveMultiplayerSession(expectedRoomCode, gotMatchId);
@@ -1280,11 +1299,11 @@ export default function GameView(): JSX.Element {
       });
     }
 
-    const activeExpectedMatchId = expectedMatchIdRef.current;
-    if (!activeExpectedMatchId || gotMatchId !== activeExpectedMatchId) {
+    const snapshotExpectedMatchId = expectedMatchIdRef.current;
+    if (!snapshotExpectedMatchId || gotMatchId !== snapshotExpectedMatchId) {
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot_match_mismatch', {
         expectedRoomCode,
-        expectedMatchId: activeExpectedMatchId,
+        expectedMatchId: snapshotExpectedMatchId,
         gotRoomCode,
         gotMatchId,
         snapTick: snapshot.tick ?? null,
@@ -1297,10 +1316,13 @@ export default function GameView(): JSX.Element {
     }
 
     if (!worldReadyRef.current) {
-      pendingSnapshotRef.current = snapshot;
+      const pendingSnapshot = pendingSnapshotRef.current;
+      if (!pendingSnapshot || snapshot.tick > pendingSnapshot.tick) {
+        pendingSnapshotRef.current = snapshot;
+      }
       diagnosticsStore.log('ROOM', 'INFO', 'snapshot:buffered_waiting_world_init', {
         expectedRoomCode,
-        expectedMatchId: activeExpectedMatchId,
+        expectedMatchId: snapshotExpectedMatchId,
         gotRoomCode,
         gotMatchId,
         snapTick: snapshot.tick ?? null,
