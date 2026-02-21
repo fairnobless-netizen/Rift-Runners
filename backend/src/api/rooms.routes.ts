@@ -16,7 +16,7 @@ import {
   setRoomMemberReadyTx,
   startRoomTx,
 } from '../db/repos';
-import { markSessionIntentionallyTerminated } from '../services/resumeService';
+import { clearMultiplayerResume } from '../services/resumeService';
 
 export const roomsRouter = Router();
 
@@ -75,7 +75,7 @@ roomsRouter.post('/:code/leave', async (req, res) => {
 
   try {
     await leaveRoomV2({ tgUserId: session.tgUserId, roomCode });
-    markSessionIntentionallyTerminated(session.tgUserId, 'api_leave_room');
+    clearMultiplayerResume(session.tgUserId, 'api_leave_room');
     return res.status(200).json({ ok: true });
   } catch (error: any) {
     if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });
@@ -196,7 +196,7 @@ roomsRouter.post('/leave', async (req, res) => {
 
   try {
     const result = await leaveRoomTx(session.tgUserId);
-    markSessionIntentionallyTerminated(session.tgUserId, 'api_leave');
+    clearMultiplayerResume(session.tgUserId, 'api_leave');
     return res.status(200).json({ ok: true, ...result });
   } catch (error: any) {
     if (error?.code === 'ROOM_NOT_JOINED') return res.status(200).json({ ok: true, roomCode: '' });
@@ -213,7 +213,7 @@ roomsRouter.post('/close', async (req, res) => {
 
   try {
     await closeRoomTx(session.tgUserId, roomCode);
-    markSessionIntentionallyTerminated(session.tgUserId, 'api_close_room');
+    clearMultiplayerResume(session.tgUserId, 'api_close_room');
     return res.status(200).json({ ok: true, roomCode });
   } catch (error: any) {
     if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });

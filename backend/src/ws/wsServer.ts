@@ -10,13 +10,7 @@ import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchMana
 // ✅ add DB cleanup
 import { closeRoomTx, getRoomByCode, leaveRoomV2, removeRoomCascade, setRoomPhase } from '../db/repos';
 import { RoomRegistry } from './roomRegistry';
-import {
-  clearRoomActiveSessions,
-  getActiveSession,
-  markSessionIntentionallyTerminated,
-  touchMultiplayerSessionsByRoom,
-  upsertMultiplayerSessionActivity,
-} from '../services/resumeService';
+import { clearMultiplayerResume, clearRoomMultiplayerResume, markMultiplayerResumeEligible, validateMultiplayerResume } from '../services/resumeService';
 
 type ClientCtx = {
   connectionId: string;
@@ -93,7 +87,7 @@ async function finalizeAndDeleteRoom(roomId: string) {
   rooms.delete(roomId);
   restartVotes.delete(roomId);
   roomRegistry.removeRoom(roomId);
-  clearRoomActiveSessions(roomId, 'room_deleted');
+  clearRoomMultiplayerResume(roomId, 'room_deleted');
 
   try {
     await setRoomPhase(roomId, 'FINISHED');
@@ -559,9 +553,9 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
   });
 
   if (reason === 'intentional_leave') {
-    markSessionIntentionallyTerminated(leavingTgUserId, 'intentional_leave');
+    clearMultiplayerResume(leavingTgUserId, 'intentional_leave');
   } else if (activeMatchId) {
-    upsertMultiplayerSessionActivity({ tgUserId: leavingTgUserId, roomCode: roomId, matchId: activeMatchId });
+    markMultiplayerResumeEligible({ tgUserId: leavingTgUserId, roomCode: roomId, matchId: activeMatchId });
   }
 
   void handlePlayerLeftInActiveMatch(roomId, leavingTgUserId);
@@ -622,13 +616,12 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       if (String(dbRoom.phase ?? 'LOBBY') !== 'LOBBY') {
         roomRegistry.markStarted(msg.roomId);
         const roomMatch = getMatchByRoom(msg.roomId);
-        const session = getActiveSession(ctx.tgUserId);
-        const allowResumeJoin =
-          session?.mode === 'MULTIPLAYER'
-          && !session.intentionallyTerminated
-          && session.roomCode === msg.roomId
-          && (!roomMatch?.matchId || session.matchId === roomMatch.matchId);
-        if (!allowResumeJoin) {
+        const resumeCheck = validateMultiplayerResume({
+          tgUserId: ctx.tgUserId,
+          roomCode: msg.roomId,
+          matchId: roomMatch?.matchId ?? null,
+        });
+        if (!resumeCheck.ok) {
           return send(ctx.socket, { type: 'match:error', error: 'room_started' });
         }
       }
@@ -727,8 +720,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
           return;
         }
 
-        touchMultiplayerSessionsByRoom({ roomCode: activeRoom.roomId, matchId: snapshot.matchId });
-
 
         for (const event of events) {
           if (activeRoom.matchId !== event.matchId || event.roomCode !== activeRoom.roomId) {
@@ -808,7 +799,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
           seq,
           payload,
         });
-        upsertMultiplayerSessionActivity({ tgUserId: ctx.tgUserId, roomCode: ctx.roomId, matchId });
       }
 
       return;
@@ -842,8 +832,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       if (!spawned) {
         return;
       }
-
-      upsertMultiplayerSessionActivity({ tgUserId: ctx.tgUserId, roomCode: ctx.roomId, matchId: match.matchId });
 
       broadcastToRoomMatch(room.roomId, match.matchId, spawned);
       return;
@@ -991,8 +979,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         if (activeRoom.matchId !== snapshot.matchId) {
           return;
         }
-
-        touchMultiplayerSessionsByRoom({ roomCode: activeRoom.roomId, matchId: snapshot.matchId });
 
         for (const event of events) {
           broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
