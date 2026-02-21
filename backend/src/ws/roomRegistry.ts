@@ -92,6 +92,22 @@ export class RoomRegistry {
     return connection.roomId;
   }
 
+
+  removeRoom(roomId: string): string[] {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return [];
+    }
+
+    const connectionIds = Array.from(room.activeConnectionIds);
+    this.rooms.delete(roomId);
+
+    for (const connectionId of connectionIds) {
+      this.connections.delete(connectionId);
+    }
+
+    return connectionIds;
+  }
   markStarted(roomId: string, nowMs = Date.now()): void {
     const room = this.ensureRoom(roomId, nowMs);
     room.started = true;
