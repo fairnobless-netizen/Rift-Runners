@@ -102,6 +102,16 @@ const TURN_BUFFER_MS = 220;
 const INITIAL_LIVES = 3;
 const MAX_LIVES = 6;
 const EXTRA_LIFE_STEP_SCORE = 1000;
+const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / (1000 / 20)));
+
+interface TileTweenSegment {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  startTick: number;
+  durationTicks: number;
+}
 
 export type SceneAudioSettings = {
   musicEnabled: boolean;
@@ -147,6 +157,9 @@ export class GameScene extends Phaser.Scene {
   private droppedDuplicateTick = 0;
   // MP local render state (used for hard resync snap only)
   private localRenderPos: { x: number; y: number } | null = null;
+  private localSegment?: TileTweenSegment;
+  private lastLocalTarget?: { x: number; y: number };
+  private lastLocalTargetTick = -1;
   private localRenderSnapCount = 0;
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
@@ -2239,7 +2252,90 @@ export class GameScene extends Phaser.Scene {
     const local = this.getLocalRenderTarget(this.localTgUserId, renderTick);
     if (!local) return;
 
-    this.snapLocalRenderPosition(local.x, local.y, local.targetTickUsed);
+    this.updateLocalRenderSegment(local);
+
+    const tweened = this.runTileTweenSegment(
+      this.localSegment,
+      this.localRenderPos,
+      renderTick,
+      MP_MOVE_TICKS_CONST,
+    );
+
+    if (tweened) {
+      this.placeLocalPlayerSpriteAt(tweened.x, tweened.y);
+      return;
+    }
+
+    this.placeLocalPlayerSpriteAt(local.x, local.y);
+  }
+
+  private getLocalStepDurationTicks(deltaTicks?: number): number {
+    // Fallback to constant if we cannot infer a sane duration from snapshots.
+    const fallback = MP_MOVE_TICKS_CONST;
+
+    if (deltaTicks === undefined || !Number.isFinite(deltaTicks)) return fallback;
+
+    // deltaTicks is "how many simulation ticks passed between tile changes"
+    // If it's too small or too large, keep fallback to avoid weird pauses/explosions.
+    if (deltaTicks <= 0) return fallback;
+    if (deltaTicks > 60) return fallback; // sanity cap
+
+    return deltaTicks;
+  }
+
+  private updateLocalRenderSegment(local: { x: number; y: number; targetTickUsed: number }): void {
+    if (!this.lastLocalTarget) {
+      this.lastLocalTarget = { x: local.x, y: local.y };
+      this.lastLocalTargetTick = local.targetTickUsed;
+      return;
+    }
+
+    // No change → keep current segment as-is.
+    if (local.x === this.lastLocalTarget.x && local.y === this.lastLocalTarget.y) {
+      return;
+    }
+
+    // Compute duration from snapshot tick delta between tile changes.
+    // This prevents: tween finishes early → idle pause until next tile change.
+    const prevTick = this.lastLocalTargetTick;
+    const nextTick = local.targetTickUsed;
+
+    const rawDelta = nextTick - prevTick;
+    const durationTicks = this.getLocalStepDurationTicks(rawDelta);
+
+    // Segment should start when we were still in the previous tile (prevTick),
+    // and reach the next tile exactly by nextTick.
+    this.localSegment = {
+      fromX: this.lastLocalTarget.x,
+      fromY: this.lastLocalTarget.y,
+      toX: local.x,
+      toY: local.y,
+      startTick: prevTick,
+      durationTicks,
+    };
+
+    this.lastLocalTarget = { x: local.x, y: local.y };
+    this.lastLocalTargetTick = nextTick;
+  }
+
+  private runTileTweenSegment(
+    segment: TileTweenSegment | undefined,
+    currentPos: { x: number; y: number } | null,
+    renderTick: number,
+    fallbackDurationTicks: number,
+  ): { x: number; y: number } | null {
+    if (!segment) return currentPos;
+
+    const duration = Math.max(1, segment.durationTicks || fallbackDurationTicks);
+    const alpha = Phaser.Math.Clamp((renderTick - segment.startTick) / duration, 0, 1);
+    const x = Phaser.Math.Linear(segment.fromX, segment.toX, alpha);
+    const y = Phaser.Math.Linear(segment.fromY, segment.toY, alpha);
+
+    if (alpha >= 1) {
+      this.localSegment = undefined;
+    }
+
+    return { x, y };
   }
 
   private getLocalRenderTarget(localTgUserId: string, renderTick: number): { x: number; y: number; targetTickUsed: number } | null {
@@ -2314,6 +2410,9 @@ export class GameScene extends Phaser.Scene {
     this.prediction.reset?.();
     this.worldReady = false;
     this.localRenderPos = null;
+    this.localSegment = undefined;
+    this.lastLocalTarget = undefined;
+    this.lastLocalTargetTick = -1;
     this.localRenderSnapCount = 0;
     this.remotePlayers?.resetNetState?.();
   }
