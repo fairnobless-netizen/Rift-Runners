@@ -14,6 +14,7 @@ import { roomsRouter } from './api/rooms.routes';
 import { friendsRouter } from './api/friends.routes';
 import { usersRouter } from './api/users.routes';
 import { referralsRouter } from './api/referrals.routes';
+import { resumeRouter } from './api/resume.routes';
 import { runMigrationsFromSchemaSql } from './db/migrate';
 import { startWsGateway } from './ws/gateway';
 
@@ -48,6 +49,7 @@ app.use('/api/rooms', roomsRouter);
 app.use('/api/friends', friendsRouter);
 app.use('/api', usersRouter);
 app.use('/api', referralsRouter);
+app.use('/api', resumeRouter);
 
 // frontend static
 app.use(express.static(frontendDistPath));
