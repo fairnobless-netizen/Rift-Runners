@@ -49,13 +49,15 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
 
   processBombExplosions(match, events);
   maybeEndMatch(match, events);
+  const now = Date.now();
 
   const snapshot: MatchSnapshot = {
     version: 'match_v1',
     roomCode: match.roomId,
     matchId: match.matchId,
     tick: match.tick,
-    serverTime: Date.now(),
+    serverTime: now,
+    serverTimeMs: now,
     world: {
       gridW: match.world.gridW,
       gridH: match.world.gridH,
@@ -77,6 +79,15 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
       lastInputSeq: p.lastInputSeq,
       x: p.x,
       y: p.y,
+      isMoving: false,
+      moveFromX: p.x,
+      moveFromY: p.y,
+      moveToX: p.x,
+      moveToY: p.y,
+      moveStartTick: match.tick,
+      moveDurationTicks: 0,
+      moveStartServerTimeMs: now,
+      moveDurationMs: 0,
       lives: match.playerLives.get(p.tgUserId) ?? 0,
       eliminated: match.eliminatedPlayers.has(p.tgUserId),
     })),
