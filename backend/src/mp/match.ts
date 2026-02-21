@@ -7,12 +7,15 @@ import type {
   MatchPlayerRespawned,
   MatchSnapshot,
   MatchTilesDestroyed,
+  MoveDir,
 } from './protocol';
-import type { MatchState } from './types';
+import type { MatchState, PlayerState } from './types';
 
 const TICK_RATE_MS = 50; // 20 Hz
 const RESPAWN_DELAY_TICKS = 24;
 const INVULN_TICKS = 20;
+const MOVE_DURATION_TICKS = 6;
+const LOG_MOVEMENT_STATE = false;
 
 type MatchEvent = MatchBombSpawned | MatchBombExploded | MatchTilesDestroyed | MatchPlayerDamaged | MatchPlayerRespawned | MatchPlayerEliminated | MatchEnd;
 
@@ -47,6 +50,8 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
     applyInput(match, input.tgUserId, input.seq, input.payload);
   }
 
+  advancePlayerMovementStates(match);
+
   processBombExplosions(match, events);
   maybeEndMatch(match, events);
   const now = Date.now();
@@ -79,15 +84,15 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
       lastInputSeq: p.lastInputSeq,
       x: p.x,
       y: p.y,
-      isMoving: false,
-      moveFromX: p.x,
-      moveFromY: p.y,
-      moveToX: p.x,
-      moveToY: p.y,
-      moveStartTick: match.tick,
-      moveDurationTicks: 0,
-      moveStartServerTimeMs: now,
-      moveDurationMs: 0,
+      isMoving: p.isMoving,
+      moveFromX: p.isMoving ? p.moveFromX : p.x,
+      moveFromY: p.isMoving ? p.moveFromY : p.y,
+      moveToX: p.isMoving ? p.moveToX : p.x,
+      moveToY: p.isMoving ? p.moveToY : p.y,
+      moveStartTick: p.isMoving ? p.moveStartTick : match.tick,
+      moveDurationTicks: p.isMoving ? p.moveDurationTicks : 0,
+      moveStartServerTimeMs: p.isMoving ? p.moveStartServerTimeMs : now,
+      moveDurationMs: p.isMoving ? p.moveDurationTicks * TICK_RATE_MS : 0,
       lives: match.playerLives.get(p.tgUserId) ?? 0,
       eliminated: match.eliminatedPlayers.has(p.tgUserId),
     })),
@@ -145,6 +150,7 @@ function processRespawns(match: MatchState, events: MatchEvent[]): void {
 
     player.x = player.spawnX;
     player.y = player.spawnY;
+    resetPlayerMovementState(player, match.tick, Date.now());
     player.state = 'alive';
     player.respawnAtTick = null;
     player.invulnUntilTick = match.tick + INVULN_TICKS;
@@ -233,6 +239,7 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
 
       if (nextLives <= 0) {
         player.state = 'eliminated';
+        resetPlayerMovementState(player, match.tick, Date.now());
         player.respawnAtTick = null;
         player.invulnUntilTick = 0;
         match.eliminatedPlayers.add(player.tgUserId);
@@ -249,6 +256,7 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
       }
 
       player.state = 'dead_respawning';
+      resetPlayerMovementState(player, match.tick, Date.now());
       player.respawnAtTick = match.tick + RESPAWN_DELAY_TICKS;
       player.invulnUntilTick = 0;
     }
@@ -308,31 +316,12 @@ function canOccupyWorldCell(match: MatchState, x: number, y: number): boolean {
   return tile === 0;
 }
 
-function applyInput(match: MatchState, tgUserId: string, seq: number, payload: { kind: 'move'; dir: 'up' | 'down' | 'left' | 'right' } | { kind: 'bomb_place'; x: number; y: number }) {
+function applyInput(match: MatchState, tgUserId: string, seq: number, payload: { kind: 'move'; dir: MoveDir } | { kind: 'bomb_place'; x: number; y: number }) {
   const p = match.players.get(tgUserId);
   if (!p) return;
 
   if (payload.kind === 'move') {
-    let nx = p.x;
-    let ny = p.y;
-
-    switch (payload.dir) {
-      case 'up': ny -= 1; break;
-      case 'down': ny += 1; break;
-      case 'left': nx -= 1; break;
-      case 'right': nx += 1; break;
-    }
-
-    nx = clamp(nx, 0, match.world.gridW - 1);
-    ny = clamp(ny, 0, match.world.gridH - 1);
-
-    if (!canOccupyWorldCell(match, nx, ny)) {
-      p.lastInputSeq = seq;
-      return;
-    }
-
-    p.x = nx;
-    p.y = ny;
+    p.intentDir = payload.dir;
     p.lastInputSeq = seq;
     return;
   }
@@ -340,11 +329,90 @@ function applyInput(match: MatchState, tgUserId: string, seq: number, payload: {
   p.lastInputSeq = seq;
 }
 
+function advancePlayerMovementStates(match: MatchState): void {
+  const now = Date.now();
+
+  for (const player of match.players.values()) {
+    if (player.state !== 'alive') continue;
+
+    if (player.isMoving) {
+      const elapsed = match.tick - player.moveStartTick;
+      if (elapsed >= player.moveDurationTicks) {
+        player.x = player.moveToX;
+        player.y = player.moveToY;
+        resetPlayerMovementState(player, match.tick, now, false);
+        if (LOG_MOVEMENT_STATE) {
+          // eslint-disable-next-line no-console
+          console.debug('[mp][move:end]', {
+            tgUserId: player.tgUserId,
+            x: player.x,
+            y: player.y,
+            tick: match.tick,
+          });
+        }
+      }
+    }
+
+    if (player.isMoving || player.intentDir == null) continue;
+
+    const { x: nx, y: ny } = nextCellForDir(player.x, player.y, player.intentDir);
+    if (!canOccupyWorldCell(match, nx, ny)) continue;
+
+    player.isMoving = true;
+    player.moveFromX = player.x;
+    player.moveFromY = player.y;
+    player.moveToX = nx;
+    player.moveToY = ny;
+    player.moveStartTick = match.tick;
+    player.moveDurationTicks = MOVE_DURATION_TICKS;
+    player.moveStartServerTimeMs = now;
+
+    if (LOG_MOVEMENT_STATE) {
+      // eslint-disable-next-line no-console
+      console.debug('[mp][move:start]', {
+        tgUserId: player.tgUserId,
+        fromX: player.moveFromX,
+        fromY: player.moveFromY,
+        toX: player.moveToX,
+        toY: player.moveToY,
+        startTick: player.moveStartTick,
+        durationTicks: player.moveDurationTicks,
+      });
+    }
+  }
+}
+
+function nextCellForDir(x: number, y: number, dir: MoveDir): { x: number; y: number } {
+  switch (dir) {
+    case 'up':
+      return { x, y: y - 1 };
+    case 'down':
+      return { x, y: y + 1 };
+    case 'left':
+      return { x: x - 1, y };
+    case 'right':
+      return { x: x + 1, y };
+    default:
+      return { x, y };
+  }
+}
+
+function resetPlayerMovementState(player: PlayerState, tick: number, now: number, clearIntent = true): void {
+  player.isMoving = false;
+  player.moveFromX = player.x;
+  player.moveFromY = player.y;
+  player.moveToX = player.x;
+  player.moveToY = player.y;
+  player.moveStartTick = tick;
+  player.moveDurationTicks = 0;
+  player.moveStartServerTimeMs = now;
+  if (clearIntent) {
+    player.intentDir = null;
+  }
+}
+
 function nextEventId(match: MatchState): string {
   match.eventSeq += 1;
   return `${match.matchId}_${match.eventSeq}`;
 }
 
-function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v));
-}
