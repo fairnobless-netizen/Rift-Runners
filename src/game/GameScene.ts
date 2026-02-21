@@ -103,15 +103,13 @@ const INITIAL_LIVES = 3;
 const MAX_LIVES = 6;
 const EXTRA_LIFE_STEP_SCORE = 1000;
 const MP_RENDER_SNAP_DISTANCE_TILES = 1.5;
-const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / (1000 / 20)));
-
 type TileTweenSegment = {
   fromX: number;
   fromY: number;
   toX: number;
   toY: number;
-  startTick: number;
-  durationTicks: number;
+  startTimeMs: number;
+  durationMs: number;
 };
 
 export type SceneAudioSettings = {
@@ -485,7 +483,7 @@ export class GameScene extends Phaser.Scene {
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
 
-    // Multiplayer: render local player from the same delayed playhead as remotes (no easing).
+    // Multiplayer local movement is tweened on the same ms timeline as solo.
     this.tickMultiplayerRenderInterpolation(renderSimulationTick);
 
     this.consumeMovementIntent(time);
@@ -2218,6 +2216,7 @@ export class GameScene extends Phaser.Scene {
 
     const delayTicks = (this.remotePlayers as any)?.getDelayTicks?.() ?? 2;
     const renderTick = simulationTick - delayTicks;
+    const renderTimeMs = renderTick * this.FIXED_DT;
 
     const local = this.getLocalRenderTarget(this.localTgUserId, renderTick);
     if (!local) return;
@@ -2238,13 +2237,25 @@ export class GameScene extends Phaser.Scene {
 
     this.updateLocalRenderSegment(local);
 
-    const tweened = this.runTileTweenSegment(
-      this.localSegment,
-      this.localRenderPos,
-      renderTick,
-      this.getLocalStepDurationTicks(),
-    );
-    this.localSegment = tweened.nextSegment;
+    let segmentAdvanceCount = 0;
+    const maxSegmentAdvancesPerFrame = 4;
+    while (this.localSegment && segmentAdvanceCount < maxSegmentAdvancesPerFrame) {
+      const tweened = this.evalTileTweenPosition(this.localSegment, renderTimeMs);
+      this.localRenderPos.x = tweened.x;
+      this.localRenderPos.y = tweened.y;
+      if (!tweened.done) {
+        break;
+      }
+
+      this.localRenderPos.x = this.localSegment.toX;
+      this.localRenderPos.y = this.localSegment.toY;
+      const finishedSegment = this.localSegment;
+      this.localSegment = undefined;
+      segmentAdvanceCount += 1;
+
+      // Carry over leftover render time immediately if a newer target is already known.
+      this.updateLocalRenderSegment(local, finishedSegment.startTimeMs + finishedSegment.durationMs);
+    }
 
     const dx = local.x - this.localRenderPos.x;
     const dy = local.y - this.localRenderPos.y;
@@ -2262,11 +2273,15 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
-  private getLocalStepDurationTicks(): number {
-    return MP_MOVE_TICKS_CONST;
+  private getMoveDurationMsForOneTile(): number {
+    return Math.max(1, scaleMovementDurationMs(GAME_CONFIG.moveDurationMs));
   }
 
-  private updateLocalRenderSegment(local: { x: number; y: number; targetTickUsed: number }): void {
+  private updateLocalRenderSegment(local: { x: number; y: number; targetTickUsed: number }, overrideStartTimeMs?: number): void {
+    if (this.localSegment) {
+      return;
+    }
+
     if (!this.lastLocalTarget) {
       this.lastLocalTarget = { x: local.x, y: local.y };
       this.lastLocalTargetTick = local.targetTickUsed;
@@ -2277,40 +2292,29 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    const durationMs = this.getMoveDurationMsForOneTile();
+    const fallbackStartTimeMs = local.targetTickUsed * this.FIXED_DT - durationMs;
     this.localSegment = {
       fromX: this.lastLocalTarget.x,
       fromY: this.lastLocalTarget.y,
       toX: local.x,
       toY: local.y,
-      startTick: Math.max(this.lastLocalTargetTick + 1, local.targetTickUsed),
-      durationTicks: this.getLocalStepDurationTicks(),
+      startTimeMs: overrideStartTimeMs ?? fallbackStartTimeMs,
+      durationMs,
     };
     this.lastLocalTarget = { x: local.x, y: local.y };
     this.lastLocalTargetTick = local.targetTickUsed;
   }
 
-  private runTileTweenSegment(
-    segment: TileTweenSegment | undefined,
-    renderPos: { x: number; y: number },
-    renderTick: number,
-    durationFallbackTicks: number,
-  ): { nextSegment: TileTweenSegment | undefined } {
-    if (!segment) {
-      return { nextSegment: undefined };
-    }
-
-    const duration = Math.max(1, segment.durationTicks || durationFallbackTicks);
-    const alpha = Phaser.Math.Clamp((renderTick - segment.startTick) / duration, 0, 1);
-    renderPos.x = Phaser.Math.Linear(segment.fromX, segment.toX, alpha);
-    renderPos.y = Phaser.Math.Linear(segment.fromY, segment.toY, alpha);
-
-    if (alpha < 1) {
-      return { nextSegment: segment };
-    }
-
-    renderPos.x = segment.toX;
-    renderPos.y = segment.toY;
-    return { nextSegment: undefined };
+  private evalTileTweenPosition(segment: TileTweenSegment, nowMs: number): { x: number; y: number; done: boolean } {
+    const duration = Math.max(1, segment.durationMs);
+    const progress = Phaser.Math.Clamp((nowMs - segment.startTimeMs) / duration, 0, 1);
+    const easedProgress = progress;
+    return {
+      x: Phaser.Math.Linear(segment.fromX, segment.toX, easedProgress),
+      y: Phaser.Math.Linear(segment.fromY, segment.toY, easedProgress),
+      done: progress >= 1,
+    };
   }
 
   private getLocalRenderTarget(localTgUserId: string, renderTick: number): { x: number; y: number; targetTickUsed: number } | null {
