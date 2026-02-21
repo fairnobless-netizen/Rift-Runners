@@ -2318,6 +2318,12 @@ export class GameScene extends Phaser.Scene {
     this.lastLocalTargetTick = nextTick;
   }
 
+  private resetLocalRenderSegmentTracking(x: number, y: number, targetTickUsed: number = -1): void {
+    this.localSegment = undefined;
+    this.lastLocalTarget = { x, y };
+    this.lastLocalTargetTick = targetTickUsed;
+  }
+
   private runTileTweenSegment(
     segment: TileTweenSegment | undefined,
     currentPos: { x: number; y: number } | null,
@@ -2359,9 +2365,10 @@ export class GameScene extends Phaser.Scene {
     return null;
   }
 
-  private snapLocalRenderPosition(x: number, y: number, _targetTickUsed: number = -1): void {
+  private snapLocalRenderPosition(x: number, y: number, targetTickUsed: number = -1): void {
     this.localRenderPos = { x, y };
     this.localRenderSnapCount += 1;
+    this.resetLocalRenderSegmentTracking(x, y, targetTickUsed);
     this.placeLocalPlayerSpriteAt(x, y);
   }
 
@@ -2410,9 +2417,11 @@ export class GameScene extends Phaser.Scene {
     this.prediction.reset?.();
     this.worldReady = false;
     this.localRenderPos = null;
-    this.localSegment = undefined;
-    this.lastLocalTarget = undefined;
-    this.lastLocalTargetTick = -1;
+    this.resetLocalRenderSegmentTracking(
+      this.player.gridX,
+      this.player.gridY,
+      this.lastAppliedSnapshotTick >= 0 ? this.lastAppliedSnapshotTick : this.simulationTick,
+    );
     this.localRenderSnapCount = 0;
     this.remotePlayers?.resetNetState?.();
   }
@@ -2518,7 +2527,7 @@ export class GameScene extends Phaser.Scene {
 
     if (driftTiles > 1 || this.needsNetResync) {
       this.setLocalPlayerPosition(me.x, me.y);
-      this.snapLocalRenderPosition(me.x, me.y);
+      this.snapLocalRenderPosition(me.x, me.y, snapshot.tick);
       this.prediction.reset?.();
       this.prediction.setServerFirstMode(false);
       this.mpLocalInputQueue = [];
