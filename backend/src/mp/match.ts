@@ -16,6 +16,7 @@ const RESPAWN_DELAY_TICKS = 24;
 const INVULN_TICKS = 20;
 const MOVE_DURATION_TICKS = 6;
 const LOG_MOVEMENT_STATE = false;
+const LOG_EXPLOSION_DAMAGE = false;
 
 type MatchEvent = MatchBombSpawned | MatchBombExploded | MatchTilesDestroyed | MatchPlayerDamaged | MatchPlayerRespawned | MatchPlayerEliminated | MatchEnd;
 
@@ -171,6 +172,8 @@ function processRespawns(match: MatchState, events: MatchEvent[]): void {
 }
 
 function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
+  const damagedPlayersThisTick = new Set<string>();
+
   while (true) {
     const dueBomb = Array.from(match.bombs.values())
       .filter((bomb) => match.tick >= bomb.explodeAtTick)
@@ -220,11 +223,24 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
     for (const player of match.players.values()) {
       if (player.state !== 'alive') continue;
       if (player.invulnUntilTick > match.tick) continue;
+      if (damagedPlayersThisTick.has(player.tgUserId)) continue;
       const hit = impacts.some((impact) => impact.x === player.x && impact.y === player.y);
       if (!hit) continue;
 
-      const nextLives = Math.max(0, (match.playerLives.get(player.tgUserId) ?? 0) - 1);
+      const prevLives = match.playerLives.get(player.tgUserId) ?? 0;
+      const nextLives = Math.max(0, prevLives - 1);
       match.playerLives.set(player.tgUserId, nextLives);
+      damagedPlayersThisTick.add(player.tgUserId);
+
+      if (LOG_EXPLOSION_DAMAGE) {
+        console.log(JSON.stringify({
+          victimId: player.tgUserId,
+          prevLives,
+          newLives: nextLives,
+          source: 'explosion',
+          tick: match.tick,
+        }));
+      }
 
       events.push({
         type: 'match:player_damaged',
@@ -415,4 +431,3 @@ function nextEventId(match: MatchState): string {
   match.eventSeq += 1;
   return `${match.matchId}_${match.eventSeq}`;
 }
-

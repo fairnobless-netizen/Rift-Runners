@@ -321,6 +321,7 @@ export default function GameView(): JSX.Element {
   const [publicRooms, setPublicRooms] = useState<PublicRoomEntry[]>([]);
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
+  const [multiplayerLivesByUserId, setMultiplayerLivesByUserId] = useState<Record<string, number>>({});
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [restartVote, setRestartVote] = useState<{ active: boolean; yesCount: number; total: number; expiresAt: number | null } | null>(null);
   const [matchEndState, setMatchEndState] = useState<{ winnerTgUserId: string | null; reason: 'elimination' | 'draw' } | null>(null);
@@ -1477,8 +1478,17 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    const players = Array.isArray(snapshot.players) ? snapshot.players : [];
+    setMultiplayerLivesByUserId(() => {
+      const next: Record<string, number> = {};
+      for (const player of players) {
+        if (!player?.tgUserId) continue;
+        next[player.tgUserId] = Math.max(0, Number(player.lives ?? 0));
+      }
+      return next;
+    });
+
     if (localTgUserId) {
-      const players = Array.isArray(snapshot.players) ? snapshot.players : [];
       const me = players.find((player) => String(player?.tgUserId) === String(localTgUserId));
       if (typeof me?.lastInputSeq === 'number') {
         setAckLastInputSeq(me.lastInputSeq);
@@ -2511,6 +2521,14 @@ export default function GameView(): JSX.Element {
   const bootProgressPercent = Math.round(bootSplashProgress * 100);
 
   const isMultiplayerHud = currentRoomMembers.length >= 2;
+  const getHudLives = (member: RoomMember | null): string => {
+    if (!member) return '';
+    if (!isMultiplayerHud) {
+      return '❤️'.repeat(Math.max(0, lifeState.lives)) || '💀';
+    }
+    const lives = Math.max(0, multiplayerLivesByUserId[member.tgUserId] ?? 0);
+    return '❤️'.repeat(lives) || '💀';
+  };
   const hudSlots = isMultiplayerHud
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
     : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
@@ -2742,7 +2760,7 @@ export default function GameView(): JSX.Element {
                   {member ? (
                     <>
                       <span className="hud-slot-name" title={member.displayName}>{member.displayName}</span>
-                      <span ref={index === 0 ? hudLivesRef : undefined} className="hud-lives" aria-label="Lives" title="Lives">{index === 0 ? ('❤️'.repeat(Math.max(0, lifeState.lives)) || '💀') : '❤️❤️❤️'}</span>
+                      <span ref={index === 0 ? hudLivesRef : undefined} className="hud-lives" aria-label="Lives" title="Lives">{getHudLives(member)}</span>
                     </>
                   ) : null}
                 </div>
