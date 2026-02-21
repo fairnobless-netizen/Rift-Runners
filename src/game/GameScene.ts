@@ -480,7 +480,7 @@ export class GameScene extends Phaser.Scene {
     let renderSimulationTick = 0;
     if (this.worldReady) {
       renderSimulationTick = this.simulationTick + this.accumulator / this.FIXED_DT;
-      this.remotePlayers?.update(renderSimulationTick, this.snapshotBuffer, this.localTgUserId, delta, this.needsNetResync);
+      this.remotePlayers?.update(renderSimulationTick, this.snapshotBuffer, this.localTgUserId, this.needsNetResync);
     }
 
     this.consumeKeyboard();
