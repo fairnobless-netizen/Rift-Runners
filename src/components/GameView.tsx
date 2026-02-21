@@ -31,7 +31,6 @@ import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../
 import type { MatchServerMessage } from '@shared/protocol';
 import {
   buyShopSku,
-  checkMultiplayerResumeEligibility,
   claimReferral,
   closeRoom,
   createRoom,
@@ -46,12 +45,10 @@ import {
   fetchWallet,
   joinRoom,
   leaveRoom,
-  discardResume,
   requestFriend,
   setRoomReady,
   startRoom,
   respondFriend,
-  resumeMultiplayerSession,
   submitLeaderboard,
   type FriendEntry,
   type IncomingFriendRequest,
@@ -77,7 +74,6 @@ import { MultiplayerModal } from './MultiplayerModal';
 import { isDebugEnabled } from '../debug/debugFlags';
 import { diagnosticsStore } from '../debug/diagnosticsStore';
 import { DiagnosticsOverlay } from '../debug/DiagnosticsOverlay';
-import { buildMultiplayerResumeMeta, buildSingleplayerResumeMeta, clearResumeMeta, loadResumeMeta, saveResumeMeta } from '../game/resumeSession';
 
 
 const defaultStats: PlayerStats = {
@@ -330,8 +326,6 @@ export default function GameView(): JSX.Element {
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [restartVote, setRestartVote] = useState<{ active: boolean; yesCount: number; total: number; expiresAt: number | null } | null>(null);
   const [matchEndState, setMatchEndState] = useState<{ winnerTgUserId: string | null; reason: 'elimination' | 'draw' } | null>(null);
-  const [resumePrompt, setResumePrompt] = useState<{ kind: 'multiplayer'; roomCode: string; matchId: string } | { kind: 'singleplayer'; snapshot: unknown } | null>(null);
-  const resumeCheckedRef = useRef(false);
   const expectedRoomCodeRef = useRef<string | null>(null);
   const expectedMatchIdRef = useRef<string | null>(null);
   const worldReadyRef = useRef(false);
@@ -2021,8 +2015,6 @@ export default function GameView(): JSX.Element {
       }
     }
 
-    clearResumeMeta();
-    void discardResume();
     sceneRef.current?.setGameMode('solo');
     sceneRef.current?.restartSoloRun();
     setGameFlowPhase('start');
@@ -2044,8 +2036,6 @@ export default function GameView(): JSX.Element {
     }
 
     ws.send({ type: 'room:leave' });
-    clearResumeMeta();
-    void discardResume();
     setCurrentRoom(null);
     setCurrentRoomMembers([]);
     setCurrentMatchId(null);
@@ -2072,8 +2062,6 @@ export default function GameView(): JSX.Element {
     }
 
     ws.send({ type: 'room:leave' });
-    clearResumeMeta();
-    void discardResume();
     setCurrentRoom(null);
     setCurrentRoomMembers([]);
     setCurrentMatchId(null);
@@ -2642,83 +2630,6 @@ export default function GameView(): JSX.Element {
     }
   };
 
-  useEffect(() => {
-    if (resumeCheckedRef.current) return;
-    if (!localTgUserId || !token) return;
-    resumeCheckedRef.current = true;
-
-    const run = async () => {
-      const local = loadResumeMeta();
-      if (!local || local.tgUserId !== localTgUserId) {
-        clearResumeMeta();
-      }
-
-      const eligibility = await checkMultiplayerResumeEligibility();
-      if (eligibility?.eligible && eligibility.roomCode && eligibility.matchId) {
-        saveResumeMeta(buildMultiplayerResumeMeta({ tgUserId: localTgUserId, roomCode: eligibility.roomCode, matchId: eligibility.matchId, disconnectedAt: Date.now() }));
-        setResumePrompt({ kind: 'multiplayer', roomCode: eligibility.roomCode, matchId: eligibility.matchId });
-        return;
-      }
-
-      const refreshed = loadResumeMeta();
-      if (refreshed?.kind === 'singleplayer' && refreshed.tgUserId === localTgUserId) {
-        setResumePrompt({ kind: 'singleplayer', snapshot: refreshed.snapshot });
-      }
-    };
-
-    void run();
-  }, [localTgUserId, token]);
-
-  useEffect(() => {
-    const onBeforeUnload = () => {
-      if (!localTgUserId || gameFlowPhase !== 'playing') return;
-      if (currentRoom?.roomCode && currentMatchId) {
-        saveResumeMeta(buildMultiplayerResumeMeta({ tgUserId: localTgUserId, roomCode: currentRoom.roomCode, matchId: currentMatchId }));
-        return;
-      }
-      const snapshot = sceneRef.current?.buildSoloResumeSnapshot();
-      if (snapshot) {
-        saveResumeMeta(buildSingleplayerResumeMeta({ tgUserId: localTgUserId, snapshot }));
-      }
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [currentMatchId, currentRoom?.roomCode, gameFlowPhase, localTgUserId]);
-
-  const onResumeConfirm = useCallback(async (): Promise<void> => {
-    if (!resumePrompt) return;
-    if (resumePrompt.kind === 'multiplayer') {
-      const resumed = await resumeMultiplayerSession(resumePrompt.roomCode, resumePrompt.matchId);
-      if (!resumed?.ok || !resumed.room) {
-        clearResumeMeta();
-        void discardResume();
-        setResumePrompt(null);
-        return;
-      }
-      setCurrentRoom(resumed.room);
-      setCurrentRoomMembers(resumed.members ?? []);
-      setCurrentMatchId(resumed.matchId ?? resumePrompt.matchId);
-      setGameFlowPhase('playing');
-      setResumePrompt(null);
-      return;
-    }
-
-    const restored = sceneRef.current?.applySoloResumeSnapshot(resumePrompt.snapshot as any) ?? false;
-    if (!restored) {
-      clearResumeMeta();
-      setResumePrompt(null);
-      return;
-    }
-    setGameFlowPhase('playing');
-    setResumePrompt(null);
-  }, [resumePrompt]);
-
-  const onResumeCancel = useCallback((): void => {
-    clearResumeMeta();
-    void discardResume();
-    setResumePrompt(null);
-  }, []);
-
   const onStartGame = (): void => {
     void requestTelegramFullscreenBestEffort();
     if (shouldShowRotateOverlay) return;
@@ -2787,19 +2698,6 @@ export default function GameView(): JSX.Element {
               <button type="button" className="game-flow-start-btn" disabled={shouldShowRotateOverlay} onClick={onStartGame}>Start</button>
             </div>
           )}
-        </div>
-      )}
-      {resumePrompt && (
-        <div className="settings-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Resume session">
-          <div className="settings-modal rr-overlay-modal">
-            <div className="settings-header"><strong>Resume your current game?</strong></div>
-            <div className="settings-panel">
-              <div className="rr-mp-inline-actions">
-                <button type="button" className="primary" onClick={() => { void onResumeConfirm(); }}>OK</button>
-                <button type="button" className="ghost" onClick={onResumeCancel}>Cancel</button>
-              </div>
-            </div>
-          </div>
         </div>
       )}
       {registrationOpen && (

@@ -4,13 +4,12 @@ import type { RawData, Server as WebSocketServer } from 'ws';
 
 import type { MatchClientMessage, MatchServerMessage } from '../mp/protocol';
 import type { MatchState } from '../mp/types';
-import { markPlayerDisconnected, markPlayerReconnected, startMatch, tryPlaceBomb } from '../mp/match';
+import { markPlayerDisconnected, startMatch, tryPlaceBomb } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 
 // ✅ add DB cleanup
 import { closeRoomTx, getRoomByCode, leaveRoomV2, removeRoomCascade, setRoomPhase } from '../db/repos';
 import { RoomRegistry } from './roomRegistry';
-import { clearMultiplayerResume, clearRoomMultiplayerResume, markMultiplayerResumeEligible, validateMultiplayerResume } from '../services/resumeService';
 
 type ClientCtx = {
   connectionId: string;
@@ -87,7 +86,6 @@ async function finalizeAndDeleteRoom(roomId: string) {
   rooms.delete(roomId);
   restartVotes.delete(roomId);
   roomRegistry.removeRoom(roomId);
-  clearRoomMultiplayerResume(roomId, 'room_deleted');
 
   try {
     await setRoomPhase(roomId, 'FINISHED');
@@ -441,8 +439,6 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
     return;
   }
 
-  markPlayerReconnected(activeMatch, ctx.tgUserId);
-
   send(ctx.socket, {
     type: 'match:started',
     roomCode: roomId,
@@ -521,10 +517,8 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
 
   const roomId = ctx.roomId;
   const leavingTgUserId = ctx.tgUserId;
-  let activeMatchId: string | null = null;
   const room = rooms.get(roomId);
   if (room) {
-    activeMatchId = room.matchId;
     room.players.delete(leavingTgUserId);
 
     const vote = restartVotes.get(roomId);
@@ -536,7 +530,7 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
       }
     }
 
-    if (room.players.size === 0 && reason === 'intentional_leave') {
+    if (room.players.size === 0) {
       void finalizeAndDeleteRoom(room.roomId);
     }
   }
@@ -552,15 +546,8 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
     reason,
   });
 
-  if (reason === 'intentional_leave') {
-    clearMultiplayerResume(leavingTgUserId, 'intentional_leave');
-  } else if (activeMatchId) {
-    markMultiplayerResumeEligible({ tgUserId: leavingTgUserId, roomCode: roomId, matchId: activeMatchId });
-  }
-
   void handlePlayerLeftInActiveMatch(roomId, leavingTgUserId);
 }
-
 
 function parseMessage(raw: RawData): ClientMessage | null {
   try {
@@ -615,15 +602,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
       if (String(dbRoom.phase ?? 'LOBBY') !== 'LOBBY') {
         roomRegistry.markStarted(msg.roomId);
-        const roomMatch = getMatchByRoom(msg.roomId);
-        const resumeCheck = validateMultiplayerResume({
-          tgUserId: ctx.tgUserId,
-          roomCode: msg.roomId,
-          matchId: roomMatch?.matchId ?? null,
-        });
-        if (!resumeCheck.ok) {
-          return send(ctx.socket, { type: 'match:error', error: 'room_started' });
-        }
+        return send(ctx.socket, { type: 'match:error', error: 'room_started' });
       }
 
       attachClientToRoom(ctx, msg.roomId);

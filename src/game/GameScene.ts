@@ -120,23 +120,6 @@ export type SceneAudioSettings = {
   sfxEnabled: boolean;
 };
 
-export type SoloResumeSnapshot = {
-  levelIndex: number;
-  lives: number;
-  nextExtraLifeScore: number;
-  stats: PlayerStats;
-  campaignState: CampaignState;
-  player: PlayerModel;
-  arena: { tiles: TileType[][]; bombs: Array<[string, import('./types').BombModel]>; items: Array<[string, import('./types').ItemModel]>; hiddenDoorKey: string; width: number; height: number };
-  enemies: Array<[string, EnemyModel]>;
-  enemyNextMoveAt: Array<[string, number]>;
-  doorRevealed: boolean;
-  doorEntered: boolean;
-  isLevelCleared: boolean;
-  pickupCount: number;
-  isBossLevel: boolean;
-};
-
 export class GameScene extends Phaser.Scene {
   private remotePlayers?: RemotePlayersRenderer;
   private prediction = new LocalPredictionController();
@@ -2815,82 +2798,7 @@ export class GameScene extends Phaser.Scene {
     return `fnv1a_${(hash >>> 0).toString(16).padStart(8, '0')}`;
   }
 
-    public buildSoloResumeSnapshot(): SoloResumeSnapshot | null {
-    if (this.gameMode !== 'solo') return null;
-    return {
-      levelIndex: this.levelIndex,
-      lives: this.lives,
-      nextExtraLifeScore: this.nextExtraLifeScore,
-      stats: { ...this.stats },
-      campaignState: { ...this.campaignState, trophies: [...this.campaignState.trophies] },
-      player: { ...this.player },
-      arena: {
-        tiles: this.arena.tiles.map((row) => [...row]),
-        bombs: Array.from(this.arena.bombs.entries()).map(([k, v]) => [k, { ...v }]),
-        items: Array.from(this.arena.items.entries()).map(([k, v]) => [k, { ...v }]),
-        hiddenDoorKey: this.arena.hiddenDoorKey,
-        width: this.arena.width,
-        height: this.arena.height,
-      },
-      enemies: Array.from(this.enemies.entries()).map(([k, v]) => [k, { ...v }]),
-      enemyNextMoveAt: Array.from(this.enemyNextMoveAt.entries()),
-      doorRevealed: this.doorRevealed,
-      doorEntered: this.doorEntered,
-      isLevelCleared: this.isLevelCleared,
-      pickupCount: this.pickupsSpawnedThisLevel,
-      isBossLevel: this.isBossLevel,
-    };
-  }
-
-  public applySoloResumeSnapshot(snapshot: SoloResumeSnapshot): boolean {
-    try {
-      this.gameMode = 'solo';
-      this.levelIndex = Math.max(0, Number(snapshot.levelIndex ?? 0));
-      this.zoneIndex = Math.floor(this.levelIndex / LEVELS_PER_ZONE);
-      this.levelInZone = this.levelIndex % LEVELS_PER_ZONE;
-      this.isBossLevel = Boolean(snapshot.isBossLevel);
-      this.lives = Math.max(0, Number(snapshot.lives ?? INITIAL_LIVES));
-      this.nextExtraLifeScore = Math.max(EXTRA_LIFE_STEP_SCORE, Number(snapshot.nextExtraLifeScore ?? EXTRA_LIFE_STEP_SCORE));
-      this.stats = { ...snapshot.stats, lives: this.lives };
-      this.campaignState = { ...snapshot.campaignState, trophies: [...(snapshot.campaignState?.trophies ?? [])] };
-      this.player = { ...snapshot.player };
-      this.pickupsSpawnedThisLevel = Math.max(0, Number(snapshot.pickupCount ?? 0));
-      this.doorRevealed = Boolean(snapshot.doorRevealed);
-      this.doorEntered = Boolean(snapshot.doorEntered);
-      this.isLevelCleared = Boolean(snapshot.isLevelCleared);
-      this.awaitingSoloContinue = false;
-      this.soloGameOver = false;
-      this.multiplayerEliminated = false;
-      this.multiplayerRespawning = false;
-
-      this.arena.tiles = snapshot.arena.tiles.map((row) => [...row]);
-      this.arena.hiddenDoorKey = snapshot.arena.hiddenDoorKey;
-      this.arena.width = snapshot.arena.width;
-      this.arena.height = snapshot.arena.height;
-      this.arena.bombs = new Map(snapshot.arena.bombs.map(([k, v]) => [k, { ...v }]));
-      this.arena.items = new Map(snapshot.arena.items.map(([k, v]) => [k, { ...v }]));
-
-      this.enemies = new Map(snapshot.enemies.map(([k, v]) => [k, { ...v }]));
-      this.enemyNextMoveAt = new Map(snapshot.enemyNextMoveAt);
-
-      this.clearDynamicSprites();
-      this.rebuildArenaTiles();
-      this.syncCameraBoundsToArena();
-      this.spawnPlayer();
-      this.placeLocalPlayerSpriteAt(this.player.gridX, this.player.gridY);
-      this.playerSprite?.setVisible(true);
-      this.updateCameraFollowMode();
-
-      emitStats(this.stats);
-      this.emitLifeState();
-      this.emitCampaignState();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-public applyMatchWorldInit(payload: { roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }): boolean {
+  public applyMatchWorldInit(payload: { roomCode: string; matchId: string; world: { gridW: number; gridH: number; tiles: number[]; worldHash: string } }): boolean {
     if (this.currentRoomCode && payload.roomCode !== this.currentRoomCode) {
       this.droppedWrongRoom += 1;
       return false;

@@ -49,10 +49,6 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
     if (player.state === 'dead_respawning') continue;
     if (input.seq <= player.lastInputSeq) continue;
 
-    if (match.disconnectedPlayers.has(input.tgUserId)) {
-      match.disconnectedPlayers.delete(input.tgUserId);
-    }
-
     applyInput(match, input.tgUserId, input.seq, input.payload);
   }
 
@@ -122,15 +118,17 @@ export function markPlayerDisconnected(match: MatchState, tgUserId: string): boo
   if (!player) return false;
 
   match.disconnectedPlayers.add(tgUserId);
-  resetPlayerMovementState(player, match.tick, Date.now(), false);
+  if (player.state !== 'eliminated') {
+    player.state = 'eliminated';
+    resetPlayerMovementState(player, match.tick, Date.now());
+    player.respawnAtTick = null;
+    player.invulnUntilTick = 0;
+    match.eliminatedPlayers.add(tgUserId);
+    match.playerLives.set(tgUserId, 0);
+  }
+
   match.inputQueue = match.inputQueue.filter((entry) => entry.tgUserId !== tgUserId);
   return true;
-}
-
-
-export function markPlayerReconnected(match: MatchState, tgUserId: string): boolean {
-  if (!match.players.has(tgUserId)) return false;
-  return match.disconnectedPlayers.delete(tgUserId);
 }
 
 export function tryPlaceBomb(match: MatchState, tgUserId: string, x: number, y: number): MatchBombSpawned | null {
