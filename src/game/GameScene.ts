@@ -2241,11 +2241,6 @@ export class GameScene extends Phaser.Scene {
     if (!this.localTgUserId) return;
     if (this.snapshotBuffer.length === 0) return;
 
-    if (!this.needsNetResync) {
-      // In multiplayer predicted mode, local render comes from the same ms tween path as solo.
-      return;
-    }
-
     const delayTicks = (this.remotePlayers as any)?.getDelayTicks?.() ?? 2;
     const renderTick = simulationTick - delayTicks;
 
