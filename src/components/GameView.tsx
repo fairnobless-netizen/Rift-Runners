@@ -3032,7 +3032,6 @@ export default function GameView(): JSX.Element {
         autoJoin={Boolean(deepLinkJoinCode)}
         roomsLoading={roomsLoading}
         roomsError={roomsError}
-        myRooms={myRooms}
         publicRooms={publicRooms}
         currentRoom={currentRoom}
         currentRoomMembers={currentRoomMembers}

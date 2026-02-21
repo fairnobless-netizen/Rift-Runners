@@ -16,6 +16,7 @@ import {
   setRoomMemberReadyTx,
   startRoomTx,
 } from '../db/repos';
+import { getJoinableRoomCodes, getRoomJoinStatus } from '../ws/wsServer';
 
 export const roomsRouter = Router();
 
@@ -43,7 +44,9 @@ roomsRouter.get('/public', async (req, res) => {
 
   const query = String(req.query?.query ?? '').trim();
   const rooms = await listPublicRooms(query);
-  return res.status(200).json({ rooms });
+  const joinableCodes = getJoinableRoomCodes();
+  const filteredRooms = rooms.filter((room) => joinableCodes.has(room.code));
+  return res.status(200).json({ rooms: filteredRooms });
 });
 
 roomsRouter.post('/:code/join', async (req, res) => {
@@ -54,6 +57,10 @@ roomsRouter.post('/:code/join', async (req, res) => {
   if (!roomCode) return res.status(400).json({ ok: false, error: 'room_code_required' });
 
   try {
+    const joinStatus = getRoomJoinStatus(roomCode);
+    if (joinStatus === 'started') return res.status(409).json({ ok: false, error: 'room_started' });
+    if (joinStatus === 'inactive') return res.status(404).json({ ok: false, error: 'room_not_found' });
+
     const room = await joinRoomWithPassword({ tgUserId: session.tgUserId, roomCode, password: String((req as any).body?.password ?? '') || undefined });
     return res.status(200).json({ room });
   } catch (error: any) {

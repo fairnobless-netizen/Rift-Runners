@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   FriendEntry,
   IncomingFriendRequest,
-  MyRoomEntry,
   OutgoingFriendRequest,
   PublicRoomEntry,
   RoomMember,
@@ -32,7 +31,6 @@ type Props = {
   autoJoin?: boolean;
   roomsLoading: boolean;
   roomsError: string | null;
-  myRooms: MyRoomEntry[];
   publicRooms: PublicRoomEntry[];
   currentRoom: RoomState | null;
   currentRoomMembers: RoomMember[];
@@ -73,7 +71,6 @@ export function MultiplayerModal({
   autoJoin,
   roomsLoading,
   roomsError,
-  myRooms,
   publicRooms,
   currentRoom,
   currentRoomMembers,
@@ -181,23 +178,14 @@ export function MultiplayerModal({
     && nonHostMembers.every((member) => member.ready ?? false);
 
   const filteredRooms = useMemo(() => {
-    const roomsSource: PublicRoomEntry[] = publicRooms.length > 0
-      ? publicRooms
-      : myRooms.map((room) => ({
-        roomCode: room.roomCode,
-        name: `Room ${room.roomCode}`,
-        hostDisplayName: 'Host',
-        players: room.memberCount,
-        capacity: room.capacity,
-        hasPassword: false,
-      }));
+    const roomsSource: PublicRoomEntry[] = publicRooms;
     const query = roomSearchDraft.trim().toLowerCase();
     if (!query) return roomsSource;
     return roomsSource.filter((room) => {
       const composite = `${room.roomCode} ${room.name} ${room.hostDisplayName}`.toLowerCase();
       return composite.includes(query);
     });
-  }, [myRooms, publicRooms, roomSearchDraft]);
+  }, [publicRooms, roomSearchDraft]);
 
   const lobbyMembersBySlot = useMemo(() => {
     const members: Array<RoomMember | null> = [null, null, null, null];

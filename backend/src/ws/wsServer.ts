@@ -10,6 +10,7 @@ import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchMana
 import { closeRoomTx, getRoomByCode, leaveRoomV2, setRoomPhase } from '../db/repos';
 
 type ClientCtx = {
+  connId: string;
   socket: WebSocket;
   tgUserId: string;
   roomId: string | null; // (roomCode)
@@ -17,9 +18,20 @@ type ClientCtx = {
   lastSeenMs: number; // ✅ for idle timeout
 };
 
+type RoomConnection = {
+  connId: string;
+  tgUserId: string;
+  socket: WebSocket;
+  lastSeenMs: number;
+};
+
 type RoomState = {
   roomId: string;
+  createdAtMs: number;
+  startedAtMs: number | null;
+  started: boolean;
   players: Map<string, WebSocket>;
+  connections: Map<string, RoomConnection>;
   matchId: string | null;
 };
 
@@ -50,17 +62,21 @@ type ServerMessage =
 const rooms = new Map<string, RoomState>();
 const clients = new Set<ClientCtx>();
 const restartVotes = new Map<string, RestartVoteState>();
+let nextConnectionSeq = 1;
+
+const INACTIVE_CONN_MS = 60_000;
+const ROOM_SWEEP_INTERVAL_MS = 10_000;
 
 setInterval(() => {
   const now = Date.now();
   for (const c of clients) {
-    if (now - c.lastSeenMs > 60_000) {
+    if (now - c.lastSeenMs > INACTIVE_CONN_MS) {
       try {
         c.socket.terminate();
       } catch {}
     }
   }
-}, 10_000);
+}, ROOM_SWEEP_INTERVAL_MS);
 
 function send(socket: WebSocket, msg: ServerMessage) {
   if (socket.readyState !== WebSocket.OPEN) {
@@ -82,7 +98,11 @@ function getOrCreateRoom(roomId: string): RoomState {
 
   const room: RoomState = {
     roomId,
+    createdAtMs: Date.now(),
+    startedAtMs: null,
+    started: false,
     players: new Map<string, WebSocket>(),
+    connections: new Map<string, RoomConnection>(),
     matchId: null,
   };
   rooms.set(roomId, room);
@@ -307,6 +327,13 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
 
   const room = getOrCreateRoom(roomId);
 
+  room.connections.set(ctx.connId, {
+    connId: ctx.connId,
+    tgUserId: ctx.tgUserId,
+    socket: ctx.socket,
+    lastSeenMs: ctx.lastSeenMs,
+  });
+
   for (const [tgUserId, socket] of room.players.entries()) {
     if (socket === ctx.socket && tgUserId !== ctx.tgUserId) {
       room.players.delete(tgUserId);
@@ -318,6 +345,10 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
 
   const roomMatch = getMatchByRoom(roomId);
   room.matchId = roomMatch?.matchId ?? null;
+  room.started = Boolean(room.matchId);
+  if (room.started && room.startedAtMs == null) {
+    room.startedAtMs = Date.now();
+  }
 
   ctx.roomId = roomId;
   ctx.matchId = room.matchId;
@@ -422,7 +453,15 @@ function detachClientFromRoom(ctx: ClientCtx) {
   const roomId = ctx.roomId;
   const room = rooms.get(roomId);
   if (room) {
+    room.connections.delete(ctx.connId);
+
     room.players.delete(ctx.tgUserId);
+    for (const connection of room.connections.values()) {
+      if (connection.tgUserId === ctx.tgUserId) {
+        room.players.set(ctx.tgUserId, connection.socket);
+        break;
+      }
+    }
 
     const vote = restartVotes.get(roomId);
     if (vote) {
@@ -433,7 +472,7 @@ function detachClientFromRoom(ctx: ClientCtx) {
       }
     }
 
-    if (room.players.size === 0) {
+    if (room.connections.size === 0) {
       if (room.matchId) {
         endMatch(room.matchId);
       }
@@ -448,6 +487,83 @@ function detachClientFromRoom(ctx: ClientCtx) {
     tgUserId: ctx.tgUserId,
     roomId,
   });
+}
+
+function touchClientConnection(ctx: ClientCtx): void {
+  ctx.lastSeenMs = Date.now();
+  if (!ctx.roomId) {
+    return;
+  }
+
+  const room = rooms.get(ctx.roomId);
+  if (!room) {
+    return;
+  }
+
+  const connection = room.connections.get(ctx.connId);
+  if (!connection) {
+    return;
+  }
+
+  connection.lastSeenMs = ctx.lastSeenMs;
+}
+
+function sweepInactiveConnections(): void {
+  const now = Date.now();
+  for (const room of rooms.values()) {
+    for (const connection of [...room.connections.values()]) {
+      if (now - connection.lastSeenMs <= INACTIVE_CONN_MS) {
+        continue;
+      }
+
+      const clientCtx = [...clients].find((client) => client.connId === connection.connId);
+      if (clientCtx) {
+        detachClientFromRoom(clientCtx);
+        clients.delete(clientCtx);
+      } else {
+        room.connections.delete(connection.connId);
+      }
+
+      try {
+        connection.socket.terminate();
+      } catch {}
+    }
+
+    if (room.connections.size === 0) {
+      if (room.matchId) {
+        endMatch(room.matchId);
+      }
+      rooms.delete(room.roomId);
+    }
+  }
+}
+
+setInterval(() => {
+  sweepInactiveConnections();
+}, ROOM_SWEEP_INTERVAL_MS);
+
+export function getRoomJoinStatus(roomCodeRaw: string): 'joinable' | 'started' | 'inactive' {
+  const roomCode = String(roomCodeRaw ?? '').trim().toUpperCase();
+  const room = rooms.get(roomCode);
+  if (!room) {
+    return 'inactive';
+  }
+
+  if (room.started) {
+    return 'started';
+  }
+
+  return room.connections.size > 0 ? 'joinable' : 'inactive';
+}
+
+export function getJoinableRoomCodes(): Set<string> {
+  const joinable = new Set<string>();
+  for (const room of rooms.values()) {
+    if (!room.started && room.connections.size > 0) {
+      joinable.add(room.roomId);
+    }
+  }
+  return joinable;
 }
 
 function parseMessage(raw: RawData): ClientMessage | null {
@@ -538,6 +654,8 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
       const match = createMatch(room.roomId, players);
       room.matchId = match.matchId;
+      room.started = true;
+      room.startedAtMs = Date.now();
       clearRestartVote(room.roomId);
       await setRoomPhase(room.roomId, 'STARTED');
 
@@ -809,6 +927,8 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       const players = Array.from(room.players.keys());
       const match = createMatch(room.roomId, players);
       room.matchId = match.matchId;
+      room.started = true;
+      room.startedAtMs = Date.now();
 
       for (const client of clients) {
         if (client.roomId === room.roomId && isSocketAttachedToRoom(client, room)) {
@@ -878,6 +998,7 @@ export function registerWsHandlers(wss: WebSocketServer) {
     const tgUserId = url.searchParams.get('tgUserId') ?? `guest_${Math.random().toString(36).slice(2, 10)}`;
 
     const ctx: ClientCtx = {
+      connId: `c_${nextConnectionSeq++}`,
       socket,
       tgUserId,
       roomId: null,
@@ -898,7 +1019,7 @@ export function registerWsHandlers(wss: WebSocketServer) {
         send(socket, { type: 'match:error', error: 'invalid_message' });
         return;
       }
-      ctx.lastSeenMs = Date.now();
+      touchClientConnection(ctx);
       void handleMessage(ctx, msg);
     });
 
