@@ -3,8 +3,6 @@ import { TELEGRAM_AUTH_MAX_AGE_SEC, getSessionTtlSeconds, isProduction, requireE
 import { verifyTelegramInitData } from '../auth/telegramInitDataVerify';
 import { randomToken, sha256Hex } from '../auth/session';
 import { ensureGameUserId, ensureReferralCode, ensureWallet, createSession, upsertUser } from '../db/repos';
-import { resolveResumeEligibility } from '../services/resumeEligibilityService';
-import { getActiveSession } from '../services/resumeService';
 
 export const authRouter = Router();
 
@@ -34,8 +32,7 @@ authRouter.post('/auth/telegram', async (req, res) => {
     const tokenHash = sha256Hex(token);
     await createSession({ tokenHash, tgUserId, expiresAt });
 
-    const resume = await resolveResumeEligibility(tgUserId, getActiveSession(tgUserId));
-    return res.status(200).json({ ok: true, token, user: { ...user, gameUserId: user.gameUserId ?? gameUserId }, resume });
+    return res.status(200).json({ ok: true, token, user: { ...user, gameUserId: user.gameUserId ?? gameUserId } });
   }
 
   let botToken: string;
@@ -72,6 +69,5 @@ authRouter.post('/auth/telegram', async (req, res) => {
   await createSession({ tokenHash, tgUserId: vr.tgUserId, expiresAt });
 
   // GDX backend-relevant: later replace with JWT+refresh; for now token+hash+TTL in DB
-  const resume = await resolveResumeEligibility(vr.tgUserId, getActiveSession(vr.tgUserId));
-  return res.status(200).json({ ok: true, token, user: { ...user, gameUserId: user.gameUserId ?? gameUserId }, resume });
+  return res.status(200).json({ ok: true, token, user: { ...user, gameUserId: user.gameUserId ?? gameUserId } });
 });

@@ -1,128 +1,83 @@
 const RESUME_WINDOW_MS = 60_000;
 
-type SessionMode = 'MULTIPLAYER' | 'SINGLEPLAYER';
-
-type ActiveSessionBase = {
+type MultiplayerResumeRecord = {
+  kind: 'multiplayer';
   tgUserId: string;
-  mode: SessionMode;
-  lastActivityAt: number;
-  expiresAt: number;
-  intentionallyTerminated: boolean;
-};
-
-export type ActiveMultiplayerSession = ActiveSessionBase & {
-  mode: 'MULTIPLAYER';
   roomCode: string;
   matchId: string;
+  disconnectedAt: number;
+  expiresAt: number;
 };
 
-export type ActiveSingleplayerSession = ActiveSessionBase & {
-  mode: 'SINGLEPLAYER';
-};
-
-export type ActiveSessionRecord = ActiveMultiplayerSession | ActiveSingleplayerSession;
-
-const activeSessionByUser = new Map<string, ActiveSessionRecord>();
+const multiplayerResumeByUser = new Map<string, MultiplayerResumeRecord>();
 
 function logResumeEvent(evt: string, payload: Record<string, unknown>) {
   console.log(JSON.stringify({ evt, ...payload, ts: Date.now() }));
 }
 
-function withTtl<T extends ActiveSessionRecord>(record: T, atMs: number): T {
-  return {
-    ...record,
-    lastActivityAt: atMs,
-    expiresAt: atMs + RESUME_WINDOW_MS,
-  };
-}
-
-export function getResumeWindowMs(): number {
-  return RESUME_WINDOW_MS;
-}
-
-export function upsertMultiplayerSessionActivity(params: { tgUserId: string; roomCode: string; matchId: string; atMs?: number }): ActiveMultiplayerSession {
-  const atMs = Number(params.atMs ?? Date.now());
-  const next = withTtl({
+export function markMultiplayerResumeEligible(params: { tgUserId: string; roomCode: string; matchId: string; disconnectedAt?: number }): MultiplayerResumeRecord {
+  const disconnectedAt = Number(params.disconnectedAt ?? Date.now());
+  const record: MultiplayerResumeRecord = {
+    kind: 'multiplayer',
     tgUserId: params.tgUserId,
-    mode: 'MULTIPLAYER',
     roomCode: params.roomCode,
     matchId: params.matchId,
-    intentionallyTerminated: false,
-    lastActivityAt: atMs,
-    expiresAt: atMs + RESUME_WINDOW_MS,
-  }, atMs);
-  activeSessionByUser.set(params.tgUserId, next);
-  return next;
+    disconnectedAt,
+    expiresAt: disconnectedAt + RESUME_WINDOW_MS,
+  };
+  multiplayerResumeByUser.set(params.tgUserId, record);
+  logResumeEvent('resume_eligible', { kind: record.kind, tgUserId: record.tgUserId, roomCode: record.roomCode, matchId: record.matchId, expiresAt: record.expiresAt });
+  return record;
 }
 
-export function touchMultiplayerSessionsByRoom(params: { roomCode: string; matchId: string; atMs?: number }): void {
-  const atMs = Number(params.atMs ?? Date.now());
-  for (const [tgUserId, record] of activeSessionByUser.entries()) {
-    if (record.mode !== 'MULTIPLAYER') continue;
-    if (record.roomCode !== params.roomCode || record.matchId !== params.matchId) continue;
-    if (record.intentionallyTerminated) continue;
-    activeSessionByUser.set(tgUserId, withTtl(record, atMs));
-  }
-}
-
-export function markSingleplayerSessionActivity(params: { tgUserId: string; atMs?: number }): ActiveSingleplayerSession {
-  const atMs = Number(params.atMs ?? Date.now());
-  const next = withTtl({
-    tgUserId: params.tgUserId,
-    mode: 'SINGLEPLAYER',
-    intentionallyTerminated: false,
-    lastActivityAt: atMs,
-    expiresAt: atMs + RESUME_WINDOW_MS,
-  }, atMs);
-  activeSessionByUser.set(params.tgUserId, next);
-  return next;
-}
-
-export function getActiveSession(tgUserId: string): ActiveSessionRecord | null {
-  const existing = activeSessionByUser.get(tgUserId);
+export function getMultiplayerResume(tgUserId: string): MultiplayerResumeRecord | null {
+  const existing = multiplayerResumeByUser.get(tgUserId);
   if (!existing) return null;
   if (Date.now() > existing.expiresAt) {
-    activeSessionByUser.delete(tgUserId);
-    logResumeEvent('resume_session_expired', { tgUserId, mode: existing.mode });
+    multiplayerResumeByUser.delete(tgUserId);
+    logResumeEvent('resume_denied_expired', { kind: existing.kind, tgUserId: existing.tgUserId, roomCode: existing.roomCode, matchId: existing.matchId });
     return null;
   }
   return existing;
 }
 
-export function clearActiveSession(tgUserId: string, reason: string): void {
-  const existing = activeSessionByUser.get(tgUserId);
+export function clearMultiplayerResume(tgUserId: string, reason: string): void {
+  const existing = multiplayerResumeByUser.get(tgUserId);
   if (!existing) return;
-  activeSessionByUser.delete(tgUserId);
-  logResumeEvent('resume_session_cleared', { tgUserId, mode: existing.mode, reason });
+  multiplayerResumeByUser.delete(tgUserId);
+  logResumeEvent('resume_cleared', { kind: existing.kind, tgUserId: existing.tgUserId, roomCode: existing.roomCode, matchId: existing.matchId, reason });
 }
 
-export function clearRoomActiveSessions(roomCode: string, reason: string): void {
-  for (const [tgUserId, record] of activeSessionByUser.entries()) {
-    if (record.mode !== 'MULTIPLAYER' || record.roomCode !== roomCode) continue;
-    activeSessionByUser.delete(tgUserId);
-    logResumeEvent('resume_session_cleared', { tgUserId, mode: record.mode, roomCode: record.roomCode, matchId: record.matchId, reason });
+export function clearRoomMultiplayerResume(roomCode: string, reason: string): void {
+  for (const [tgUserId, record] of multiplayerResumeByUser.entries()) {
+    if (record.roomCode !== roomCode) continue;
+    multiplayerResumeByUser.delete(tgUserId);
+    logResumeEvent('resume_cleared', { kind: record.kind, tgUserId: record.tgUserId, roomCode: record.roomCode, matchId: record.matchId, reason });
   }
 }
 
-export function markSessionIntentionallyTerminated(tgUserId: string, reason: string): void {
-  const existing = activeSessionByUser.get(tgUserId);
-  if (!existing) return;
-  const next: ActiveSessionRecord = {
-    ...existing,
-    intentionallyTerminated: true,
-    expiresAt: Date.now(),
-  };
-  activeSessionByUser.set(tgUserId, next);
-  clearActiveSession(tgUserId, reason);
+export function validateMultiplayerResume(params: { tgUserId: string; roomCode: string; matchId?: string | null }): { ok: boolean; reason?: string; record?: MultiplayerResumeRecord } {
+  const record = getMultiplayerResume(params.tgUserId);
+  if (!record) return { ok: false, reason: 'expired_or_missing' };
+  if (record.tgUserId !== params.tgUserId) {
+    logResumeEvent('resume_identity_mismatch', { expectedTgUserId: record.tgUserId, gotTgUserId: params.tgUserId });
+    return { ok: false, reason: 'identity_mismatch' };
+  }
+  if (record.roomCode !== params.roomCode) {
+    logResumeEvent('resume_denied_invalid', { tgUserId: params.tgUserId, roomCode: params.roomCode, expectedRoomCode: record.roomCode, reason: 'room_mismatch' });
+    return { ok: false, reason: 'room_mismatch' };
+  }
+  if (params.matchId && record.matchId !== params.matchId) {
+    logResumeEvent('resume_denied_invalid', { tgUserId: params.tgUserId, roomCode: params.roomCode, matchId: params.matchId, expectedMatchId: record.matchId, reason: 'match_mismatch' });
+    return { ok: false, reason: 'match_mismatch' };
+  }
+  return { ok: true, record };
 }
 
-export function consumeMultiplayerResume(params: { tgUserId: string; roomCode: string; matchId: string }): { ok: true; record: ActiveMultiplayerSession } | { ok: false; reason: string } {
-  const record = getActiveSession(params.tgUserId);
-  if (!record || record.mode !== 'MULTIPLAYER') return { ok: false, reason: 'expired_or_missing' };
-  if (record.intentionallyTerminated) return { ok: false, reason: 'intentionally_terminated' };
-  if (record.roomCode !== params.roomCode) return { ok: false, reason: 'room_mismatch' };
-  if (record.matchId !== params.matchId) return { ok: false, reason: 'match_mismatch' };
-  clearActiveSession(params.tgUserId, 'resume_consumed');
-  logResumeEvent('resume_success', { tgUserId: params.tgUserId, roomCode: params.roomCode, matchId: params.matchId });
-  return { ok: true, record };
+export function markMultiplayerResumeSuccess(params: { tgUserId: string; roomCode: string; matchId: string }): void {
+  logResumeEvent('resume_success', { kind: 'multiplayer', tgUserId: params.tgUserId, roomCode: params.roomCode, matchId: params.matchId });
+}
+
+export function getResumeWindowMs(): number {
+  return RESUME_WINDOW_MS;
 }

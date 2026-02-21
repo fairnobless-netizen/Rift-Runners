@@ -716,16 +716,7 @@ export async function startRoom(roomCode: string): Promise<{ room: RoomState; me
 }
 
 
-export type ResumeEligibilityResponse = {
-  ok: boolean;
-  eligible: boolean;
-  kind?: 'multiplayer' | 'singleplayer';
-  roomCode?: string;
-  matchId?: string;
-  expiresAt?: number;
-};
-
-export async function checkResumeEligibility(): Promise<ResumeEligibilityResponse | null> {
+export async function checkMultiplayerResumeEligibility(): Promise<{ ok: boolean; eligible: boolean; roomCode?: string; matchId?: string; expiresAt?: number } | null> {
   const token = getToken();
   if (!token) return null;
   try {
@@ -735,7 +726,6 @@ export async function checkResumeEligibility(): Promise<ResumeEligibilityRespons
     return {
       ok: true,
       eligible: Boolean(json.eligible),
-      kind: json.kind === 'singleplayer' || json.kind === 'multiplayer' ? json.kind : undefined,
       roomCode: typeof json.roomCode === 'string' ? json.roomCode : undefined,
       matchId: typeof json.matchId === 'string' ? json.matchId : undefined,
       expiresAt: typeof json.expiresAt === 'number' ? json.expiresAt : undefined,
@@ -779,16 +769,6 @@ export async function discardResume(): Promise<void> {
   if (!token) return;
   try {
     await fetch(apiUrl('/api/resume/discard'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-  } catch {
-    // noop
-  }
-}
-
-export async function markSingleplayerResumeActivity(): Promise<void> {
-  const token = getToken();
-  if (!token) return;
-  try {
-    await fetch(apiUrl('/api/resume/singleplayer/activity'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
   } catch {
     // noop
   }
