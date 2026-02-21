@@ -104,12 +104,14 @@ function isSocketAttachedToRoom(ctx: ClientCtx, room: RoomState): boolean {
 }
 
 function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, { type: 'match:snapshot' }>['snapshot'] {
+  const serverNowMs = Date.now();
   return {
     version: 'match_v1',
     roomCode: match.roomId,
     matchId: match.matchId,
     tick: match.tick,
-    serverTime: Date.now(),
+    serverTime: serverNowMs,
+    serverTimeMs: serverNowMs,
     world: {
       gridW: match.world.gridW,
       gridH: match.world.gridH,

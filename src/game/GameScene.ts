@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { RemotePlayersRenderer } from './RemotePlayersRenderer';
+import { RemotePlayersRenderer, type TimedMatchSnapshot } from './RemotePlayersRenderer';
 import { LocalPredictionController } from './LocalPredictionController';
 import type { MatchSnapshotV1 } from '@shared/protocol';
 import {
@@ -149,7 +149,7 @@ export class GameScene extends Phaser.Scene {
   private simulationTick = 0;
   private lastSnapshotTick = -1;
   private lastAppliedSnapshotTick = -1;
-  private snapshotBuffer: MatchSnapshotV1[] = [];
+  private snapshotBuffer: TimedMatchSnapshot[] = [];
   private currentRoomCode: string | null = null;
   private currentMatchId: string | null = null;
   private droppedWrongRoom = 0;
@@ -167,7 +167,7 @@ export class GameScene extends Phaser.Scene {
   private netResyncReason: string | null = null;
   private lastInvalidPosWarnAtMs = 0;
   private lastInvalidPosWarnKey: string | null = null;
-  private readonly SNAPSHOT_BUFFER_SIZE = 10;
+  private readonly SNAPSHOT_BUFFER_SIZE = 40;
   private arena: ArenaModel = createArena(0, this.rng);
   private levelIndex = 0;
   private zoneIndex = 0;
@@ -2241,10 +2241,9 @@ export class GameScene extends Phaser.Scene {
     if (!this.localTgUserId) return;
     if (this.snapshotBuffer.length === 0) return;
 
-    const delayTicks = (this.remotePlayers as any)?.getDelayTicks?.() ?? 2;
-    const renderTick = simulationTick - delayTicks;
-
-    const local = this.getLocalRenderTarget(this.localTgUserId, renderTick);
+    const renderTimeMs = this.remotePlayers?.getRenderTimeMs?.() ?? -1;
+    const local = this.getLocalRenderTarget(this.localTgUserId, renderTimeMs);
+    const renderTick = local?.targetTickUsed ?? simulationTick;
     if (!local) return;
 
     this.updateLocalRenderSegment(local);
@@ -2339,25 +2338,40 @@ export class GameScene extends Phaser.Scene {
     return { x, y };
   }
 
-  private getLocalRenderTarget(localTgUserId: string, renderTick: number): { x: number; y: number; targetTickUsed: number } | null {
-    for (let i = this.snapshotBuffer.length - 1; i >= 0; i -= 1) {
-      const snapshot = this.snapshotBuffer[i];
-      if (snapshot.tick > renderTick) continue;
+  private getLocalRenderTarget(localTgUserId: string, renderTimeMs: number): { x: number; y: number; targetTickUsed: number } | null {
+    if (renderTimeMs <= 0) return null;
 
-      const local = snapshot.players.find((player) => player.tgUserId === localTgUserId);
-      if (local) {
-        return { x: local.x, y: local.y, targetTickUsed: snapshot.tick };
+    let a: TimedMatchSnapshot | null = null;
+    let b: TimedMatchSnapshot | null = null;
+
+    for (let i = this.snapshotBuffer.length - 1; i >= 0; i -= 1) {
+      const candidate = this.snapshotBuffer[i];
+      if (candidate.serverTimeMs <= renderTimeMs) {
+        a = candidate;
+        b = this.snapshotBuffer[Math.min(i + 1, this.snapshotBuffer.length - 1)] ?? candidate;
+        break;
       }
     }
 
-    for (let i = this.snapshotBuffer.length - 1; i >= 0; i -= 1) {
-      const local = this.snapshotBuffer[i].players.find((player) => player.tgUserId === localTgUserId);
-      if (local) {
-        return { x: local.x, y: local.y, targetTickUsed: this.snapshotBuffer[i].tick };
-      }
+    if (!a) {
+      a = this.snapshotBuffer[0] ?? null;
+      b = this.snapshotBuffer[Math.min(1, this.snapshotBuffer.length - 1)] ?? a;
     }
 
-    return null;
+    if (!a || !b) return null;
+
+    const localA = a.snapshot.players.find((player) => player.tgUserId === localTgUserId);
+    const localB = b.snapshot.players.find((player) => player.tgUserId === localTgUserId) ?? localA;
+    if (!localA || !localB) return null;
+
+    const dt = Math.max(1, b.serverTimeMs - a.serverTimeMs);
+    const alpha = Phaser.Math.Clamp((renderTimeMs - a.serverTimeMs) / dt, 0, 1);
+
+    return {
+      x: Phaser.Math.Linear(localA.x, localB.x, alpha),
+      y: Phaser.Math.Linear(localA.y, localB.y, alpha),
+      targetTickUsed: Phaser.Math.Linear(a.tick, b.tick, alpha),
+    };
   }
 
   private snapLocalRenderPosition(x: number, y: number, targetTickUsed: number = -1): void {
@@ -2492,12 +2506,20 @@ export class GameScene extends Phaser.Scene {
       this.netResyncReason = 'snapshot_world_hash_mismatch';
     }
 
-    this.snapshotBuffer.push(snapshot);
+    const timedSnapshot: TimedMatchSnapshot = {
+      snapshot,
+      tick: snapshot.tick,
+      serverTimeMs: snapshot.serverTimeMs ?? snapshot.serverTime,
+      arriveClientTimeMs: performance.now(),
+    };
+
+    const prevSnapshot = this.snapshotBuffer[this.snapshotBuffer.length - 1];
+    this.snapshotBuffer.push(timedSnapshot);
     if (this.snapshotBuffer.length > this.SNAPSHOT_BUFFER_SIZE) {
       this.snapshotBuffer.shift();
     }
 
-    this.remotePlayers?.onSnapshotBuffered(snapshot.tick, this.simulationTick);
+    this.remotePlayers?.onSnapshotBuffered(timedSnapshot, prevSnapshot);
 
     return true;
   }
@@ -2819,6 +2841,11 @@ export class GameScene extends Phaser.Scene {
     minDelayTicks: number;
     maxDelayTicks: number;
     bufferSize: number;
+    renderDelayMs: number;
+    serverTimeOffsetMs: number;
+    snapshotRateHz: number;
+    jitterMs: number;
+    lateFrames: number;
     underrunRate: number;
     underrunCount: number;
     lateSnapshotCount: number;
@@ -2852,6 +2879,11 @@ export class GameScene extends Phaser.Scene {
       minDelayTicks: 1,
       maxDelayTicks: 10,
       bufferSize: this.snapshotBuffer.length,
+      renderDelayMs: 120,
+      serverTimeOffsetMs: 0,
+      snapshotRateHz: 0,
+      jitterMs: 0,
+      lateFrames: 0,
       underrunRate: 0,
       underrunCount: 0,
       lateSnapshotCount: 0,

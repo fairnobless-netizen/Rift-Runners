@@ -52,6 +52,11 @@ export type WsDebugMetrics = {
   minDelayTicks: number;
   maxDelayTicks: number;
   bufferSize: number;
+  renderDelayMs: number;
+  serverTimeOffsetMs: number;
+  snapshotRateHz: number;
+  jitterMs: number;
+  lateFrames: number;
   eventsBuffered: number;
   eventsDroppedDup: number;
   eventsDroppedOutOfOrder: number;

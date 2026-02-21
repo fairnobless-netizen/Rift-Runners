@@ -50,12 +50,14 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
   processBombExplosions(match, events);
   maybeEndMatch(match, events);
 
+  const serverNowMs = Date.now();
   const snapshot: MatchSnapshot = {
     version: 'match_v1',
     roomCode: match.roomId,
     matchId: match.matchId,
     tick: match.tick,
-    serverTime: Date.now(),
+    serverTime: serverNowMs,
+    serverTimeMs: serverNowMs,
     world: {
       gridW: match.world.gridW,
       gridH: match.world.gridH,

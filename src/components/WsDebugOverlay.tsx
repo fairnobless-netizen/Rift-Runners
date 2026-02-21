@@ -664,6 +664,10 @@ export function WsDebugOverlay({
             bufferSize: {tickDebugStats?.bufferSize ?? 0} | underrunRate: {((tickDebugStats?.underrunRate ?? 0) * 100).toFixed(1)}% | underruns: {tickDebugStats?.underrunCount ?? 0} | lateRate(EMA):{' '}
             {((tickDebugStats?.lateSnapshotEma ?? 0) * 100).toFixed(1)}% | lateCount: {tickDebugStats?.lateSnapshotCount ?? 0}
           </div>
+          <div style={{ marginTop: 4 }}>
+            renderDelayMs: {(tickDebugStats?.renderDelayMs ?? 0).toFixed(1)} | serverTimeOffsetMs: {(tickDebugStats?.serverTimeOffsetMs ?? 0).toFixed(1)} | snapshotRateHz: {(tickDebugStats?.snapshotRateHz ?? 0).toFixed(1)} | jitterMs: {(tickDebugStats?.jitterMs ?? 0).toFixed(1)} | lateFrames: {tickDebugStats?.lateFrames ?? 0}
+          </div>
+
 
           <div style={{ marginTop: 4 }}>
             droppedWrongRoom: {tickDebugStats?.droppedWrongRoom ?? 0} | invalidPosDrops: {tickDebugStats?.invalidPosDrops ?? 0} | lastSnapshotRoom: {tickDebugStats?.lastSnapshotRoom ?? '—'}

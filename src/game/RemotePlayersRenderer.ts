@@ -1,44 +1,21 @@
 import Phaser from 'phaser';
 import type { MatchSnapshotV1 } from '@shared/protocol';
-import { GAME_CONFIG, scaleMovementDurationMs } from './config';
-
-// M15.4: Frozen interpolation tuning constants (single source of truth)
-const INTERP_TUNING = {
-  // baseDelay (RTT-based) smoothing
-  baseDelay: {
-    minTicks: 1,
-    maxTicks: 10, // hard ceiling for safety
-    stepLimitPerUpdate: 1, // max +/- ticks per updateAdaptiveDelay call
-    cooldownTicks: 20, // how often baseDelay can change (in simulation ticks)
-    hysteresisTicks: 1, // dead-zone around target
-    spikeGuardMs: 120, // ignore sudden RTT spikes beyond this (ms)
-  },
-
-  // targetBufferPairs smoothing (jitter-aware)
-  targetBuffer: {
-    minPairs: 2,
-    maxPairs: 6,
-    cooldownTicks: 20,
-    hysteresisPairs: 1,
-  },
-
-  // adaptive cadence (how often controller runs)
-  cadence: {
-    minEvery: 2,
-    maxEvery: 8,
-    cooldownTicks: 30,
-  },
-
-  // late snapshot EMA
-  late: {
-    emaAlpha: 0.2, // smoothing factor for late rate
-  },
-} as const;
 
 const SNAPSHOT_INTERP_MIN_MS = 80;
-const REMOTE_RENDER_SNAP_DISTANCE_TILES = 1.5;
-const FIXED_DT = 1000 / 20;
-const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / FIXED_DT));
+const MAX_EXTRAPOLATION_MS = 50;
+const BUFFER_BASE_DELAY_MS = 120;
+const BUFFER_MIN_DELAY_MS = 80;
+const BUFFER_MAX_DELAY_MS = 250;
+const OFFSET_EMA_ALPHA = 0.1;
+const DELTA_EMA_ALPHA = 0.1;
+const JITTER_EMA_ALPHA = 0.1;
+
+export type TimedMatchSnapshot = {
+  snapshot: MatchSnapshotV1;
+  tick: number;
+  serverTimeMs: number;
+  arriveClientTimeMs: number;
+};
 
 type RemotePlayerView = {
   container: Phaser.GameObjects.Container;
@@ -46,74 +23,24 @@ type RemotePlayerView = {
   nameText: Phaser.GameObjects.Text;
 };
 
-type RenderSegment = {
-  fromX: number;
-  fromY: number;
-  toX: number;
-  toY: number;
-  startTick: number;
-  durationTicks: number;
-};
-
-type RemoteRenderState = {
-  x: number;
-  y: number;
-  lastTargetX: number;
-  lastTargetY: number;
-  lastTargetTick: number;
-  segment?: RenderSegment;
-};
-
 export class RemotePlayersRenderer {
   private scene: Phaser.Scene;
   private players = new Map<string, RemotePlayerView>();
-  private velocities = new Map<string, { vx: number; vy: number }>();
-  private remoteRenderStates = new Map<string, RemoteRenderState>();
-  private remoteRenderSnapCount = new Map<string, number>();
-
-  private readonly maxExtrapolationTicks = 3;
-  private stallAfterTicks = 7;
-  private renderTick = -1;
-  private baseDelayTicks = 2;
-  // M14.3: baseDelay smoothing / spike guard
-  private baseDelayTargetTicks: number = 2;
-  private baseDelayLastAppliedAtMs: number = 0;
-  private rttLastGoodEmaMs: number | null = null;
-  private rttMs: number | null = null;
-  private rttJitterMs = 0;
-  private delayTicks = 2;
-  private minDelayTicks: number = INTERP_TUNING.baseDelay.minTicks;
-  private maxDelayTicks: number = INTERP_TUNING.baseDelay.maxTicks;
-  private targetBufferPairs = 2;
-  // M15: targetBufferPairs smoothing
-  private targetBufferTargetPairs = 2;
-  private lastTargetBufferChangeTick = 0;
-  // M15.2: adaptive update cadence (reduce noise under jitter)
-  private adaptiveEveryTargetTicks: number = 2;
-  private adaptiveEveryTicks: number = 2;
-  private lastAdaptiveEveryChangeTick: number = 0;
-  private bufferSize = 0;
-  private extrapolatingTicks = 0;
-  private stalled = false;
-  private underrunCount = 0;
-  private lateSnapshotCount = 0;
-  private lateSnapshotEma = 0;
-  private stallCount = 0;
-  private extrapCount = 0;
-
-  private readonly metricsWindowTicks = 60;
-  private readonly adaptiveCooldownTicks = 20;
-  private lastDelayChangeTick = 0;
-  private windowUnderrunEvents: number[] = [];
-  private windowStallEvents: number[] = [];
-  private windowExtrapEvents: number[] = [];
-  private windowUnderrunSum = 0;
-  private windowStallSum = 0;
-  private windowExtrapSum = 0;
 
   private tileSize = 32;
   private offsetX = 0;
   private offsetY = 0;
+
+  private renderTimeMs = -1;
+  private renderTick = -1;
+  private serverTimeOffsetMs = 0;
+  private snapshotDeltaEmaMs = 0;
+  private snapshotRateHz = 0;
+  private jitterMsEma = 0;
+  private renderDelayMs = BUFFER_BASE_DELAY_MS;
+  private lateFrames = 0;
+  private extrapCount = 0;
+  private bufferSize = 0;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -130,570 +57,188 @@ export class RemotePlayersRenderer {
       view.container.destroy(true);
     }
     this.players.clear();
-
+    this.renderTimeMs = -1;
     this.renderTick = -1;
-    this.bufferSize = 0;
-
-    this.extrapolatingTicks = 0;
-    this.stalled = false;
-
-    this.underrunCount = 0;
-    this.lateSnapshotCount = 0;
-    this.lateSnapshotEma = 0;
-    this.stallCount = 0;
+    this.serverTimeOffsetMs = 0;
+    this.snapshotDeltaEmaMs = 0;
+    this.snapshotRateHz = 0;
+    this.jitterMsEma = 0;
+    this.renderDelayMs = BUFFER_BASE_DELAY_MS;
+    this.lateFrames = 0;
     this.extrapCount = 0;
-
-    this.windowUnderrunEvents = [];
-    this.windowStallEvents = [];
-    this.windowExtrapEvents = [];
-    this.windowUnderrunSum = 0;
-    this.windowStallSum = 0;
-    this.windowExtrapSum = 0;
-
-    this.velocities.clear();
-    this.remoteRenderStates.clear();
-    this.remoteRenderSnapCount.clear();
+    this.bufferSize = 0;
   }
 
-  setNetworkRtt(rttMs: number | null, rttJitterMs: number, tickMs: number): void {
-    this.rttMs = rttMs;
-    this.rttJitterMs = rttJitterMs;
+  // kept for compatibility with existing call-site; RTT is no longer the primary delay driver.
+  setNetworkRtt(_rttMs: number | null, _rttJitterMs: number, _tickMs: number): void {}
 
-    // M15: adaptive targetBufferPairs (jitter-aware)
-    const nextTarget = this.computeTargetBufferPairs(tickMs);
-    this.targetBufferTargetPairs = nextTarget;
+  onSnapshotBuffered(snapshot: TimedMatchSnapshot, prevSnapshot?: TimedMatchSnapshot): void {
+    const clientNow = performance.now();
+    const offsetEstimate = snapshot.serverTimeMs - clientNow;
+    this.serverTimeOffsetMs = Phaser.Math.Linear(this.serverTimeOffsetMs, offsetEstimate, OFFSET_EMA_ALPHA);
 
-    // M15.2: adaptive cadence target
-    this.adaptiveEveryTargetTicks = this.computeAdaptiveEveryTicks(tickMs);
+    if (!prevSnapshot) return;
 
-    if (rttMs == null || !Number.isFinite(rttMs) || tickMs <= 0) return;
+    const arrivalDelta = snapshot.arriveClientTimeMs - prevSnapshot.arriveClientTimeMs;
+    if (arrivalDelta <= 0) return;
 
-    // Spike guard: if RTT suddenly doubles vs last good EMA, don't immediately raise baseDelay.
-    if (this.rttLastGoodEmaMs != null && rttMs - this.rttLastGoodEmaMs > INTERP_TUNING.baseDelay.spikeGuardMs) {
-      // keep target as is; let symptom-based controller handle short turbulence
-      return;
+    if (this.snapshotDeltaEmaMs <= 0) {
+      this.snapshotDeltaEmaMs = arrivalDelta;
+    } else {
+      this.snapshotDeltaEmaMs = Phaser.Math.Linear(this.snapshotDeltaEmaMs, arrivalDelta, DELTA_EMA_ALPHA);
     }
 
-    this.rttLastGoodEmaMs = rttMs;
+    const jitterSample = Math.abs(arrivalDelta - this.snapshotDeltaEmaMs);
+    this.jitterMsEma = Phaser.Math.Linear(this.jitterMsEma, jitterSample, JITTER_EMA_ALPHA);
+    this.snapshotRateHz = this.snapshotDeltaEmaMs > 0 ? 1000 / this.snapshotDeltaEmaMs : 0;
 
-    // one-way ~= RTT/2. Add safety margin from jitter + 1 tick guard.
-    const oneWayMs = rttMs * 0.5;
-    const safetyMs = Math.max(0, rttJitterMs) * 0.5 + tickMs;
-    const recommended = Math.round((oneWayMs + safetyMs) / tickMs);
-    const clamped = Phaser.Math.Clamp(recommended, INTERP_TUNING.baseDelay.minTicks, INTERP_TUNING.baseDelay.maxTicks);
-
-    this.baseDelayTargetTicks = clamped;
-
-    // Apply with hysteresis + rate limit (at most 1 tick per cooldown)
-    const now = performance.now ? performance.now() : Date.now();
-    if (this.baseDelayLastAppliedAtMs === 0) this.baseDelayLastAppliedAtMs = now;
-
-    const diff = this.baseDelayTargetTicks - this.baseDelayTicks;
-    if (Math.abs(diff) <= INTERP_TUNING.baseDelay.hysteresisTicks) {
-      return; // ignore small noise
-    }
-
-    const baseDelayCooldownMs = INTERP_TUNING.baseDelay.cooldownTicks * tickMs;
-    if (now - this.baseDelayLastAppliedAtMs < baseDelayCooldownMs) {
-      return; // too soon to change again
-    }
-
-    const step = Math.min(Math.abs(diff), INTERP_TUNING.baseDelay.stepLimitPerUpdate);
-    this.baseDelayTicks += diff > 0 ? step : -step;
-    this.baseDelayTicks = Phaser.Math.Clamp(
-      this.baseDelayTicks,
-      INTERP_TUNING.baseDelay.minTicks,
-      INTERP_TUNING.baseDelay.maxTicks,
-    );
-    this.baseDelayLastAppliedAtMs = now;
-
-    // keep current delay not below base
-    if (this.delayTicks < this.baseDelayTicks) this.delayTicks = this.baseDelayTicks;
-    this.minDelayTicks = Math.max(INTERP_TUNING.baseDelay.minTicks, this.baseDelayTicks - 1);
+    const jitterMargin = this.jitterMsEma * 2;
+    this.renderDelayMs = Phaser.Math.Clamp(BUFFER_BASE_DELAY_MS + jitterMargin, BUFFER_MIN_DELAY_MS, BUFFER_MAX_DELAY_MS);
   }
 
-  update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string, deltaMs: number = 0, needsNetResync: boolean = false): void {
-    const controlTick = Math.floor(simulationTick);
-    this.updateAdaptiveDelay(controlTick, buffer.length);
-    this.stallAfterTicks = this.delayTicks + this.maxExtrapolationTicks + 2;
-
-    const renderTick = simulationTick - this.delayTicks;
-    this.renderTick = renderTick;
+  update(_simulationTick: number, buffer: TimedMatchSnapshot[], localTgUserId?: string, _deltaMs: number = 0, _needsNetResync: boolean = false): void {
     this.bufferSize = buffer.length;
-    this.extrapolatingTicks = 0;
-    this.stalled = false;
-
-    this.updateVelocities(buffer);
-
     if (buffer.length === 0) {
       this.destroyMissingPlayers(new Set<string>());
       return;
     }
 
-    // If renderTick is outside the buffered tick range, fall back to extrapolation/freeze.
-    const firstTick = buffer[0].tick;
-    const lastTick = buffer[buffer.length - 1].tick;
-    if (renderTick < firstTick || renderTick > lastTick) {
-      this.recordUnderrun();
-      const anchorSnapshot = this.findAnchorSnapshot(buffer, renderTick) ?? buffer[buffer.length - 1];
-      const extrapolationTicks = Math.max(0, renderTick - anchorSnapshot.tick);
+    this.renderTimeMs = performance.now() + this.serverTimeOffsetMs - this.renderDelayMs;
 
-      if (extrapolationTicks > 0 && extrapolationTicks <= this.maxExtrapolationTicks) {
-        this.recordExtrapolation();
-        this.extrapolatingTicks = extrapolationTicks;
-        this.renderExtrapolated(anchorSnapshot, extrapolationTicks, localTgUserId, deltaMs);
-        return;
-      }
+    const newest = buffer[buffer.length - 1];
+    if (this.renderTimeMs > newest.serverTimeMs) {
+      this.lateFrames += 1;
+    }
 
-      if (extrapolationTicks > this.maxExtrapolationTicks) {
-        this.recordExtrapolation();
-        this.extrapolatingTicks = this.maxExtrapolationTicks;
-        this.stalled = extrapolationTicks >= this.stallAfterTicks;
-        if (this.stalled) {
-          this.recordStall();
-        }
-        this.renderFrozen(anchorSnapshot, localTgUserId, deltaMs);
-        return;
-      }
-
-      this.renderFromSnapshot(anchorSnapshot, localTgUserId, deltaMs);
+    const pair = this.findSnapshotsAroundTime(buffer, this.renderTimeMs);
+    if (!pair) {
+      this.renderFromSnapshot(newest.snapshot, localTgUserId);
       return;
     }
 
-    // Normal case: segment-planned interpolation per player with fixed duration per tile step.
-    const latest = buffer[buffer.length - 1];
+    const { a, b, alpha } = pair;
+    this.renderTick = Phaser.Math.Linear(a.tick, b.tick, alpha);
+
+    const aPlayers = new Map(a.snapshot.players.map((p) => [p.tgUserId, p]));
+    const bPlayers = new Map(b.snapshot.players.map((p) => [p.tgUserId, p]));
     const alive = new Set<string>();
 
-    for (const to of latest.players) {
-      if (localTgUserId && to.tgUserId === localTgUserId) continue;
-
-      alive.add(to.tgUserId);
-      const target = this.getRenderTargetForPlayer(buffer, to.tgUserId, renderTick)
-        ?? { x: to.x, y: to.y, targetTickUsed: latest.tick };
-      this.upsertPlayer(to, target, renderTick, SNAPSHOT_INTERP_MIN_MS, deltaMs, needsNetResync);
+    for (const [tgUserId, nextPlayer] of bPlayers.entries()) {
+      if (localTgUserId && tgUserId === localTgUserId) continue;
+      alive.add(tgUserId);
+      const prevPlayer = aPlayers.get(tgUserId) ?? nextPlayer;
+      const x = Phaser.Math.Linear(prevPlayer.x, nextPlayer.x, alpha);
+      const y = Phaser.Math.Linear(prevPlayer.y, nextPlayer.y, alpha);
+      this.upsertPlayer(nextPlayer, x, y);
     }
 
     this.destroyMissingPlayers(alive);
   }
 
-  onSnapshotBuffered(snapshotTick: number, simulationTick: number): void {
-    const playheadTick = this.renderTick >= 0 ? this.renderTick : simulationTick - this.delayTicks;
-    const isLateSnapshot = snapshotTick < playheadTick;
+  private findSnapshotsAroundTime(buffer: TimedMatchSnapshot[], renderTimeMs: number): { a: TimedMatchSnapshot; b: TimedMatchSnapshot; alpha: number } | null {
+    let a: TimedMatchSnapshot | null = null;
+    let b: TimedMatchSnapshot | null = null;
 
-    if (isLateSnapshot) {
-      this.lateSnapshotCount += 1;
-    }
-
-    const sample = isLateSnapshot ? 1 : 0;
-    this.lateSnapshotEma += (sample - this.lateSnapshotEma) * INTERP_TUNING.late.emaAlpha;
-  }
-
-  private updateAdaptiveDelay(simulationTick: number, bufferSize: number): void {
-    const prevDelay = this.delayTicks;
-
-    // M15.2: smooth adaptive cadence (step-limited, cooldown)
-    if (simulationTick - this.lastAdaptiveEveryChangeTick >= INTERP_TUNING.cadence.cooldownTicks) {
-      const diff = this.adaptiveEveryTargetTicks - this.adaptiveEveryTicks;
-
-      if (diff !== 0) {
-        this.adaptiveEveryTicks += diff > 0 ? 1 : -1;
-        this.adaptiveEveryTicks = Phaser.Math.Clamp(
-          this.adaptiveEveryTicks,
-          INTERP_TUNING.cadence.minEvery,
-          INTERP_TUNING.cadence.maxEvery,
-        );
-        this.lastAdaptiveEveryChangeTick = simulationTick;
+    for (let i = buffer.length - 1; i >= 0; i -= 1) {
+      const candidate = buffer[i];
+      if (candidate.serverTimeMs <= renderTimeMs) {
+        a = candidate;
+        b = buffer[Math.min(i + 1, buffer.length - 1)] ?? candidate;
+        break;
       }
     }
 
-    if (this.windowUnderrunEvents.length === 0) {
-      this.lastDelayChangeTick = simulationTick;
-      this.lastTargetBufferChangeTick = simulationTick;
-      this.lastAdaptiveEveryChangeTick = simulationTick;
+    if (!a) {
+      a = buffer[0];
+      b = buffer[Math.min(1, buffer.length - 1)] ?? a;
     }
 
-    this.pushWindowSample(0, 0, 0);
+    if (!b) return null;
 
-    const every = this.adaptiveEveryTicks;
-    if (every > 1 && simulationTick % every !== 0) {
-      return;
+    if (b.serverTimeMs <= a.serverTimeMs) {
+      return { a, b, alpha: 0 };
     }
 
-    const cooldownPassed = simulationTick - this.lastDelayChangeTick >= this.adaptiveCooldownTicks;
-    if (cooldownPassed) {
-      const windowSize = Math.max(1, this.windowUnderrunEvents.length);
-      const underrunRate = this.windowUnderrunSum / windowSize;
-      const bufferHasReserve = bufferSize >= this.targetBufferPairs + 2;
-
-      if (underrunRate > 0.05 || this.windowStallSum > 0) {
-        const nextDelay = Math.min(this.delayTicks + 1, this.maxDelayTicks);
-        if (nextDelay !== this.delayTicks) {
-          this.delayTicks = nextDelay;
-          this.lastDelayChangeTick = simulationTick;
-        }
-      } else if (this.windowUnderrunSum === 0 && bufferHasReserve) {
-        const nextDelay = Math.max(this.delayTicks - 1, this.minDelayTicks);
-        if (nextDelay !== this.delayTicks) {
-          this.delayTicks = nextDelay;
-          this.lastDelayChangeTick = simulationTick;
-        }
+    if (renderTimeMs > b.serverTimeMs) {
+      const dt = renderTimeMs - b.serverTimeMs;
+      if (dt > MAX_EXTRAPOLATION_MS) {
+        return { a: b, b, alpha: 1 };
       }
+      this.extrapCount += 1;
+      return { a, b, alpha: 1 };
     }
 
-    // M15: apply targetBufferPairs smoothly (cooldown + hysteresis + step)
-    if (simulationTick - this.lastTargetBufferChangeTick >= INTERP_TUNING.targetBuffer.cooldownTicks) {
-      const diff = this.targetBufferTargetPairs - this.targetBufferPairs;
-
-      if (Math.abs(diff) > INTERP_TUNING.targetBuffer.hysteresisPairs) {
-        this.targetBufferPairs += diff > 0 ? 1 : -1;
-        this.targetBufferPairs = Phaser.Math.Clamp(
-          this.targetBufferPairs,
-          INTERP_TUNING.targetBuffer.minPairs,
-          INTERP_TUNING.targetBuffer.maxPairs,
-        );
-        this.lastTargetBufferChangeTick = simulationTick;
-      }
-    }
-
-    // Optional: limit delayTicks step to avoid visible jitter
-    const maxStepPerUpdate = INTERP_TUNING.baseDelay.stepLimitPerUpdate;
-    if (this.delayTicks > prevDelay + maxStepPerUpdate) this.delayTicks = prevDelay + maxStepPerUpdate;
-    if (this.delayTicks < prevDelay - maxStepPerUpdate) this.delayTicks = prevDelay - maxStepPerUpdate;
-
-    // M14.4: never go below RTT-based baseDelay
-    if (this.delayTicks < this.baseDelayTicks) this.delayTicks = this.baseDelayTicks;
+    const alpha = Phaser.Math.Clamp((renderTimeMs - a.serverTimeMs) / (b.serverTimeMs - a.serverTimeMs), 0, 1);
+    return { a, b, alpha };
   }
 
-  private computeTargetBufferPairs(tickMs: number): number {
-    const jitterMs = Math.max(0, this.rttJitterMs ?? 0);
-
-    // Переводим jitter в тики. 1 tick guard + половина jitter как запас
-    const jitterTicks = tickMs > 0 ? Math.ceil((jitterMs * 0.5) / tickMs) : 0;
-
-    // База: 2 пары (минимум для нормальной интерполяции с запасом)
-    const raw = 2 + jitterTicks;
-
-    return Phaser.Math.Clamp(raw, INTERP_TUNING.targetBuffer.minPairs, INTERP_TUNING.targetBuffer.maxPairs);
-  }
-
-  private computeAdaptiveEveryTicks(tickMs: number): number {
-    const jitterMs = Math.max(0, this.rttJitterMs ?? 0);
-    const jitterTicks = tickMs > 0 ? Math.ceil((jitterMs * 0.5) / tickMs) : 0;
-
-    // Higher jitter -> update less often (more stable controller)
-    const raw = 2 + jitterTicks;
-
-    return Phaser.Math.Clamp(raw, INTERP_TUNING.cadence.minEvery, INTERP_TUNING.cadence.maxEvery);
-  }
-
-  private pushWindowSample(underrunEvent: number, stallEvent: number, extrapEvent: number): void {
-    this.windowUnderrunEvents.push(underrunEvent);
-    this.windowStallEvents.push(stallEvent);
-    this.windowExtrapEvents.push(extrapEvent);
-    this.windowUnderrunSum += underrunEvent;
-    this.windowStallSum += stallEvent;
-    this.windowExtrapSum += extrapEvent;
-
-    if (this.windowUnderrunEvents.length > this.metricsWindowTicks) {
-      this.windowUnderrunSum -= this.windowUnderrunEvents.shift() ?? 0;
-      this.windowStallSum -= this.windowStallEvents.shift() ?? 0;
-      this.windowExtrapSum -= this.windowExtrapEvents.shift() ?? 0;
-    }
-  }
-
-  private addEventSample(eventType: 'underrun' | 'stall' | 'extrap'): void {
-    const lastIndex = this.windowUnderrunEvents.length - 1;
-    if (lastIndex < 0) {
-      this.pushWindowSample(0, 0, 0);
-    }
-
-    const safeIndex = this.windowUnderrunEvents.length - 1;
-    if (eventType === 'underrun') {
-      if (this.windowUnderrunEvents[safeIndex] === 0) {
-        this.windowUnderrunEvents[safeIndex] = 1;
-        this.windowUnderrunSum += 1;
-      }
-      return;
-    }
-
-    if (eventType === 'stall') {
-      if (this.windowStallEvents[safeIndex] === 0) {
-        this.windowStallEvents[safeIndex] = 1;
-        this.windowStallSum += 1;
-      }
-      return;
-    }
-
-    if (this.windowExtrapEvents[safeIndex] === 0) {
-      this.windowExtrapEvents[safeIndex] = 1;
-      this.windowExtrapSum += 1;
-    }
-  }
-
-  private recordUnderrun(): void {
-    this.underrunCount += 1;
-    this.addEventSample('underrun');
-  }
-
-  private recordStall(): void {
-    this.stallCount += 1;
-    this.addEventSample('stall');
-  }
-
-  private recordExtrapolation(): void {
-    this.extrapCount += 1;
-    this.addEventSample('extrap');
-  }
-
-  private renderFromSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string, deltaMs: number = 0): void {
+  private renderFromSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): void {
     const alive = new Set<string>();
     for (const player of snapshot.players) {
       if (localTgUserId && player.tgUserId === localTgUserId) continue;
       alive.add(player.tgUserId);
-      this.upsertPlayer(
-        player,
-        { x: player.x, y: player.y, targetTickUsed: snapshot.tick },
-        this.renderTick,
-        SNAPSHOT_INTERP_MIN_MS,
-        deltaMs,
-      );
+      this.upsertPlayer(player, player.x, player.y);
     }
     this.destroyMissingPlayers(alive);
   }
 
-  private renderExtrapolated(snapshot: MatchSnapshotV1, extrapolationTicks: number, localTgUserId?: string, deltaMs: number = 0): void {
-    const alive = new Set<string>();
-    for (const player of snapshot.players) {
-      if (localTgUserId && player.tgUserId === localTgUserId) continue;
-      alive.add(player.tgUserId);
-      const velocity = this.velocities.get(player.tgUserId);
-      const x = player.x + (velocity?.vx ?? 0) * extrapolationTicks;
-      const y = player.y + (velocity?.vy ?? 0) * extrapolationTicks;
-      this.upsertPlayer(
-        player,
-        { x, y, targetTickUsed: snapshot.tick },
-        this.renderTick,
-        SNAPSHOT_INTERP_MIN_MS,
-        deltaMs,
-      );
-    }
-    this.destroyMissingPlayers(alive);
-  }
-
-  private renderFrozen(snapshot: MatchSnapshotV1, localTgUserId?: string, deltaMs: number = 0): void {
-    const alive = new Set<string>();
-    for (const player of snapshot.players) {
-      if (localTgUserId && player.tgUserId === localTgUserId) continue;
-      alive.add(player.tgUserId);
-      const frozenPos = this.remoteRenderStates.get(player.tgUserId);
-      this.upsertPlayer(
-        player,
-        { x: frozenPos?.x ?? player.x, y: frozenPos?.y ?? player.y, targetTickUsed: snapshot.tick },
-        this.renderTick,
-        SNAPSHOT_INTERP_MIN_MS,
-        deltaMs,
-        true,
-      );
-    }
-    this.destroyMissingPlayers(alive);
-  }
-
-  private findAnchorSnapshot(buffer: MatchSnapshotV1[], renderTick: number): MatchSnapshotV1 | undefined {
-    for (let i = buffer.length - 1; i >= 0; i -= 1) {
-      if (buffer[i].tick <= renderTick) {
-        return buffer[i];
-      }
-    }
-    return undefined;
-  }
-
-  private getRenderTargetForPlayer(
-    buffer: MatchSnapshotV1[],
-    tgUserId: string,
-    renderTick: number,
-  ): { x: number; y: number; targetTickUsed: number } | undefined {
-    for (let i = buffer.length - 1; i >= 0; i -= 1) {
-      const snapshot = buffer[i];
-      if (snapshot.tick > renderTick) continue;
-
-      const player = snapshot.players.find((candidate) => candidate.tgUserId === tgUserId);
-      if (player) {
-        return { x: player.x, y: player.y, targetTickUsed: snapshot.tick };
-      }
-    }
-
-    for (let i = buffer.length - 1; i >= 0; i -= 1) {
-      const player = buffer[i].players.find((candidate) => candidate.tgUserId === tgUserId);
-      if (player) {
-        return { x: player.x, y: player.y, targetTickUsed: buffer[i].tick };
-      }
-    }
-
-    return undefined;
-  }
-
-  private updateVelocities(buffer: MatchSnapshotV1[]): void {
-    if (buffer.length < 2) return;
-
-    const snapshotA = buffer[buffer.length - 2];
-    const snapshotB = buffer[buffer.length - 1];
-    const dt = snapshotB.tick - snapshotA.tick;
-    if (dt <= 0) return;
-
-    const prevPlayers = new Map(snapshotA.players.map((p) => [p.tgUserId, p]));
-    for (const nextPlayer of snapshotB.players) {
-      const prevPlayer = prevPlayers.get(nextPlayer.tgUserId);
-      if (!prevPlayer) continue;
-      this.velocities.set(nextPlayer.tgUserId, {
-        vx: (nextPlayer.x - prevPlayer.x) / dt,
-        vy: (nextPlayer.y - prevPlayer.y) / dt,
-      });
-    }
-  }
-
-  getDebugStats(): {
-    renderTick: number;
-    baseDelayTicks: number;
-    baseDelayTargetTicks: number;
-    baseDelayStepCooldownMs: number;
-    baseDelayStepCooldownTicks: number;
-    delayTicks: number;
-    minDelayTicks: number;
-    maxDelayTicks: number;
-    bufferSize: number;
-    underrunRate: number;
-    underrunCount: number;
-    lateSnapshotCount: number;
-    lateSnapshotEma: number;
-    stallCount: number;
-    extrapCount: number;
-    extrapolatingTicks: number;
-    stalled: boolean;
-    rttMs: number | null;
-    rttJitterMs: number;
-    targetBufferPairs: number;
-    targetBufferTargetPairs: number;
-    adaptiveEveryTicks: number;
-    adaptiveEveryTargetTicks: number;
-    bufferHasReserve: boolean;
-    tuning: {
-      baseDelayMax: number;
-      targetBufferMin: number;
-      targetBufferMax: number;
-      cadenceMin: number;
-      cadenceMax: number;
-    };
-  } {
-    const windowSize = Math.max(1, this.windowUnderrunEvents.length);
-    const bufferHasReserve = this.bufferSize >= this.targetBufferPairs + 2;
+  getDebugStats() {
     return {
       renderTick: this.renderTick,
-      baseDelayTicks: this.baseDelayTicks,
-      baseDelayTargetTicks: this.baseDelayTargetTicks,
-      baseDelayStepCooldownMs: INTERP_TUNING.baseDelay.cooldownTicks,
-      baseDelayStepCooldownTicks: INTERP_TUNING.baseDelay.cooldownTicks,
-      delayTicks: this.delayTicks,
-      minDelayTicks: this.minDelayTicks,
-      maxDelayTicks: this.maxDelayTicks,
+      renderTimeMs: this.renderTimeMs,
+      baseDelayTicks: this.renderDelayMs / 50,
+      baseDelayTargetTicks: this.renderDelayMs / 50,
+      baseDelayStepCooldownMs: 0,
+      baseDelayStepCooldownTicks: 0,
+      delayTicks: this.renderDelayMs / 50,
+      minDelayTicks: BUFFER_MIN_DELAY_MS / 50,
+      maxDelayTicks: BUFFER_MAX_DELAY_MS / 50,
+      renderDelayMs: this.renderDelayMs,
+      serverTimeOffsetMs: this.serverTimeOffsetMs,
+      snapshotRateHz: this.snapshotRateHz,
+      jitterMs: this.jitterMsEma,
       bufferSize: this.bufferSize,
-      underrunRate: this.windowUnderrunSum / windowSize,
-      underrunCount: this.underrunCount,
-      lateSnapshotCount: this.lateSnapshotCount,
-      lateSnapshotEma: this.lateSnapshotEma,
-      stallCount: this.stallCount,
+      underrunRate: 0,
+      underrunCount: this.lateFrames,
+      lateSnapshotCount: this.lateFrames,
+      lateSnapshotEma: 0,
+      stallCount: 0,
       extrapCount: this.extrapCount,
-      extrapolatingTicks: this.extrapolatingTicks,
-      stalled: this.stalled,
-      rttMs: this.rttMs,
-      rttJitterMs: this.rttJitterMs,
-      targetBufferPairs: this.targetBufferPairs,
-      targetBufferTargetPairs: this.targetBufferTargetPairs,
-      adaptiveEveryTicks: this.adaptiveEveryTicks,
-      adaptiveEveryTargetTicks: this.adaptiveEveryTargetTicks,
-      bufferHasReserve,
+      extrapolatingTicks: 0,
+      stalled: false,
+      lateFrames: this.lateFrames,
+      rttMs: null,
+      rttJitterMs: 0,
+      targetBufferPairs: 0,
+      targetBufferTargetPairs: 0,
+      adaptiveEveryTicks: 0,
+      adaptiveEveryTargetTicks: 0,
+      bufferHasReserve: this.bufferSize >= 2,
       tuning: {
-        baseDelayMax: INTERP_TUNING.baseDelay.maxTicks,
-        targetBufferMin: INTERP_TUNING.targetBuffer.minPairs,
-        targetBufferMax: INTERP_TUNING.targetBuffer.maxPairs,
-        cadenceMin: INTERP_TUNING.cadence.minEvery,
-        cadenceMax: INTERP_TUNING.cadence.maxEvery,
+        baseDelayMax: BUFFER_MAX_DELAY_MS / 50,
+        targetBufferMin: 0,
+        targetBufferMax: 0,
+        cadenceMin: 0,
+        cadenceMax: 0,
       },
     };
   }
 
   getDelayTicks(): number {
-    return this.delayTicks;
+    return this.renderDelayMs / 50;
+  }
+
+  getRenderTimeMs(): number {
+    return this.renderTimeMs;
   }
 
   private upsertPlayer(
     player: { tgUserId: string; displayName: string; colorId: number },
-    target: { x: number; y: number; targetTickUsed: number },
-    renderTick: number = this.renderTick,
-    _moveDurationMs?: number,
-    _deltaMs?: number,
-    forceSnap: boolean = false,
+    x: number,
+    y: number,
   ): void {
-    let state = this.remoteRenderStates.get(player.tgUserId);
-    if (!state) {
-      state = {
-        x: target.x,
-        y: target.y,
-        lastTargetX: target.x,
-        lastTargetY: target.y,
-        lastTargetTick: target.targetTickUsed,
-      };
-      this.remoteRenderStates.set(player.tgUserId, state);
-    }
-
-    if (forceSnap) {
-      state.x = target.x;
-      state.y = target.y;
-      state.lastTargetX = target.x;
-      state.lastTargetY = target.y;
-      state.lastTargetTick = target.targetTickUsed;
-      state.segment = undefined;
-    } else if (target.x !== state.lastTargetX || target.y !== state.lastTargetY) {
-      const fromX = state.lastTargetX;
-      const fromY = state.lastTargetY;
-      const startTick = Math.max(state.lastTargetTick + 1, target.targetTickUsed);
-      state.segment = {
-        fromX,
-        fromY,
-        toX: target.x,
-        toY: target.y,
-        startTick,
-        durationTicks: this.getStepDurationTicks(),
-      };
-      state.lastTargetX = target.x;
-      state.lastTargetY = target.y;
-      state.lastTargetTick = target.targetTickUsed;
-    }
-
-    if (state.segment) {
-      const duration = Math.max(1, state.segment.durationTicks);
-      const alpha = Phaser.Math.Clamp((renderTick - state.segment.startTick) / duration, 0, 1);
-      state.x = Phaser.Math.Linear(state.segment.fromX, state.segment.toX, alpha);
-      state.y = Phaser.Math.Linear(state.segment.fromY, state.segment.toY, alpha);
-      if (alpha >= 1) {
-        state.segment = undefined;
-      }
-    }
-
-    const dx = target.x - state.x;
-    const dy = target.y - state.y;
-    const driftTiles = Math.hypot(dx, dy);
-    const shouldSnap = driftTiles > REMOTE_RENDER_SNAP_DISTANCE_TILES;
-
-    if (shouldSnap) {
-      const snapCount = this.remoteRenderSnapCount.get(player.tgUserId) ?? 0;
-      this.remoteRenderSnapCount.set(player.tgUserId, snapCount + 1);
-      state.x = target.x;
-      state.y = target.y;
-      state.segment = undefined;
-    }
-
-    const px = this.offsetX + state.x * this.tileSize + this.tileSize / 2;
-    const py = this.offsetY + state.y * this.tileSize + this.tileSize / 2;
+    const px = this.offsetX + x * this.tileSize + this.tileSize / 2;
+    const py = this.offsetY + y * this.tileSize + this.tileSize / 2;
     let view = this.players.get(player.tgUserId);
     if (!view) {
       view = this.createPlayer(player, px, py);
@@ -706,18 +251,11 @@ export class RemotePlayersRenderer {
     view.body.setFillStyle(colorFromId(player.colorId), 0.75);
   }
 
-  private getStepDurationTicks(): number {
-    return MP_MOVE_TICKS_CONST;
-  }
-
   private destroyMissingPlayers(alive: Set<string>): void {
     for (const [id, view] of this.players.entries()) {
       if (alive.has(id)) continue;
       view.container.destroy(true);
       this.players.delete(id);
-      this.remoteRenderStates.delete(id);
-      this.velocities.delete(id);
-      this.remoteRenderSnapCount.delete(id);
     }
   }
 
