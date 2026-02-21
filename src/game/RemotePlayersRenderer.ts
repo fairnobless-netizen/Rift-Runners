@@ -35,7 +35,6 @@ const INTERP_TUNING = {
   },
 } as const;
 
-const SNAPSHOT_INTERP_MIN_MS = 80;
 const REMOTE_RENDER_SNAP_DISTANCE_TILES = 1.5;
 const FIXED_DT = 1000 / 20;
 const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / FIXED_DT));
@@ -212,7 +211,7 @@ export class RemotePlayersRenderer {
     this.minDelayTicks = Math.max(INTERP_TUNING.baseDelay.minTicks, this.baseDelayTicks - 1);
   }
 
-  update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string, deltaMs: number = 0, needsNetResync: boolean = false): void {
+  update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string, needsNetResync: boolean = false): void {
     const controlTick = Math.floor(simulationTick);
     this.updateAdaptiveDelay(controlTick, buffer.length);
     this.stallAfterTicks = this.delayTicks + this.maxExtrapolationTicks + 2;
@@ -241,7 +240,7 @@ export class RemotePlayersRenderer {
       if (extrapolationTicks > 0 && extrapolationTicks <= this.maxExtrapolationTicks) {
         this.recordExtrapolation();
         this.extrapolatingTicks = extrapolationTicks;
-        this.renderExtrapolated(anchorSnapshot, extrapolationTicks, localTgUserId, deltaMs);
+        this.renderExtrapolated(anchorSnapshot, extrapolationTicks, localTgUserId);
         return;
       }
 
@@ -252,11 +251,11 @@ export class RemotePlayersRenderer {
         if (this.stalled) {
           this.recordStall();
         }
-        this.renderFrozen(anchorSnapshot, localTgUserId, deltaMs);
+        this.renderFrozen(anchorSnapshot, localTgUserId);
         return;
       }
 
-      this.renderFromSnapshot(anchorSnapshot, localTgUserId, deltaMs);
+      this.renderFromSnapshot(anchorSnapshot, localTgUserId);
       return;
     }
 
@@ -270,7 +269,7 @@ export class RemotePlayersRenderer {
       alive.add(to.tgUserId);
       const target = this.getRenderTargetForPlayer(buffer, to.tgUserId, renderTick)
         ?? { x: to.x, y: to.y, targetTickUsed: latest.tick };
-      this.upsertPlayer(to, target, renderTick, SNAPSHOT_INTERP_MIN_MS, deltaMs, needsNetResync);
+      this.upsertPlayer(to, target, renderTick, needsNetResync);
     }
 
     this.destroyMissingPlayers(alive);
@@ -445,23 +444,17 @@ export class RemotePlayersRenderer {
     this.addEventSample('extrap');
   }
 
-  private renderFromSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string, deltaMs: number = 0): void {
+  private renderFromSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): void {
     const alive = new Set<string>();
     for (const player of snapshot.players) {
       if (localTgUserId && player.tgUserId === localTgUserId) continue;
       alive.add(player.tgUserId);
-      this.upsertPlayer(
-        player,
-        { x: player.x, y: player.y, targetTickUsed: snapshot.tick },
-        this.renderTick,
-        SNAPSHOT_INTERP_MIN_MS,
-        deltaMs,
-      );
+      this.upsertPlayer(player, { x: player.x, y: player.y, targetTickUsed: snapshot.tick }, this.renderTick);
     }
     this.destroyMissingPlayers(alive);
   }
 
-  private renderExtrapolated(snapshot: MatchSnapshotV1, extrapolationTicks: number, localTgUserId?: string, deltaMs: number = 0): void {
+  private renderExtrapolated(snapshot: MatchSnapshotV1, extrapolationTicks: number, localTgUserId?: string): void {
     const alive = new Set<string>();
     for (const player of snapshot.players) {
       if (localTgUserId && player.tgUserId === localTgUserId) continue;
@@ -469,18 +462,12 @@ export class RemotePlayersRenderer {
       const velocity = this.velocities.get(player.tgUserId);
       const x = player.x + (velocity?.vx ?? 0) * extrapolationTicks;
       const y = player.y + (velocity?.vy ?? 0) * extrapolationTicks;
-      this.upsertPlayer(
-        player,
-        { x, y, targetTickUsed: snapshot.tick },
-        this.renderTick,
-        SNAPSHOT_INTERP_MIN_MS,
-        deltaMs,
-      );
+      this.upsertPlayer(player, { x, y, targetTickUsed: snapshot.tick }, this.renderTick);
     }
     this.destroyMissingPlayers(alive);
   }
 
-  private renderFrozen(snapshot: MatchSnapshotV1, localTgUserId?: string, deltaMs: number = 0): void {
+  private renderFrozen(snapshot: MatchSnapshotV1, localTgUserId?: string): void {
     const alive = new Set<string>();
     for (const player of snapshot.players) {
       if (localTgUserId && player.tgUserId === localTgUserId) continue;
@@ -490,8 +477,6 @@ export class RemotePlayersRenderer {
         player,
         { x: frozenPos?.x ?? player.x, y: frozenPos?.y ?? player.y, targetTickUsed: snapshot.tick },
         this.renderTick,
-        SNAPSHOT_INTERP_MIN_MS,
-        deltaMs,
         true,
       );
     }
@@ -629,8 +614,6 @@ export class RemotePlayersRenderer {
     player: { tgUserId: string; displayName: string; colorId: number },
     target: { x: number; y: number; targetTickUsed: number },
     renderTick: number = this.renderTick,
-    _moveDurationMs?: number,
-    _deltaMs?: number,
     forceSnap: boolean = false,
   ): void {
     let state = this.remoteRenderStates.get(player.tgUserId);
