@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import type { MatchSnapshotV1 } from '@shared/protocol';
+import type { MatchSnapshotPlayer, MatchSnapshotV1 } from '@shared/protocol';
 import { GAME_CONFIG, scaleMovementDurationMs } from './config';
 
 // M15.4: Frozen interpolation tuning constants (single source of truth)
@@ -275,6 +275,34 @@ export class RemotePlayersRenderer {
     this.destroyMissingPlayers(alive);
   }
 
+  renderFromMoveProgress(
+    snapshot: MatchSnapshotV1,
+    estimatedServerNowMs: number,
+    renderTick: number,
+    localTgUserId?: string,
+    forceSnap: boolean = false,
+  ): void {
+    this.renderTick = renderTick;
+    this.bufferSize = 1;
+    this.extrapolatingTicks = 0;
+    this.stalled = false;
+
+    const alive = new Set<string>();
+    for (const player of snapshot.players) {
+      if (localTgUserId && player.tgUserId === localTgUserId) continue;
+      alive.add(player.tgUserId);
+      const target = this.getPlayerRenderPosFromMoveState(player, estimatedServerNowMs, renderTick);
+      this.upsertPlayer(
+        player,
+        { x: target.x, y: target.y, targetTickUsed: snapshot.tick },
+        renderTick,
+        forceSnap,
+      );
+    }
+
+    this.destroyMissingPlayers(alive);
+  }
+
   onSnapshotBuffered(snapshotTick: number, simulationTick: number): void {
     const playheadTick = this.renderTick >= 0 ? this.renderTick : simulationTick - this.delayTicks;
     const isLateSnapshot = snapshotTick < playheadTick;
@@ -534,6 +562,54 @@ export class RemotePlayersRenderer {
         vy: (nextPlayer.y - prevPlayer.y) / dt,
       });
     }
+  }
+
+  private getPlayerRenderPosFromMoveState(
+    player: MatchSnapshotPlayer,
+    estimatedServerNowMs: number,
+    renderTick: number,
+  ): { x: number; y: number } {
+    if (!player.isMoving || (player.moveDurationMs ?? 0) <= 0) {
+      return { x: player.x, y: player.y };
+    }
+
+    const hasMsMoveState =
+      typeof player.moveFromX === 'number'
+      && typeof player.moveFromY === 'number'
+      && typeof player.moveToX === 'number'
+      && typeof player.moveToY === 'number'
+      && typeof player.moveStartServerTimeMs === 'number'
+      && typeof player.moveDurationMs === 'number'
+      && player.moveDurationMs > 0;
+
+    if (hasMsMoveState) {
+      const moveDurationMs = player.moveDurationMs as number;
+      const t = Phaser.Math.Clamp((estimatedServerNowMs - (player.moveStartServerTimeMs as number)) / moveDurationMs, 0, 1);
+      return {
+        x: Phaser.Math.Linear(player.moveFromX as number, player.moveToX as number, t),
+        y: Phaser.Math.Linear(player.moveFromY as number, player.moveToY as number, t),
+      };
+    }
+
+    const hasTickMoveState =
+      typeof player.moveFromX === 'number'
+      && typeof player.moveFromY === 'number'
+      && typeof player.moveToX === 'number'
+      && typeof player.moveToY === 'number'
+      && typeof player.moveStartTick === 'number'
+      && typeof player.moveDurationTicks === 'number'
+      && player.moveDurationTicks > 0;
+
+    if (hasTickMoveState) {
+      const moveDurationTicks = player.moveDurationTicks as number;
+      const tTicks = Phaser.Math.Clamp((renderTick - (player.moveStartTick as number)) / moveDurationTicks, 0, 1);
+      return {
+        x: Phaser.Math.Linear(player.moveFromX as number, player.moveToX as number, tTicks),
+        y: Phaser.Math.Linear(player.moveFromY as number, player.moveToY as number, tTicks),
+      };
+    }
+
+    return { x: player.x, y: player.y };
   }
 
   getDebugStats(): {

@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { RemotePlayersRenderer } from './RemotePlayersRenderer';
 import { LocalPredictionController } from './LocalPredictionController';
-import type { MatchSnapshotV1 } from '@shared/protocol';
+import type { MatchSnapshotPlayer, MatchSnapshotV1 } from '@shared/protocol';
 import {
   canOccupyCell,
   createArena,
@@ -113,6 +113,8 @@ interface TileTweenSegment {
   durationTicks: number;
 }
 
+type PlayerRenderPosition = { xPx: number; yPx: number };
+
 export type SceneAudioSettings = {
   musicEnabled: boolean;
   sfxEnabled: boolean;
@@ -161,6 +163,8 @@ export class GameScene extends Phaser.Scene {
   private lastLocalTarget?: { x: number; y: number };
   private lastLocalTargetTick = -1;
   private localRenderSnapCount = 0;
+  private serverTimeOffsetMs = 0;
+  private hasServerTimeOffset = false;
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
   private needsNetResync = false;
@@ -478,16 +482,35 @@ export class GameScene extends Phaser.Scene {
     }
 
     let renderSimulationTick = 0;
+    const latestSnapshot = this.snapshotBuffer.length > 0 ? this.snapshotBuffer[this.snapshotBuffer.length - 1] : undefined;
+    const canUseMoveProgressRender = this.canUseMoveProgressRender(latestSnapshot);
     if (this.worldReady) {
       renderSimulationTick = this.simulationTick + this.accumulator / this.FIXED_DT;
-      this.remotePlayers?.update(renderSimulationTick, this.snapshotBuffer, this.localTgUserId, this.needsNetResync);
+      if (canUseMoveProgressRender && latestSnapshot) {
+        const estimatedServerNowMs = this.getEstimatedServerNowMs();
+        if (estimatedServerNowMs !== null) {
+          this.remotePlayers?.renderFromMoveProgress(
+            latestSnapshot,
+            estimatedServerNowMs,
+            renderSimulationTick,
+            this.localTgUserId,
+            this.needsNetResync,
+          );
+        }
+      } else {
+        this.remotePlayers?.update(renderSimulationTick, this.snapshotBuffer, this.localTgUserId, this.needsNetResync);
+      }
     }
 
     this.consumeKeyboard();
     this.tickPlayerMovement(time);
 
-    // Multiplayer: render local player from the same delayed playhead as remotes (no easing).
-    this.tickMultiplayerRenderInterpolation(renderSimulationTick);
+    if (canUseMoveProgressRender && latestSnapshot) {
+      this.tickMultiplayerMoveProgressRender(latestSnapshot, renderSimulationTick);
+    } else {
+      // Legacy fallback: render local player from delayed snapshot playhead.
+      this.tickMultiplayerRenderInterpolation(renderSimulationTick);
+    }
 
     this.consumeMovementIntent(time);
     if (this.gameMode !== 'multiplayer') {
@@ -2264,6 +2287,103 @@ export class GameScene extends Phaser.Scene {
     this.placeLocalPlayerSpriteAt(local.x, local.y);
   }
 
+  private tickMultiplayerMoveProgressRender(snapshot: MatchSnapshotV1, renderTick: number): void {
+    if (this.gameMode !== 'multiplayer' || !this.playerSprite) return;
+    if (!this.localTgUserId) return;
+
+    const local = snapshot.players.find((player) => player.tgUserId === this.localTgUserId);
+    if (!local) return;
+
+    const estimatedServerNowMs = this.getEstimatedServerNowMs();
+    if (estimatedServerNowMs === null) return;
+
+    const pos = this.getPlayerRenderPosFromMoveState(local, estimatedServerNowMs, GAME_CONFIG.tileSize, renderTick);
+    this.localRenderPos = {
+      x: (pos.xPx - GAME_CONFIG.tileSize / 2) / GAME_CONFIG.tileSize,
+      y: (pos.yPx - GAME_CONFIG.tileSize / 2) / GAME_CONFIG.tileSize,
+    };
+    this.playerSprite.setPosition(pos.xPx, pos.yPx);
+  }
+
+  private canUseMoveProgressRender(snapshot?: MatchSnapshotV1): boolean {
+    return Boolean(snapshot && typeof snapshot.serverTimeMs === 'number' && Number.isFinite(snapshot.serverTimeMs));
+  }
+
+  private updateServerTimeOffset(snapshot: MatchSnapshotV1): void {
+    if (typeof snapshot.serverTimeMs !== 'number' || !Number.isFinite(snapshot.serverTimeMs)) return;
+
+    const newOffset = snapshot.serverTimeMs - performance.now();
+    if (!this.hasServerTimeOffset) {
+      this.serverTimeOffsetMs = newOffset;
+      this.hasServerTimeOffset = true;
+      return;
+    }
+
+    this.serverTimeOffsetMs = Phaser.Math.Linear(this.serverTimeOffsetMs, newOffset, 0.1);
+  }
+
+  private getEstimatedServerNowMs(): number | null {
+    if (!this.hasServerTimeOffset) return null;
+    return performance.now() + this.serverTimeOffsetMs;
+  }
+
+  private getPlayerRenderPosFromMoveState(
+    player: MatchSnapshotPlayer,
+    estimatedServerNowMs: number,
+    tileSizePx: number,
+    renderTick: number,
+  ): PlayerRenderPosition {
+    if (!player.isMoving || (player.moveDurationMs ?? 0) <= 0) {
+      return {
+        xPx: player.x * tileSizePx + tileSizePx / 2,
+        yPx: player.y * tileSizePx + tileSizePx / 2,
+      };
+    }
+
+    const hasMsMoveState =
+      typeof player.moveFromX === 'number'
+      && typeof player.moveFromY === 'number'
+      && typeof player.moveToX === 'number'
+      && typeof player.moveToY === 'number'
+      && typeof player.moveStartServerTimeMs === 'number'
+      && typeof player.moveDurationMs === 'number'
+      && player.moveDurationMs > 0;
+
+    if (hasMsMoveState) {
+      const t = Phaser.Math.Clamp((estimatedServerNowMs - player.moveStartServerTimeMs!) / player.moveDurationMs!, 0, 1);
+      const tileX = Phaser.Math.Linear(player.moveFromX!, player.moveToX!, t);
+      const tileY = Phaser.Math.Linear(player.moveFromY!, player.moveToY!, t);
+      return {
+        xPx: tileX * tileSizePx + tileSizePx / 2,
+        yPx: tileY * tileSizePx + tileSizePx / 2,
+      };
+    }
+
+    const hasTickMoveState =
+      typeof player.moveFromX === 'number'
+      && typeof player.moveFromY === 'number'
+      && typeof player.moveToX === 'number'
+      && typeof player.moveToY === 'number'
+      && typeof player.moveStartTick === 'number'
+      && typeof player.moveDurationTicks === 'number'
+      && player.moveDurationTicks > 0;
+
+    if (hasTickMoveState) {
+      const tTicks = Phaser.Math.Clamp((renderTick - player.moveStartTick!) / player.moveDurationTicks!, 0, 1);
+      const tileX = Phaser.Math.Linear(player.moveFromX!, player.moveToX!, tTicks);
+      const tileY = Phaser.Math.Linear(player.moveFromY!, player.moveToY!, tTicks);
+      return {
+        xPx: tileX * tileSizePx + tileSizePx / 2,
+        yPx: tileY * tileSizePx + tileSizePx / 2,
+      };
+    }
+
+    return {
+      xPx: player.x * tileSizePx + tileSizePx / 2,
+      yPx: player.y * tileSizePx + tileSizePx / 2,
+    };
+  }
+
   private getLocalStepDurationTicks(deltaTicks?: number): number {
     // Fallback to constant if we cannot infer a sane duration from snapshots.
     const fallback = MP_MOVE_TICKS_CONST;
@@ -2420,6 +2540,8 @@ export class GameScene extends Phaser.Scene {
     this.prediction.reset?.();
     this.worldReady = false;
     this.localRenderPos = null;
+    this.hasServerTimeOffset = false;
+    this.serverTimeOffsetMs = 0;
     this.resetLocalRenderSegmentTracking(
       this.player.gridX,
       this.player.gridY,
@@ -2482,6 +2604,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.lastSnapshotTick = snapshot.tick;
+    this.updateServerTimeOffset(snapshot);
     this.lastAppliedSnapshotTick = Math.max(this.lastAppliedSnapshotTick, snapshot.tick);
     this.matchGridW = snapshot.world?.gridW ?? this.matchGridW;
     this.matchGridH = snapshot.world?.gridH ?? this.matchGridH;
