@@ -1,4 +1,4 @@
-import type { MatchInputPayload } from './protocol';
+import type { MatchInputPayload, MoveDir } from './protocol';
 
 export type PlayerState = {
   tgUserId: string;
@@ -8,6 +8,15 @@ export type PlayerState = {
   lastInputSeq: number;
   x: number;
   y: number;
+  isMoving: boolean;
+  moveFromX: number;
+  moveFromY: number;
+  moveToX: number;
+  moveToY: number;
+  moveStartTick: number;
+  moveDurationTicks: number;
+  moveStartServerTimeMs: number;
+  intentDir: MoveDir | null;
   state: 'alive' | 'dead_respawning' | 'eliminated';
   respawnAtTick: number | null;
   invulnUntilTick: number;
