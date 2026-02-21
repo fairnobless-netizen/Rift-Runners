@@ -2386,6 +2386,14 @@ export class GameScene extends Phaser.Scene {
     this.player.moveDurationMs = 0;
     this.player.moveStartedAtMs = 0;
 
+    if (this.gameMode === 'multiplayer') {
+      this.resetLocalRenderSegmentTracking(
+        x,
+        y,
+        this.lastAppliedSnapshotTick >= 0 ? this.lastAppliedSnapshotTick : this.simulationTick,
+      );
+    }
+
     this.placeLocalPlayerSpriteAt(x, y);
   }
 
