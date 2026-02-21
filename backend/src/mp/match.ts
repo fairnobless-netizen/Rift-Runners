@@ -98,7 +98,8 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
       moveStartServerTimeMs: p.isMoving ? p.moveStartServerTimeMs : now,
       moveDurationMs: p.isMoving ? p.moveDurationTicks * TICK_RATE_MS : 0,
       lives: match.playerLives.get(p.tgUserId) ?? 0,
-      eliminated: match.eliminatedPlayers.has(p.tgUserId),
+      eliminated: match.eliminatedPlayers.has(p.tgUserId) || match.disconnectedPlayers.has(p.tgUserId),
+      disconnected: match.disconnectedPlayers.has(p.tgUserId),
     })),
     enemies: Array.from(match.enemies.values()).map((enemy) => ({
       id: enemy.id,
@@ -109,6 +110,25 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
   };
 
   broadcast(snapshot, events);
+}
+
+
+export function markPlayerDisconnected(match: MatchState, tgUserId: string): boolean {
+  const player = match.players.get(tgUserId);
+  if (!player) return false;
+
+  match.disconnectedPlayers.add(tgUserId);
+  if (player.state !== 'eliminated') {
+    player.state = 'eliminated';
+    resetPlayerMovementState(player, match.tick, Date.now());
+    player.respawnAtTick = null;
+    player.invulnUntilTick = 0;
+    match.eliminatedPlayers.add(tgUserId);
+    match.playerLives.set(tgUserId, 0);
+  }
+
+  match.inputQueue = match.inputQueue.filter((entry) => entry.tgUserId !== tgUserId);
+  return true;
 }
 
 export function tryPlaceBomb(match: MatchState, tgUserId: string, x: number, y: number): MatchBombSpawned | null {

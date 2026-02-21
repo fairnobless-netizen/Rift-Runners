@@ -158,6 +158,7 @@ export type MatchSnapshotPlayer = {
   y: number;
   lives?: number;
   eliminated?: boolean;
+  disconnected?: boolean;
   isMoving?: boolean;
   moveFromX?: number;
   moveFromY?: number;

@@ -84,6 +84,7 @@ export function createMatch(roomId: string, players: string[]): MatchState {
     tick: 0,
     world: { gridW, gridH, tiles: worldTiles, worldHash },
     players: new Map<string, PlayerState>(),
+    disconnectedPlayers: new Set<string>(),
     playerLives: new Map<string, number>(),
     eliminatedPlayers: new Set<string>(),
     bombs: new Map(),
