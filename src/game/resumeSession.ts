@@ -1,15 +1,6 @@
 const RESUME_KEY = 'rr_resume_v1';
 const WINDOW_MS = 60_000;
 
-export type MultiplayerResumeMeta = {
-  kind: 'multiplayer';
-  tgUserId: string;
-  roomCode: string;
-  matchId: string;
-  disconnectedAt: number;
-  expiresAt: number;
-};
-
 export type SingleplayerResumeMeta = {
   kind: 'singleplayer';
   tgUserId: string;
@@ -18,7 +9,7 @@ export type SingleplayerResumeMeta = {
   snapshot: unknown;
 };
 
-export type ResumeMeta = MultiplayerResumeMeta | SingleplayerResumeMeta;
+export type ResumeMeta = SingleplayerResumeMeta;
 
 export function getResumeWindowMs(): number { return WINDOW_MS; }
 
@@ -29,6 +20,10 @@ export function loadResumeMeta(): ResumeMeta | null {
     const parsed = JSON.parse(raw) as ResumeMeta;
     if (!parsed || typeof parsed !== 'object') return null;
     if (Date.now() > Number((parsed as any).expiresAt ?? 0)) {
+      clearResumeMeta();
+      return null;
+    }
+    if ((parsed as any).kind !== 'singleplayer') {
       clearResumeMeta();
       return null;
     }
@@ -44,18 +39,6 @@ export function saveResumeMeta(meta: ResumeMeta): void {
 
 export function clearResumeMeta(): void {
   localStorage.removeItem(RESUME_KEY);
-}
-
-export function buildMultiplayerResumeMeta(params: { tgUserId: string; roomCode: string; matchId: string; disconnectedAt?: number }): MultiplayerResumeMeta {
-  const disconnectedAt = params.disconnectedAt ?? Date.now();
-  return {
-    kind: 'multiplayer',
-    tgUserId: params.tgUserId,
-    roomCode: params.roomCode,
-    matchId: params.matchId,
-    disconnectedAt,
-    expiresAt: disconnectedAt + WINDOW_MS,
-  };
 }
 
 export function buildSingleplayerResumeMeta(params: { tgUserId: string; snapshot: unknown }): SingleplayerResumeMeta {

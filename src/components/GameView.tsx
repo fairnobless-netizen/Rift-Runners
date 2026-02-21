@@ -31,8 +31,9 @@ import type { ControlsState, Direction, PlayerStats, SimulationEvent } from '../
 import type { MatchServerMessage } from '@shared/protocol';
 import {
   buyShopSku,
-  checkMultiplayerResumeEligibility,
+  checkResumeEligibility,
   claimReferral,
+  markSingleplayerResumeActivity,
   closeRoom,
   createRoom,
   fetchFriends,
@@ -77,7 +78,7 @@ import { MultiplayerModal } from './MultiplayerModal';
 import { isDebugEnabled } from '../debug/debugFlags';
 import { diagnosticsStore } from '../debug/diagnosticsStore';
 import { DiagnosticsOverlay } from '../debug/DiagnosticsOverlay';
-import { buildMultiplayerResumeMeta, buildSingleplayerResumeMeta, clearResumeMeta, loadResumeMeta, saveResumeMeta } from '../game/resumeSession';
+import { buildSingleplayerResumeMeta, clearResumeMeta, loadResumeMeta, saveResumeMeta } from '../game/resumeSession';
 
 
 const defaultStats: PlayerStats = {
@@ -116,6 +117,15 @@ type AccountInfo = {
   gameNickname: string | null;
   referralLink: string;
   nameChangeRemaining: number;
+};
+
+type AuthResumeEligibility = {
+  ok: boolean;
+  eligible: boolean;
+  kind?: 'multiplayer' | 'singleplayer';
+  roomCode?: string;
+  matchId?: string;
+  expiresAt?: number;
 };
 
 type GameFlowPhase = 'intro' | 'start' | 'playing';
@@ -289,6 +299,7 @@ export default function GameView(): JSX.Element {
   const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [profileName, setProfileName] = useState<string>('—');
   const [token, setToken] = useState<string>(() => localStorage.getItem('rift_session_token') ?? '');
+  const authResumeRef = useRef<AuthResumeEligibility | null>(null);
   // D1: show why a new user has no token (no secrets!)
   const [authDiag, setAuthDiag] = useState<string | null>(null);
 
@@ -867,6 +878,7 @@ export default function GameView(): JSX.Element {
 
         localStorage.setItem('rift_session_token', token);
         setToken(token);
+        authResumeRef.current = authJson.resume ?? null;
 
         const nextLocalTgUserId = String(authJson.user?.tgUserId ?? '');
         if (nextLocalTgUserId) {
@@ -2653,16 +2665,20 @@ export default function GameView(): JSX.Element {
         clearResumeMeta();
       }
 
-      const eligibility = await checkMultiplayerResumeEligibility();
-      if (eligibility?.eligible && eligibility.roomCode && eligibility.matchId) {
-        saveResumeMeta(buildMultiplayerResumeMeta({ tgUserId: localTgUserId, roomCode: eligibility.roomCode, matchId: eligibility.matchId, disconnectedAt: Date.now() }));
-        setResumePrompt({ kind: 'multiplayer', roomCode: eligibility.roomCode, matchId: eligibility.matchId });
-        return;
-      }
-
-      const refreshed = loadResumeMeta();
-      if (refreshed?.kind === 'singleplayer' && refreshed.tgUserId === localTgUserId) {
-        setResumePrompt({ kind: 'singleplayer', snapshot: refreshed.snapshot });
+      const eligibility = authResumeRef.current ?? await checkResumeEligibility();
+      authResumeRef.current = null;
+      if (eligibility?.eligible) {
+        if (eligibility.kind === 'multiplayer' && eligibility.roomCode && eligibility.matchId) {
+          setResumePrompt({ kind: 'multiplayer', roomCode: eligibility.roomCode, matchId: eligibility.matchId });
+          return;
+        }
+        if (eligibility.kind === 'singleplayer') {
+          const refreshed = loadResumeMeta();
+          if (refreshed?.kind === 'singleplayer' && refreshed.tgUserId === localTgUserId) {
+            setResumePrompt({ kind: 'singleplayer', snapshot: refreshed.snapshot });
+          }
+          return;
+        }
       }
     };
 
@@ -2672,10 +2688,6 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     const onBeforeUnload = () => {
       if (!localTgUserId || gameFlowPhase !== 'playing') return;
-      if (currentRoom?.roomCode && currentMatchId) {
-        saveResumeMeta(buildMultiplayerResumeMeta({ tgUserId: localTgUserId, roomCode: currentRoom.roomCode, matchId: currentMatchId }));
-        return;
-      }
       const snapshot = sceneRef.current?.buildSoloResumeSnapshot();
       if (snapshot) {
         saveResumeMeta(buildSingleplayerResumeMeta({ tgUserId: localTgUserId, snapshot }));
@@ -2683,7 +2695,16 @@ export default function GameView(): JSX.Element {
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [currentMatchId, currentRoom?.roomCode, gameFlowPhase, localTgUserId]);
+  }, [gameFlowPhase, localTgUserId]);
+
+  useEffect(() => {
+    if (!token || gameFlowPhase !== 'playing' || currentRoom?.roomCode) return;
+    const id = window.setInterval(() => {
+      void markSingleplayerResumeActivity();
+    }, 5_000);
+    void markSingleplayerResumeActivity();
+    return () => window.clearInterval(id);
+  }, [currentRoom?.roomCode, gameFlowPhase, token]);
 
   const onResumeConfirm = useCallback(async (): Promise<void> => {
     if (!resumePrompt) return;
