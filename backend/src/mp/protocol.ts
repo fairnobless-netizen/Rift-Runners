@@ -18,6 +18,7 @@ export type {
   RoomRestartProposed,
   RoomRestartVoteState,
   MatchSnapshot,
+  MatchSnapshotPlayer,
   MatchSnapshotV1,
   ProtocolVersion,
 } from '@shared/protocol';

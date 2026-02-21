@@ -141,29 +141,41 @@ export type RoomRestartCancelled = {
 export type MatchBombPlacedEvent = MatchBombSpawned;
 export type MatchBombExplodedEvent = MatchBombExploded;
 
+export type MatchSnapshotPlayer = {
+  tgUserId: string;
+  displayName: string;
+  colorId: number;
+  skinId: string;
+  lastInputSeq: number;
+  x: number;
+  y: number;
+  lives?: number;
+  eliminated?: boolean;
+  isMoving?: boolean;
+  moveFromX?: number;
+  moveFromY?: number;
+  moveToX?: number;
+  moveToY?: number;
+  moveStartTick?: number;
+  moveDurationTicks?: number;
+  moveStartServerTimeMs?: number;
+  moveDurationMs?: number;
+};
+
 export type MatchSnapshot = {
   version: ProtocolVersion;
   roomCode: string;
   matchId: string;
   tick: number;
   serverTime: number;
+  serverTimeMs?: number;
   world: {
     gridW: number;
     gridH: number;
     worldHash?: string;
     bombs?: BombSnapshot[];
   };
-  players: Array<{
-    tgUserId: string;
-    displayName: string;
-    colorId: number;
-    skinId: string;
-    lastInputSeq: number;
-    x: number;
-    y: number;
-    lives?: number;
-    eliminated?: boolean;
-  }>;
+  players: MatchSnapshotPlayer[];
 };
 
 export type MatchSnapshotV1 = MatchSnapshot;

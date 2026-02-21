@@ -104,12 +104,14 @@ function isSocketAttachedToRoom(ctx: ClientCtx, room: RoomState): boolean {
 }
 
 function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, { type: 'match:snapshot' }>['snapshot'] {
+  const now = Date.now();
   return {
     version: 'match_v1',
     roomCode: match.roomId,
     matchId: match.matchId,
     tick: match.tick,
-    serverTime: Date.now(),
+    serverTime: now,
+    serverTimeMs: now,
     world: {
       gridW: match.world.gridW,
       gridH: match.world.gridH,
@@ -131,6 +133,15 @@ function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, 
       lastInputSeq: player.lastInputSeq,
       x: player.x,
       y: player.y,
+      isMoving: false,
+      moveFromX: player.x,
+      moveFromY: player.y,
+      moveToX: player.x,
+      moveToY: player.y,
+      moveStartTick: match.tick,
+      moveDurationTicks: 0,
+      moveStartServerTimeMs: now,
+      moveDurationMs: 0,
       lives: match.playerLives.get(player.tgUserId) ?? 0,
       eliminated: match.eliminatedPlayers.has(player.tgUserId),
     })),
