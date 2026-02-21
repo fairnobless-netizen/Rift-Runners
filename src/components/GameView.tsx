@@ -322,6 +322,7 @@ export default function GameView(): JSX.Element {
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
   const [multiplayerLivesByUserId, setMultiplayerLivesByUserId] = useState<Record<string, number>>({});
+  const [multiplayerDisconnectedByUserId, setMultiplayerDisconnectedByUserId] = useState<Record<string, boolean>>({});
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [restartVote, setRestartVote] = useState<{ active: boolean; yesCount: number; total: number; expiresAt: number | null } | null>(null);
   const [matchEndState, setMatchEndState] = useState<{ winnerTgUserId: string | null; reason: 'elimination' | 'draw' } | null>(null);
@@ -1088,6 +1089,8 @@ export default function GameView(): JSX.Element {
       setWrongRoomDrops(0);
       setWrongMatchDrops(0);
       setDuplicateTickDrops(0);
+      setMultiplayerLivesByUserId({});
+      setMultiplayerDisconnectedByUserId({});
       setLastWorldInitAt(null);
       setLastSnapshotAt(null);
       setLastRecvSnapshotTick(null);
@@ -1115,6 +1118,8 @@ export default function GameView(): JSX.Element {
     pendingSnapshotRef.current = null;
     lastAppliedSnapshotTickRef.current = null;
     setCurrentMatchId(null);
+    setMultiplayerLivesByUserId({});
+    setMultiplayerDisconnectedByUserId({});
     handledMatchEventIdsRef.current.clear();
   }, [currentRoom?.roomCode]);
 
@@ -1127,6 +1132,8 @@ export default function GameView(): JSX.Element {
       pendingSnapshotRef.current = null;
       lastAppliedSnapshotTickRef.current = null;
       setCurrentMatchId(null);
+      setMultiplayerLivesByUserId({});
+      setMultiplayerDisconnectedByUserId({});
       handledMatchEventIdsRef.current.clear();
       sceneRef.current?.resetMultiplayerNetState();
     }
@@ -1484,6 +1491,14 @@ export default function GameView(): JSX.Element {
       for (const player of players) {
         if (!player?.tgUserId) continue;
         next[player.tgUserId] = Math.max(0, Number(player.lives ?? 0));
+      }
+      return next;
+    });
+    setMultiplayerDisconnectedByUserId(() => {
+      const next: Record<string, boolean> = {};
+      for (const player of players) {
+        if (!player?.tgUserId) continue;
+        next[player.tgUserId] = Boolean(player.disconnected);
       }
       return next;
     });
@@ -1962,6 +1977,48 @@ export default function GameView(): JSX.Element {
     if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'onCreateRoom:success', { roomCode: created.roomCode, capacity });
     await joinRoomByCode(created.roomCode);
   }, [isMultiplayerDebugEnabled, joinRoomByCode]);
+
+
+  const clearMultiplayerSessionState = useCallback((): void => {
+    ws.send({ type: 'room:leave' });
+    setMultiplayerUiOpen(false);
+    setDeepLinkJoinCode(null);
+    setCurrentRoom(null);
+    setCurrentRoomMembers([]);
+    setCurrentMatchId(null);
+    setMultiplayerLivesByUserId({});
+    setMultiplayerDisconnectedByUserId({});
+    setRestartVote(null);
+    setMatchEndState(null);
+    expectedRoomCodeRef.current = null;
+    expectedMatchIdRef.current = null;
+    worldReadyRef.current = false;
+    firstSnapshotReadyRef.current = false;
+    pendingSnapshotRef.current = null;
+    lastAppliedSnapshotTickRef.current = null;
+    handledMatchEventIdsRef.current.clear();
+    processedWsMessagesRef.current = 0;
+    wsJoinedRoomCodeRef.current = null;
+    sceneRef.current?.setActiveMultiplayerSession(null, null);
+    sceneRef.current?.resetMultiplayerNetState();
+  }, [ws]);
+
+  const onLeaveMultiplayerMatch = useCallback(async (): Promise<void> => {
+    const roomCode = currentRoom?.roomCode;
+    clearMultiplayerSessionState();
+
+    if (roomCode) {
+      try {
+        await leaveRoom();
+      } catch {
+        // best effort: ws detach already executed
+      }
+    }
+
+    sceneRef.current?.setGameMode('solo');
+    sceneRef.current?.restartSoloRun();
+    setGameFlowPhase('start');
+  }, [clearMultiplayerSessionState, currentRoom?.roomCode]);
 
   const onLeaveRoom = useCallback(async (): Promise<void> => {
     if (!currentRoom) return;
@@ -2756,7 +2813,7 @@ export default function GameView(): JSX.Element {
           <div className="hud-left">
             <div className={`hud-slots ${isMultiplayerHud ? 'hud-slots--multiplayer' : 'hud-slots--single'}`}>
               {hudSlots.map((member, index) => (
-                <div key={member?.tgUserId ?? `empty-${index}`} className={`hud-slot ${member ? '' : 'hud-slot--empty'}`}>
+                <div key={member?.tgUserId ?? `empty-${index}`} className={`hud-slot ${member ? '' : 'hud-slot--empty'} ${member && multiplayerDisconnectedByUserId[member.tgUserId] ? 'hud-slot--inactive' : ''}`}>
                   {member ? (
                     <>
                       <span className="hud-slot-name" title={member.displayName}>{member.displayName}</span>
@@ -2810,11 +2867,19 @@ export default function GameView(): JSX.Element {
                 </button>
               </div>
               <div className="nav-secondary">
-                <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerUiOpen(true)}>
-                  <span className="nav-btn__plate" aria-hidden="true">
-                    <span className="nav-btn__icon" aria-hidden="true">👥</span>
-                  </span>
-                </button>
+                {isMultiplayerMode && currentRoom?.phase === 'STARTED' ? (
+                  <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Leave Multiplayer" onClick={() => { void onLeaveMultiplayerMatch(); }}>
+                    <span className="nav-btn__plate" aria-hidden="true">
+                      <span className="nav-btn__icon" aria-hidden="true">↩️</span>
+                    </span>
+                  </button>
+                ) : (
+                  <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerUiOpen(true)}>
+                    <span className="nav-btn__plate" aria-hidden="true">
+                      <span className="nav-btn__icon" aria-hidden="true">👥</span>
+                    </span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

@@ -4,7 +4,7 @@ import type { RawData, Server as WebSocketServer } from 'ws';
 
 import type { MatchClientMessage, MatchServerMessage } from '../mp/protocol';
 import type { MatchState } from '../mp/types';
-import { startMatch, tryPlaceBomb } from '../mp/match';
+import { markPlayerDisconnected, startMatch, tryPlaceBomb } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 
 // ✅ add DB cleanup
@@ -59,6 +59,7 @@ const STALE_CONNECTION_MS = 60_000;
 const INACTIVE_ROOM_MS = 90_000;
 
 async function finalizeAndDeleteRoom(roomId: string) {
+  logWsEvent('ws_room_auto_cleanup_start', { roomId });
   const room = rooms.get(roomId);
   const socketsToTerminate = new Set<WebSocket>();
 
@@ -93,6 +94,8 @@ async function finalizeAndDeleteRoom(roomId: string) {
   try {
     await removeRoomCascade(roomId);
   } catch {}
+
+  logWsEvent('ws_room_auto_cleanup_done', { roomId, socketsTerminated: socketsToTerminate.size });
 
   for (const socket of socketsToTerminate) {
     try {
@@ -211,6 +214,7 @@ function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, 
       moveDurationMs: 0,
       lives: match.playerLives.get(player.tgUserId) ?? 0,
       eliminated: match.eliminatedPlayers.has(player.tgUserId),
+      disconnected: match.disconnectedPlayers.has(player.tgUserId),
     })),
     enemies: Array.from(match.enemies.values()).map((enemy) => ({
       id: enemy.id,
@@ -483,20 +487,44 @@ async function detachClientFromRoomDb(roomCode: string, tgUserId: string) {
   }
 }
 
-function detachClientFromRoom(ctx: ClientCtx) {
+async function handlePlayerLeftInActiveMatch(roomId: string, tgUserId: string): Promise<void> {
+  const room = rooms.get(roomId);
+  if (!room?.matchId) {
+    return;
+  }
+
+  const match = getMatch(room.matchId);
+  if (!match || match.roomId !== roomId) {
+    return;
+  }
+
+  const changed = markPlayerDisconnected(match, tgUserId);
+  if (!changed) {
+    return;
+  }
+
+  logWsEvent('ws_player_left_match', {
+    roomId,
+    matchId: match.matchId,
+    tgUserId,
+  });
+}
+
+function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'disconnect' = 'disconnect') {
   if (!ctx.roomId) {
     return;
   }
 
   const roomId = ctx.roomId;
+  const leavingTgUserId = ctx.tgUserId;
   const room = rooms.get(roomId);
   if (room) {
-    room.players.delete(ctx.tgUserId);
+    room.players.delete(leavingTgUserId);
 
     const vote = restartVotes.get(roomId);
     if (vote) {
-      vote.yes.delete(ctx.tgUserId);
-      vote.no.delete(ctx.tgUserId);
+      vote.yes.delete(leavingTgUserId);
+      vote.no.delete(leavingTgUserId);
       if (room.players.size === 0) {
         clearRestartVote(roomId);
       }
@@ -513,9 +541,12 @@ function detachClientFromRoom(ctx: ClientCtx) {
   ctx.matchId = null;
 
   logWsEvent('ws_room_leave', {
-    tgUserId: ctx.tgUserId,
+    tgUserId: leavingTgUserId,
     roomId,
+    reason,
   });
+
+  void handlePlayerLeftInActiveMatch(roomId, leavingTgUserId);
 }
 
 function parseMessage(raw: RawData): ClientMessage | null {
@@ -581,7 +612,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
 
     case 'room:leave': {
-      detachClientFromRoom(ctx);
+      detachClientFromRoom(ctx, 'intentional_leave');
       return;
     }
 
@@ -986,7 +1017,8 @@ export function registerWsHandlers(wss: WebSocketServer) {
       const roomCode = ctx.roomId;
       const tgUserId = ctx.tgUserId;
 
-      detachClientFromRoom(ctx);
+      logWsEvent('ws_player_disconnect', { tgUserId, roomId: roomCode });
+      detachClientFromRoom(ctx, 'disconnect');
       clients.delete(ctx);
 
       if (roomCode) {

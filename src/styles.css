@@ -196,6 +196,17 @@ body {
   opacity: 0.58;
 }
 
+
+.hud-slot--inactive {
+  border-color: #4b4b56;
+  background: #2a2a3345;
+}
+
+.hud-slot--inactive .hud-slot-name,
+.hud-slot--inactive .hud-lives {
+  color: #8e909d;
+}
+
 .hud-slot-name {
   min-width: 0;
   overflow: hidden;
