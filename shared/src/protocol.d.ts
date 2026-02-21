@@ -141,6 +141,13 @@ export type RoomRestartCancelled = {
 export type MatchBombPlacedEvent = MatchBombSpawned;
 export type MatchBombExplodedEvent = MatchBombExploded;
 
+export type EnemySnapshot = {
+  id: string;
+  x: number;
+  y: number;
+  alive: boolean;
+};
+
 export type MatchSnapshotPlayer = {
   tgUserId: string;
   displayName: string;
@@ -176,6 +183,7 @@ export type MatchSnapshot = {
     bombs?: BombSnapshot[];
   };
   players: MatchSnapshotPlayer[];
+  enemies?: EnemySnapshot[];
 };
 
 export type MatchSnapshotV1 = MatchSnapshot;

@@ -145,6 +145,12 @@ function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, 
       lives: match.playerLives.get(player.tgUserId) ?? 0,
       eliminated: match.eliminatedPlayers.has(player.tgUserId),
     })),
+    enemies: Array.from(match.enemies.values()).map((enemy) => ({
+      id: enemy.id,
+      x: enemy.x,
+      y: enemy.y,
+      alive: enemy.alive,
+    })),
   };
 }
 

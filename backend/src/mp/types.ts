@@ -20,8 +20,16 @@ export type PlayerState = {
   state: 'alive' | 'dead_respawning' | 'eliminated';
   respawnAtTick: number | null;
   invulnUntilTick: number;
+  lastEnemyHitTick: number;
   spawnX: number;
   spawnY: number;
+};
+
+export type EnemyState = {
+  id: string;
+  x: number;
+  y: number;
+  alive: boolean;
 };
 
 export type MatchState = {
@@ -52,6 +60,9 @@ export type MatchState = {
   maxBombsPerPlayer: number;
   bombFuseTicks: number;
   bombRange: number;
+
+  enemies: Map<string, EnemyState>;
+  enemyMoveIntervalTicks: number;
 
   eventSeq: number;
   seenEventIds: string[];

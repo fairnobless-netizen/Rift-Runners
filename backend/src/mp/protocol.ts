@@ -1,5 +1,6 @@
 export type {
   BombSnapshot,
+  EnemySnapshot,
   MoveDir,
   MatchBombExploded,
   MatchBombExplodedEvent,

@@ -871,6 +871,8 @@ export class GameScene extends Phaser.Scene {
     this.gameMode = mode;
     this.prediction.setServerFirstMode(false);
     if (mode === 'multiplayer') {
+      this.enemies.clear();
+      this.enemyNextMoveAt.clear();
       this.triggerNetResync('reset_state');
     }
     this.awaitingSoloContinue = false;
@@ -1073,7 +1075,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnEnemies(): void {
-    if (this.isBossLevel) return;
+    if (this.gameMode === 'multiplayer' || this.isBossLevel) return;
     const spawnCells = this.getShuffledEnemySpawnCells(this.levelIndex);
     const targetCount = Math.min(spawnCells.length, getEnemyCountForLevel(this.levelIndex));
 
@@ -1562,6 +1564,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private tickEnemies(time: number): void {
+    if (this.gameMode === 'multiplayer') return;
+
     for (const enemy of this.enemies.values()) {
       const next = this.enemyNextMoveAt.get(enemy.key) ?? 0;
       if (time < next) continue;
@@ -2632,6 +2636,8 @@ export class GameScene extends Phaser.Scene {
     const effectiveLocalId = localTgUserId ?? this.localTgUserId;
     if (!effectiveLocalId) return;
 
+    this.syncEnemiesFromSnapshot(snapshot.enemies ?? []);
+
     const me = snapshot.players?.find((p) => p.tgUserId === effectiveLocalId);
     if (!me) return;
 
@@ -2680,6 +2686,56 @@ export class GameScene extends Phaser.Scene {
     this.tryStartMpBufferedMove(this.time.now);
   }
 
+
+
+  private syncEnemiesFromSnapshot(enemies: Array<{ id: string; x: number; y: number; alive: boolean }>): void {
+    const seen = new Set<string>();
+
+    for (const enemy of enemies) {
+      if (!enemy.alive) continue;
+      const key = enemy.id;
+      seen.add(key);
+
+      const existing = this.enemies.get(key);
+      if (existing) {
+        existing.moveFromX = existing.gridX;
+        existing.moveFromY = existing.gridY;
+        existing.gridX = enemy.x;
+        existing.gridY = enemy.y;
+        existing.targetX = enemy.x;
+        existing.targetY = enemy.y;
+        existing.isMoving = false;
+        existing.moveStartedAtMs = 0;
+        existing.state = 'idle';
+        continue;
+      }
+
+      this.enemies.set(key, {
+        key,
+        gridX: enemy.x,
+        gridY: enemy.y,
+        moveFromX: enemy.x,
+        moveFromY: enemy.y,
+        targetX: enemy.x,
+        targetY: enemy.y,
+        moveStartedAtMs: 0,
+        moveDurationMs: this.getScaledEnemyMoveInterval('normal'),
+        isMoving: false,
+        facing: 'left',
+        state: 'idle',
+        kind: 'normal',
+        moveIntervalMs: this.getScaledEnemyMoveInterval('normal'),
+      });
+    }
+
+    for (const [key] of this.enemies) {
+      if (seen.has(key)) continue;
+      this.enemies.delete(key);
+      this.enemyNextMoveAt.delete(key);
+      this.enemySprites.get(key)?.destroy();
+      this.enemySprites.delete(key);
+    }
+  }
 
 
   private warnInvalidAuthoritativePosition(snapshot: MatchSnapshotV1, me: { x: number; y: number }, localTgUserId?: string): void {

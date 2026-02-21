@@ -1,11 +1,30 @@
 import crypto from 'crypto';
 
 import { stopMatch } from './match';
-import { MatchState, PlayerState } from './types';
+import { EnemyState, MatchState, PlayerState } from './types';
 
 const matches = new Map<string, MatchState>();
 const roomToMatch = new Map<string, string>();
 
+
+function buildInitialEnemies(gridW: number, gridH: number, tiles: number[]): Map<string, EnemyState> {
+  const enemies = new Map<string, EnemyState>();
+  const desiredCount = 6;
+
+  for (let y = gridH - 2; y >= 1 && enemies.size < desiredCount; y -= 1) {
+    for (let x = gridW - 2; x >= 1 && enemies.size < desiredCount; x -= 1) {
+      const idx = y * gridW + x;
+      const tile = tiles[idx] ?? 1;
+      if (tile !== 0) continue;
+      if (x <= 4 && y <= 3) continue;
+
+      const id = `enemy_${enemies.size + 1}`;
+      enemies.set(id, { id, x, y, alive: true });
+    }
+  }
+
+  return enemies;
+}
 
 function buildWorldTiles(gridW: number, gridH: number): number[] {
   const tiles: number[] = [];
@@ -71,6 +90,8 @@ export function createMatch(roomId: string, players: string[]): MatchState {
     maxBombsPerPlayer: 1,
     bombFuseTicks: 40,
     bombRange: 2,
+    enemies: buildInitialEnemies(gridW, gridH, worldTiles),
+    enemyMoveIntervalTicks: 5,
     eventSeq: 0,
     seenEventIds: [],
     inputQueue: [],
@@ -102,6 +123,7 @@ export function createMatch(roomId: string, players: string[]): MatchState {
       state: 'alive',
       respawnAtTick: null,
       invulnUntilTick: 0,
+      lastEnemyHitTick: Number.NEGATIVE_INFINITY,
       spawnX: x,
       spawnY: y,
     });
