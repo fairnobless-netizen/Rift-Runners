@@ -32,7 +32,7 @@ type Props = {
   autoJoin?: boolean;
   roomsLoading: boolean;
   roomsError: string | null;
-  myRooms: MyRoomEntry[];
+  myRooms?: MyRoomEntry[];
   publicRooms: PublicRoomEntry[];
   currentRoom: RoomState | null;
   currentRoomMembers: RoomMember[];
@@ -73,7 +73,7 @@ export function MultiplayerModal({
   autoJoin,
   roomsLoading,
   roomsError,
-  myRooms,
+  myRooms = [],
   publicRooms,
   currentRoom,
   currentRoomMembers,
