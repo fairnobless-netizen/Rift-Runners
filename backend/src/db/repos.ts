@@ -1933,7 +1933,7 @@ export async function listPublicRooms(query?: string): Promise<RoomModel[]> {
     LEFT JOIN room_members rm ON rm.room_code = r.room_code
     WHERE r.status = 'OPEN'
       AND r.is_public = TRUE
-      AND COALESCE(r.phase, 'LOBBY') <> 'STARTED'
+      AND COALESCE(r.phase, 'LOBBY') = 'LOBBY'
       AND (
         $1 = ''
         OR LOWER(COALESCE(r.name, '')) LIKE $2
@@ -1981,7 +1981,7 @@ export async function joinRoomWithPassword(params: { tgUserId: string; roomCode:
       throw error;
     }
 
-    if (String(room.phase ?? 'LOBBY') === 'STARTED') {
+    if (String(room.phase ?? 'LOBBY') !== 'LOBBY') {
       const error = new Error('room_started');
       (error as any).code = 'ROOM_STARTED';
       throw error;
