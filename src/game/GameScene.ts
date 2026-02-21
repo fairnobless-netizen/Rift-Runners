@@ -2424,6 +2424,10 @@ export class GameScene extends Phaser.Scene {
       this.prediction.setServerFirstMode(false);
       this.mpLocalInputQueue = [];
       this.mpLastAppliedSeq = me.lastInputSeq;
+      // resync is a one-shot latch: clear it after applying the snap,
+      // otherwise we stay in hard-snap/reset loop forever
+      this.needsNetResync = false;
+      this.netResyncReason = null;
       return;
     }
 
@@ -2641,7 +2645,7 @@ export class GameScene extends Phaser.Scene {
 
     return {
       ...stats,
-      localMode: this.gameMode === 'multiplayer' ? 'server_first' : 'predicted',
+      gameMode: this.gameMode,
       localRenderDriftTiles,
       localSnapCount: this.localRenderSnapCount,
     };
