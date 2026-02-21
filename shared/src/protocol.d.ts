@@ -147,6 +147,7 @@ export type MatchSnapshot = {
   matchId: string;
   tick: number;
   serverTime: number;
+  serverTimeMs?: number;
   world: {
     gridW: number;
     gridH: number;

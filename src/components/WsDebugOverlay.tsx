@@ -666,6 +666,10 @@ export function WsDebugOverlay({
           </div>
 
           <div style={{ marginTop: 4 }}>
+            renderDelayMs: {(tickDebugStats?.renderDelayMs ?? 0).toFixed(1)} | serverTimeOffsetMs: {(tickDebugStats?.serverTimeOffsetMs ?? 0).toFixed(1)} | snapshotRateHz: {(tickDebugStats?.snapshotRateHz ?? 0).toFixed(1)} | jitterMs: {(tickDebugStats?.jitterMs ?? 0).toFixed(1)} | lateFrames: {tickDebugStats?.lateFrames ?? 0}
+          </div>
+
+          <div style={{ marginTop: 4 }}>
             droppedWrongRoom: {tickDebugStats?.droppedWrongRoom ?? 0} | invalidPosDrops: {tickDebugStats?.invalidPosDrops ?? 0} | lastSnapshotRoom: {tickDebugStats?.lastSnapshotRoom ?? '—'}
           </div>
           <div>

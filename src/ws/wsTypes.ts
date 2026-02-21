@@ -87,4 +87,10 @@ export type WsDebugMetrics = {
   netResyncReason: string | null;
   bombInputGated: boolean;
   bombGateReason: string | null;
+  renderDelayMs: number;
+  serverTimeOffsetMs: number;
+  snapshotRateHz: number;
+  jitterMs: number;
+  lateFrames: number;
+  renderTimeMs: number;
 };

@@ -110,6 +110,7 @@ function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, 
     matchId: match.matchId,
     tick: match.tick,
     serverTime: Date.now(),
+    serverTimeMs: Date.now(),
     world: {
       gridW: match.world.gridW,
       gridH: match.world.gridH,

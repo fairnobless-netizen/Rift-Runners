@@ -55,6 +55,8 @@ type RenderSegment = {
   durationTicks: number;
 };
 
+type BufferedSnapshotLike = { snapshot: MatchSnapshotV1; tick: number; serverTimeMs: number; arriveClientTimeMs: number; };
+
 type RemoteRenderState = {
   x: number;
   y: number;
@@ -212,73 +214,84 @@ export class RemotePlayersRenderer {
     this.minDelayTicks = Math.max(INTERP_TUNING.baseDelay.minTicks, this.baseDelayTicks - 1);
   }
 
-  update(simulationTick: number, buffer: MatchSnapshotV1[], localTgUserId?: string, deltaMs: number = 0, needsNetResync: boolean = false): void {
-    const controlTick = Math.floor(simulationTick);
-    this.updateAdaptiveDelay(controlTick, buffer.length);
-    this.stallAfterTicks = this.delayTicks + this.maxExtrapolationTicks + 2;
-
-    const renderTick = simulationTick - this.delayTicks;
-    this.renderTick = renderTick;
+  update(renderTimeMs: number, buffer: BufferedSnapshotLike[], localTgUserId?: string, deltaMs: number = 0, needsNetResync: boolean = false): void {
+    this.renderTick = renderTimeMs;
     this.bufferSize = buffer.length;
     this.extrapolatingTicks = 0;
     this.stalled = false;
-
-    this.updateVelocities(buffer);
 
     if (buffer.length === 0) {
       this.destroyMissingPlayers(new Set<string>());
       return;
     }
 
-    // If renderTick is outside the buffered tick range, fall back to extrapolation/freeze.
-    const firstTick = buffer[0].tick;
-    const lastTick = buffer[buffer.length - 1].tick;
-    if (renderTick < firstTick || renderTick > lastTick) {
-      this.recordUnderrun();
-      const anchorSnapshot = this.findAnchorSnapshot(buffer, renderTick) ?? buffer[buffer.length - 1];
-      const extrapolationTicks = Math.max(0, renderTick - anchorSnapshot.tick);
+    const newest = buffer[buffer.length - 1];
+    const first = buffer[0];
 
-      if (extrapolationTicks > 0 && extrapolationTicks <= this.maxExtrapolationTicks) {
-        this.recordExtrapolation();
-        this.extrapolatingTicks = extrapolationTicks;
-        this.renderExtrapolated(anchorSnapshot, extrapolationTicks, localTgUserId, deltaMs);
-        return;
+    let a: BufferedSnapshotLike | null = null;
+    let b: BufferedSnapshotLike | null = null;
+    for (let i = 0; i < buffer.length; i += 1) {
+      const current = buffer[i];
+      if (current.serverTimeMs <= renderTimeMs) {
+        a = current;
+        continue;
+      }
+      b = current;
+      break;
+    }
+
+    if (!a) {
+      a = first;
+    }
+
+    const alive = new Set<string>();
+
+    if (!b) {
+      const extrapolationMs = Math.max(0, renderTimeMs - newest.serverTimeMs);
+      if (extrapolationMs > 0) {
+        this.recordUnderrun();
       }
 
-      if (extrapolationTicks > this.maxExtrapolationTicks) {
-        this.recordExtrapolation();
-        this.extrapolatingTicks = this.maxExtrapolationTicks;
-        this.stalled = extrapolationTicks >= this.stallAfterTicks;
-        if (this.stalled) {
-          this.recordStall();
-        }
-        this.renderFrozen(anchorSnapshot, localTgUserId, deltaMs);
-        return;
+      const clampedExtrapolationMs = Math.min(50, extrapolationMs);
+      const prev = buffer.length > 1 ? buffer[buffer.length - 2] : newest;
+
+      for (const player of newest.snapshot.players) {
+        if (localTgUserId && player.tgUserId === localTgUserId) continue;
+        alive.add(player.tgUserId);
+        const prevPlayer = prev.snapshot.players.find((candidate) => candidate.tgUserId === player.tgUserId);
+        const vx = prevPlayer ? (player.x - prevPlayer.x) / Math.max(1, newest.serverTimeMs - prev.serverTimeMs) : 0;
+        const vy = prevPlayer ? (player.y - prevPlayer.y) / Math.max(1, newest.serverTimeMs - prev.serverTimeMs) : 0;
+        this.upsertPlayer(player, { x: player.x + vx * clampedExtrapolationMs, y: player.y + vy * clampedExtrapolationMs, targetTickUsed: player.lastInputSeq }, renderTimeMs, SNAPSHOT_INTERP_MIN_MS, deltaMs, needsNetResync);
       }
 
-      this.renderFromSnapshot(anchorSnapshot, localTgUserId, deltaMs);
+      this.lateSnapshotEma += ((extrapolationMs > 0 ? 1 : 0) - this.lateSnapshotEma) * INTERP_TUNING.late.emaAlpha;
+      if (extrapolationMs > 0) this.lateSnapshotCount += 1;
+      this.destroyMissingPlayers(alive);
       return;
     }
 
-    // Normal case: segment-planned interpolation per player with fixed duration per tile step.
-    const latest = buffer[buffer.length - 1];
-    const alive = new Set<string>();
+    const span = Math.max(1, b.serverTimeMs - a.serverTimeMs);
+    const t = Phaser.Math.Clamp((renderTimeMs - a.serverTimeMs) / span, 0, 1);
+    this.lateSnapshotEma += (0 - this.lateSnapshotEma) * INTERP_TUNING.late.emaAlpha;
 
-    for (const to of latest.players) {
-      if (localTgUserId && to.tgUserId === localTgUserId) continue;
+    const byIdA = new Map(a.snapshot.players.map((player) => [player.tgUserId, player]));
+    const byIdB = new Map(b.snapshot.players.map((player) => [player.tgUserId, player]));
 
-      alive.add(to.tgUserId);
-      const target = this.getRenderTargetForPlayer(buffer, to.tgUserId, renderTick)
-        ?? { x: to.x, y: to.y, targetTickUsed: latest.tick };
-      this.upsertPlayer(to, target, renderTick, SNAPSHOT_INTERP_MIN_MS, deltaMs, needsNetResync);
+    for (const [tgUserId, to] of byIdB.entries()) {
+      if (localTgUserId && tgUserId === localTgUserId) continue;
+      alive.add(tgUserId);
+      const from = byIdA.get(tgUserId) ?? to;
+      const x = Phaser.Math.Linear(from.x, to.x, t);
+      const y = Phaser.Math.Linear(from.y, to.y, t);
+      this.upsertPlayer(to, { x, y, targetTickUsed: b.tick }, renderTimeMs, SNAPSHOT_INTERP_MIN_MS, deltaMs, needsNetResync);
     }
 
     this.destroyMissingPlayers(alive);
   }
 
-  onSnapshotBuffered(snapshotTick: number, simulationTick: number): void {
-    const playheadTick = this.renderTick >= 0 ? this.renderTick : simulationTick - this.delayTicks;
-    const isLateSnapshot = snapshotTick < playheadTick;
+  onSnapshotBuffered(snapshotTimeMs: number, renderTimeMs: number): void {
+    const playheadTick = this.renderTick >= 0 ? this.renderTick : renderTimeMs;
+    const isLateSnapshot = snapshotTimeMs < playheadTick;
 
     if (isLateSnapshot) {
       this.lateSnapshotCount += 1;

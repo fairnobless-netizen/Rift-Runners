@@ -234,6 +234,12 @@ function buildWsDebugMetrics(scene: GameScene, bombEventNetStats?: { serverTick:
     netResyncReason: routingStats.netResyncReason,
     bombInputGated: bombGate?.gated ?? true,
     bombGateReason: bombGate?.reason ?? 'unknown',
+    renderDelayMs: netInterpStats.renderDelayMs,
+    serverTimeOffsetMs: netInterpStats.serverTimeOffsetMs,
+    snapshotRateHz: netInterpStats.snapshotRateHz,
+    jitterMs: netInterpStats.jitterMs,
+    lateFrames: netInterpStats.lateFrames,
+    renderTimeMs: netInterpStats.renderTimeMs,
   };
 }
 
