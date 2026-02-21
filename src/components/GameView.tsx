@@ -317,7 +317,7 @@ export default function GameView(): JSX.Element {
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [joiningRoomCode, setJoiningRoomCode] = useState<string | null>(null);
   const [deepLinkJoinCode, setDeepLinkJoinCode] = useState<string | null>(null);
-  const [myRooms, setMyRooms] = useState<MyRoomEntry[]>([]);
+  const [, setMyRooms] = useState<MyRoomEntry[]>([]);
   const [publicRooms, setPublicRooms] = useState<PublicRoomEntry[]>([]);
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
@@ -3032,7 +3032,6 @@ export default function GameView(): JSX.Element {
         autoJoin={Boolean(deepLinkJoinCode)}
         roomsLoading={roomsLoading}
         roomsError={roomsError}
-        myRooms={myRooms}
         publicRooms={publicRooms}
         currentRoom={currentRoom}
         currentRoomMembers={currentRoomMembers}
