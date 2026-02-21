@@ -9,12 +9,13 @@ import type {
   MatchTilesDestroyed,
   MoveDir,
 } from './protocol';
-import type { MatchState, PlayerState } from './types';
+import type { EnemyState, MatchState, PlayerState } from './types';
 
 const TICK_RATE_MS = 50; // 20 Hz
 const RESPAWN_DELAY_TICKS = 24;
 const INVULN_TICKS = 20;
 const MOVE_DURATION_TICKS = 6;
+const ENEMY_HIT_COOLDOWN_TICKS = 12;
 const LOG_MOVEMENT_STATE = false;
 const LOG_EXPLOSION_DAMAGE = false;
 
@@ -52,6 +53,8 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
   }
 
   advancePlayerMovementStates(match);
+  advanceEnemyMovementStates(match);
+  processEnemyContactDamage(match, events);
 
   processBombExplosions(match, events);
   maybeEndMatch(match, events);
@@ -96,6 +99,12 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
       moveDurationMs: p.isMoving ? p.moveDurationTicks * TICK_RATE_MS : 0,
       lives: match.playerLives.get(p.tgUserId) ?? 0,
       eliminated: match.eliminatedPlayers.has(p.tgUserId),
+    })),
+    enemies: Array.from(match.enemies.values()).map((enemy) => ({
+      id: enemy.id,
+      x: enemy.x,
+      y: enemy.y,
+      alive: enemy.alive,
     })),
   };
 
@@ -155,6 +164,7 @@ function processRespawns(match: MatchState, events: MatchEvent[]): void {
     player.state = 'alive';
     player.respawnAtTick = null;
     player.invulnUntilTick = match.tick + INVULN_TICKS;
+    player.lastEnemyHitTick = Number.NEGATIVE_INFINITY;
 
     events.push({
       type: 'match:player_respawned',
@@ -220,6 +230,13 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
       });
     }
 
+    for (const enemy of match.enemies.values()) {
+      if (!enemy.alive) continue;
+      const hitEnemy = impacts.some((impact) => impact.x === enemy.x && impact.y === enemy.y);
+      if (!hitEnemy) continue;
+      enemy.alive = false;
+    }
+
     for (const player of match.players.values()) {
       if (player.state !== 'alive') continue;
       if (player.invulnUntilTick > match.tick) continue;
@@ -227,58 +244,118 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
       const hit = impacts.some((impact) => impact.x === player.x && impact.y === player.y);
       if (!hit) continue;
 
-      const prevLives = match.playerLives.get(player.tgUserId) ?? 0;
-      const nextLives = Math.max(0, prevLives - 1);
-      match.playerLives.set(player.tgUserId, nextLives);
       damagedPlayersThisTick.add(player.tgUserId);
-
-      if (LOG_EXPLOSION_DAMAGE) {
-        console.log(JSON.stringify({
-          victimId: player.tgUserId,
-          prevLives,
-          newLives: nextLives,
-          source: 'explosion',
-          tick: match.tick,
-        }));
-      }
-
-      events.push({
-        type: 'match:player_damaged',
-        roomCode: match.roomId,
-        matchId: match.matchId,
-        eventId: nextEventId(match),
-        serverTick: match.tick,
-        tick: match.tick,
-        tgUserId: player.tgUserId,
-        lives: nextLives,
-      });
-
-      if (nextLives <= 0) {
-        player.state = 'eliminated';
-        resetPlayerMovementState(player, match.tick, Date.now());
-        player.respawnAtTick = null;
-        player.invulnUntilTick = 0;
-        match.eliminatedPlayers.add(player.tgUserId);
-        events.push({
-          type: 'match:player_eliminated',
-          roomCode: match.roomId,
-          matchId: match.matchId,
-          eventId: nextEventId(match),
-          serverTick: match.tick,
-          tick: match.tick,
-          tgUserId: player.tgUserId,
-        });
-        continue;
-      }
-
-      player.state = 'dead_respawning';
-      resetPlayerMovementState(player, match.tick, Date.now());
-      player.respawnAtTick = match.tick + RESPAWN_DELAY_TICKS;
-      player.invulnUntilTick = 0;
+      applyPlayerDamage(match, player, events, 'explosion');
     }
   }
 }
 
+
+function advanceEnemyMovementStates(match: MatchState): void {
+  if (match.enemyMoveIntervalTicks <= 0) return;
+  if (match.tick % match.enemyMoveIntervalTicks !== 0) return;
+
+  for (const enemy of match.enemies.values()) {
+    if (!enemy.alive) continue;
+    const next = chooseEnemyNextCell(match, enemy);
+    if (!next) continue;
+    enemy.x = next.x;
+    enemy.y = next.y;
+  }
+}
+
+function chooseEnemyNextCell(match: MatchState, enemy: EnemyState): { x: number; y: number } | null {
+  const dirs: Array<{ dx: number; dy: number }> = [
+    { dx: 1, dy: 0 },
+    { dx: 0, dy: 1 },
+    { dx: -1, dy: 0 },
+    { dx: 0, dy: -1 },
+  ];
+  const start = enemy.id.length % dirs.length;
+
+  for (let i = 0; i < dirs.length; i += 1) {
+    const dir = dirs[(start + match.tick + i) % dirs.length];
+    const nx = enemy.x + dir.dx;
+    const ny = enemy.y + dir.dy;
+    if (!canOccupyWorldCell(match, nx, ny)) continue;
+    const occupiedByEnemy = Array.from(match.enemies.values()).some((other) => (
+      other.id !== enemy.id
+      && other.alive
+      && other.x === nx
+      && other.y === ny
+    ));
+    if (occupiedByEnemy) continue;
+    return { x: nx, y: ny };
+  }
+
+  return null;
+}
+
+function processEnemyContactDamage(match: MatchState, events: MatchEvent[]): void {
+  for (const enemy of match.enemies.values()) {
+    if (!enemy.alive) continue;
+
+    for (const player of match.players.values()) {
+      if (player.state !== 'alive') continue;
+      if (player.invulnUntilTick > match.tick) continue;
+      if (player.x !== enemy.x || player.y !== enemy.y) continue;
+      if (match.tick - player.lastEnemyHitTick < ENEMY_HIT_COOLDOWN_TICKS) continue;
+
+      player.lastEnemyHitTick = match.tick;
+      applyPlayerDamage(match, player, events, 'enemy_contact');
+    }
+  }
+}
+
+function applyPlayerDamage(match: MatchState, player: PlayerState, events: MatchEvent[], source: 'explosion' | 'enemy_contact'): void {
+  const prevLives = match.playerLives.get(player.tgUserId) ?? 0;
+  const nextLives = Math.max(0, prevLives - 1);
+  match.playerLives.set(player.tgUserId, nextLives);
+
+  if (LOG_EXPLOSION_DAMAGE) {
+    console.log(JSON.stringify({
+      victimId: player.tgUserId,
+      prevLives,
+      newLives: nextLives,
+      source,
+      tick: match.tick,
+    }));
+  }
+
+  events.push({
+    type: 'match:player_damaged',
+    roomCode: match.roomId,
+    matchId: match.matchId,
+    eventId: nextEventId(match),
+    serverTick: match.tick,
+    tick: match.tick,
+    tgUserId: player.tgUserId,
+    lives: nextLives,
+  });
+
+  if (nextLives <= 0) {
+    player.state = 'eliminated';
+    resetPlayerMovementState(player, match.tick, Date.now());
+    player.respawnAtTick = null;
+    player.invulnUntilTick = 0;
+    match.eliminatedPlayers.add(player.tgUserId);
+    events.push({
+      type: 'match:player_eliminated',
+      roomCode: match.roomId,
+      matchId: match.matchId,
+      eventId: nextEventId(match),
+      serverTick: match.tick,
+      tick: match.tick,
+      tgUserId: player.tgUserId,
+    });
+    return;
+  }
+
+  player.state = 'dead_respawning';
+  resetPlayerMovementState(player, match.tick, Date.now());
+  player.respawnAtTick = match.tick + RESPAWN_DELAY_TICKS;
+  player.invulnUntilTick = 0;
+}
 function maybeEndMatch(match: MatchState, events: MatchEvent[]): void {
   const alive = Array.from(match.players.values())
     .filter((player) => player.state !== 'eliminated')
