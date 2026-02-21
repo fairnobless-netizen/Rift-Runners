@@ -105,6 +105,15 @@ const EXTRA_LIFE_STEP_SCORE = 1000;
 const MP_RENDER_SNAP_DISTANCE_TILES = 1.5;
 const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / (1000 / 20)));
 
+type TileTweenSegment = {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  startTick: number;
+  durationTicks: number;
+};
+
 export type SceneAudioSettings = {
   musicEnabled: boolean;
   sfxEnabled: boolean;
@@ -147,15 +156,9 @@ export class GameScene extends Phaser.Scene {
   private droppedDuplicateTick = 0;
   // MP local render smoothing (server-first local movement)
   private localRenderPos: { x: number; y: number } | null = null;
-  private localSegment?: {
-    fromX: number;
-    fromY: number;
-    toX: number;
-    toY: number;
-    startTick: number;
-    durationTicks: number;
-  };
+  private localSegment?: TileTweenSegment;
   private lastLocalTarget?: { x: number; y: number };
+  private lastLocalTargetTick = -1;
   private localRenderSnapCount = 0;
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
@@ -2220,7 +2223,7 @@ export class GameScene extends Phaser.Scene {
     if (!local) return;
 
     if (this.needsNetResync) {
-      this.snapLocalRenderPosition(local.x, local.y);
+      this.snapLocalRenderPosition(local.x, local.y, local.targetTickUsed);
       return;
     }
 
@@ -2230,36 +2233,25 @@ export class GameScene extends Phaser.Scene {
 
     if (!this.lastLocalTarget) {
       this.lastLocalTarget = { x: local.x, y: local.y };
+      this.lastLocalTargetTick = local.targetTickUsed;
     }
 
-    if (local.x !== this.lastLocalTarget.x || local.y !== this.lastLocalTarget.y) {
-      this.localSegment = {
-        fromX: this.lastLocalTarget.x,
-        fromY: this.lastLocalTarget.y,
-        toX: local.x,
-        toY: local.y,
-        startTick: local.targetTickUsed,
-        durationTicks: this.getLocalStepDurationTicks(),
-      };
-      this.lastLocalTarget = { x: local.x, y: local.y };
-    }
+    this.updateLocalRenderSegment(local);
 
-    if (this.localSegment) {
-      const duration = Math.max(1, this.localSegment.durationTicks);
-      const alpha = Phaser.Math.Clamp((renderTick - this.localSegment.startTick) / duration, 0, 1);
-      this.localRenderPos.x = Phaser.Math.Linear(this.localSegment.fromX, this.localSegment.toX, alpha);
-      this.localRenderPos.y = Phaser.Math.Linear(this.localSegment.fromY, this.localSegment.toY, alpha);
-      if (alpha >= 1) {
-        this.localSegment = undefined;
-      }
-    }
+    const tweened = this.runTileTweenSegment(
+      this.localSegment,
+      this.localRenderPos,
+      renderTick,
+      this.getLocalStepDurationTicks(),
+    );
+    this.localSegment = tweened.nextSegment;
 
     const dx = local.x - this.localRenderPos.x;
     const dy = local.y - this.localRenderPos.y;
     const driftTiles = Math.hypot(dx, dy);
 
     if (driftTiles > MP_RENDER_SNAP_DISTANCE_TILES) {
-      this.snapLocalRenderPosition(local.x, local.y);
+      this.snapLocalRenderPosition(local.x, local.y, local.targetTickUsed);
       return;
     }
 
@@ -2272,6 +2264,53 @@ export class GameScene extends Phaser.Scene {
 
   private getLocalStepDurationTicks(): number {
     return MP_MOVE_TICKS_CONST;
+  }
+
+  private updateLocalRenderSegment(local: { x: number; y: number; targetTickUsed: number }): void {
+    if (!this.lastLocalTarget) {
+      this.lastLocalTarget = { x: local.x, y: local.y };
+      this.lastLocalTargetTick = local.targetTickUsed;
+      return;
+    }
+
+    if (local.x === this.lastLocalTarget.x && local.y === this.lastLocalTarget.y) {
+      return;
+    }
+
+    this.localSegment = {
+      fromX: this.lastLocalTarget.x,
+      fromY: this.lastLocalTarget.y,
+      toX: local.x,
+      toY: local.y,
+      startTick: Math.max(this.lastLocalTargetTick + 1, local.targetTickUsed),
+      durationTicks: this.getLocalStepDurationTicks(),
+    };
+    this.lastLocalTarget = { x: local.x, y: local.y };
+    this.lastLocalTargetTick = local.targetTickUsed;
+  }
+
+  private runTileTweenSegment(
+    segment: TileTweenSegment | undefined,
+    renderPos: { x: number; y: number },
+    renderTick: number,
+    durationFallbackTicks: number,
+  ): { nextSegment: TileTweenSegment | undefined } {
+    if (!segment) {
+      return { nextSegment: undefined };
+    }
+
+    const duration = Math.max(1, segment.durationTicks || durationFallbackTicks);
+    const alpha = Phaser.Math.Clamp((renderTick - segment.startTick) / duration, 0, 1);
+    renderPos.x = Phaser.Math.Linear(segment.fromX, segment.toX, alpha);
+    renderPos.y = Phaser.Math.Linear(segment.fromY, segment.toY, alpha);
+
+    if (alpha < 1) {
+      return { nextSegment: segment };
+    }
+
+    renderPos.x = segment.toX;
+    renderPos.y = segment.toY;
+    return { nextSegment: undefined };
   }
 
   private getLocalRenderTarget(localTgUserId: string, renderTick: number): { x: number; y: number; targetTickUsed: number } | null {
@@ -2295,10 +2334,11 @@ export class GameScene extends Phaser.Scene {
     return null;
   }
 
-  private snapLocalRenderPosition(x: number, y: number): void {
+  private snapLocalRenderPosition(x: number, y: number, targetTickUsed: number = -1): void {
     this.localRenderPos = { x, y };
     this.localSegment = undefined;
     this.lastLocalTarget = { x, y };
+    this.lastLocalTargetTick = targetTickUsed;
     this.localRenderSnapCount += 1;
     this.placeLocalPlayerSpriteAt(x, y);
   }
@@ -2355,6 +2395,7 @@ export class GameScene extends Phaser.Scene {
     this.localRenderPos = null;
     this.localSegment = undefined;
     this.lastLocalTarget = undefined;
+    this.lastLocalTargetTick = -1;
     this.localRenderSnapCount = 0;
     this.remotePlayers?.resetNetState?.();
   }
