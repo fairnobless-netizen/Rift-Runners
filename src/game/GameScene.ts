@@ -102,17 +102,6 @@ const TURN_BUFFER_MS = 220;
 const INITIAL_LIVES = 3;
 const MAX_LIVES = 6;
 const EXTRA_LIFE_STEP_SCORE = 1000;
-const MP_RENDER_SNAP_DISTANCE_TILES = 1.5;
-const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / (1000 / 20)));
-
-type TileTweenSegment = {
-  fromX: number;
-  fromY: number;
-  toX: number;
-  toY: number;
-  startTick: number;
-  durationTicks: number;
-};
 
 export type SceneAudioSettings = {
   musicEnabled: boolean;
@@ -126,6 +115,8 @@ export class GameScene extends Phaser.Scene {
   private accumulator = 0;
   private readonly FIXED_DT = 1000 / 20;
   private localInputQueue: Array<{ seq: number; dx: number; dy: number }> = [];
+  private mpLocalInputQueue: Array<{ seq: number; dx: number; dy: number }> = [];
+  private mpLastAppliedSeq = 0;
   private localTgUserId?: string;
   private matchGridW: number = GAME_CONFIG.gridWidth;
   private matchGridH: number = GAME_CONFIG.gridHeight;
@@ -154,11 +145,8 @@ export class GameScene extends Phaser.Scene {
   private droppedWrongRoom = 0;
   private droppedWrongMatch = 0;
   private droppedDuplicateTick = 0;
-  // MP local render smoothing (server-first local movement)
+  // MP local render state (used for hard resync snap only)
   private localRenderPos: { x: number; y: number } | null = null;
-  private localSegment?: TileTweenSegment;
-  private lastLocalTarget?: { x: number; y: number };
-  private lastLocalTargetTick = -1;
   private localRenderSnapCount = 0;
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
@@ -517,11 +505,6 @@ export class GameScene extends Phaser.Scene {
     const input = this.localInputQueue.shift();
     if (!input) return;
 
-    if (this.gameMode === 'multiplayer') {
-      // Server-first mode in multiplayer: keep sending/acking input, but do not move local grid by prediction.
-      return;
-    }
-
     this.applyLocalMove(input.dx, input.dy);
 
     // M16.2.1: record predicted state after local simulation applies the seq
@@ -850,7 +833,7 @@ export class GameScene extends Phaser.Scene {
 
   public setGameMode(mode: GameMode): void {
     this.gameMode = mode;
-    this.prediction.setServerFirstMode(mode === 'multiplayer');
+    this.prediction.setServerFirstMode(false);
     if (mode === 'multiplayer') {
       this.triggerNetResync('reset_state');
     }
@@ -1226,6 +1209,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.tryPickupItem(this.player.gridX, this.player.gridY);
+
+    if (this.gameMode === 'multiplayer') {
+      this.tryStartMpBufferedMove(time);
+      return;
+    }
 
     // Simulation remains tile-based; this only chains buffered input so render
     // interpolation does not pause/jitter at tile boundaries.
@@ -2166,7 +2154,14 @@ export class GameScene extends Phaser.Scene {
     this.prediction.pushInput(input);
     if (this.gameMode !== 'multiplayer') {
       this.enqueueLocalInput(input);
+      return;
     }
+
+    if (!this.mpLocalInputQueue.some((queued) => queued.seq === input.seq)) {
+      this.mpLocalInputQueue.push(input);
+    }
+
+    this.tryStartMpBufferedMove(this.time.now);
   }
 
   public setLocalTgUserId(id?: string) {
@@ -2178,6 +2173,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private applyLocalMove(dx: number, dy: number): boolean {
+    return this.applyPredictedLocalMoveStep(dx, dy, this.time.now);
+  }
+
+  private applyPredictedLocalMoveStep(dx: number, dy: number, timeMs: number = this.time.now): boolean {
     const nextX = this.player.gridX + dx;
     const nextY = this.player.gridY + dy;
 
@@ -2185,18 +2184,31 @@ export class GameScene extends Phaser.Scene {
       return false;
     }
 
-    const now = this.time.now;
     this.player.moveFromX = this.player.gridX;
     this.player.moveFromY = this.player.gridY;
     this.player.targetX = nextX;
     this.player.targetY = nextY;
     this.player.gridX = nextX;
     this.player.gridY = nextY;
-    this.player.moveStartedAtMs = now;
+    this.player.moveStartedAtMs = timeMs;
     this.player.moveDurationMs = scaleMovementDurationMs(GAME_CONFIG.moveDurationMs);
     this.player.isMoving = true;
     this.player.state = 'move';
     return true;
+  }
+
+  private tryStartMpBufferedMove(timeMs: number): void {
+    if (this.gameMode !== 'multiplayer') return;
+    if (this.player.isMoving || this.player.targetX !== null || this.player.targetY !== null) return;
+    if (this.mpLocalInputQueue.length === 0) return;
+
+    const input = this.mpLocalInputQueue.shift();
+    if (!input) return;
+    if (input.seq <= this.mpLastAppliedSeq) return;
+
+    this.mpLastAppliedSeq = input.seq;
+    this.applyPredictedLocalMoveStep(input.dx, input.dy, timeMs);
+    this.prediction.onLocalSimulated(input.seq, this.player.gridX, this.player.gridY);
   }
 
   private placeLocalPlayerSpriteAt(x: number, y: number) {
@@ -2216,101 +2228,18 @@ export class GameScene extends Phaser.Scene {
     if (!this.localTgUserId) return;
     if (this.snapshotBuffer.length === 0) return;
 
+    if (!this.needsNetResync) {
+      // In multiplayer predicted mode, local render comes from the same ms tween path as solo.
+      return;
+    }
+
     const delayTicks = (this.remotePlayers as any)?.getDelayTicks?.() ?? 2;
     const renderTick = simulationTick - delayTicks;
 
     const local = this.getLocalRenderTarget(this.localTgUserId, renderTick);
     if (!local) return;
 
-    if (this.needsNetResync) {
-      this.snapLocalRenderPosition(local.x, local.y, local.targetTickUsed);
-      return;
-    }
-
-    if (!this.localRenderPos) {
-      this.localRenderPos = { x: local.x, y: local.y };
-    }
-
-    if (!this.lastLocalTarget) {
-      this.lastLocalTarget = { x: local.x, y: local.y };
-      this.lastLocalTargetTick = local.targetTickUsed;
-    }
-
-    this.updateLocalRenderSegment(local);
-
-    const tweened = this.runTileTweenSegment(
-      this.localSegment,
-      this.localRenderPos,
-      renderTick,
-      this.getLocalStepDurationTicks(),
-    );
-    this.localSegment = tweened.nextSegment;
-
-    const dx = local.x - this.localRenderPos.x;
-    const dy = local.y - this.localRenderPos.y;
-    const driftTiles = Math.hypot(dx, dy);
-
-    if (driftTiles > MP_RENDER_SNAP_DISTANCE_TILES) {
-      this.snapLocalRenderPosition(local.x, local.y, local.targetTickUsed);
-      return;
-    }
-
-    const tileSize = GAME_CONFIG.tileSize;
-    this.playerSprite.setPosition(
-      this.localRenderPos.x * tileSize + tileSize / 2,
-      this.localRenderPos.y * tileSize + tileSize / 2,
-    );
-  }
-
-  private getLocalStepDurationTicks(): number {
-    return MP_MOVE_TICKS_CONST;
-  }
-
-  private updateLocalRenderSegment(local: { x: number; y: number; targetTickUsed: number }): void {
-    if (!this.lastLocalTarget) {
-      this.lastLocalTarget = { x: local.x, y: local.y };
-      this.lastLocalTargetTick = local.targetTickUsed;
-      return;
-    }
-
-    if (local.x === this.lastLocalTarget.x && local.y === this.lastLocalTarget.y) {
-      return;
-    }
-
-    this.localSegment = {
-      fromX: this.lastLocalTarget.x,
-      fromY: this.lastLocalTarget.y,
-      toX: local.x,
-      toY: local.y,
-      startTick: Math.max(this.lastLocalTargetTick + 1, local.targetTickUsed),
-      durationTicks: this.getLocalStepDurationTicks(),
-    };
-    this.lastLocalTarget = { x: local.x, y: local.y };
-    this.lastLocalTargetTick = local.targetTickUsed;
-  }
-
-  private runTileTweenSegment(
-    segment: TileTweenSegment | undefined,
-    renderPos: { x: number; y: number },
-    renderTick: number,
-    durationFallbackTicks: number,
-  ): { nextSegment: TileTweenSegment | undefined } {
-    if (!segment) {
-      return { nextSegment: undefined };
-    }
-
-    const duration = Math.max(1, segment.durationTicks || durationFallbackTicks);
-    const alpha = Phaser.Math.Clamp((renderTick - segment.startTick) / duration, 0, 1);
-    renderPos.x = Phaser.Math.Linear(segment.fromX, segment.toX, alpha);
-    renderPos.y = Phaser.Math.Linear(segment.fromY, segment.toY, alpha);
-
-    if (alpha < 1) {
-      return { nextSegment: segment };
-    }
-
-    renderPos.x = segment.toX;
-    renderPos.y = segment.toY;
-    return { nextSegment: undefined };
+    this.snapLocalRenderPosition(local.x, local.y, local.targetTickUsed);
   }
 
   private getLocalRenderTarget(localTgUserId: string, renderTick: number): { x: number; y: number; targetTickUsed: number } | null {
@@ -2334,11 +2263,8 @@ export class GameScene extends Phaser.Scene {
     return null;
   }
 
-  private snapLocalRenderPosition(x: number, y: number, targetTickUsed: number = -1): void {
+  private snapLocalRenderPosition(x: number, y: number, _targetTickUsed: number = -1): void {
     this.localRenderPos = { x, y };
-    this.localSegment = undefined;
-    this.lastLocalTarget = { x, y };
-    this.lastLocalTargetTick = targetTickUsed;
     this.localRenderSnapCount += 1;
     this.placeLocalPlayerSpriteAt(x, y);
   }
@@ -2357,14 +2283,7 @@ export class GameScene extends Phaser.Scene {
     this.player.moveDurationMs = 0;
     this.player.moveStartedAtMs = 0;
 
-    if (this.gameMode !== 'multiplayer') {
-      this.placeLocalPlayerSpriteAt(x, y);
-      return;
-    }
-
-    if (!this.localRenderPos) {
-      this.placeLocalPlayerSpriteAt(x, y);
-    }
+    this.placeLocalPlayerSpriteAt(x, y);
   }
 
 
@@ -2388,14 +2307,13 @@ export class GameScene extends Phaser.Scene {
     this.lastSnapshotTick = -1;
     this.lastAppliedSnapshotTick = -1;
     this.localInputQueue = [];
+    this.mpLocalInputQueue = [];
+    this.mpLastAppliedSeq = 0;
     this.inputSeq = 0;
     this.accumulator = 0;
     this.prediction.reset?.();
     this.worldReady = false;
     this.localRenderPos = null;
-    this.localSegment = undefined;
-    this.lastLocalTarget = undefined;
-    this.lastLocalTargetTick = -1;
     this.localRenderSnapCount = 0;
     this.remotePlayers?.resetNetState?.();
   }
@@ -2503,21 +2421,25 @@ export class GameScene extends Phaser.Scene {
       this.setLocalPlayerPosition(me.x, me.y);
       this.snapLocalRenderPosition(me.x, me.y);
       this.prediction.reset?.();
-      this.prediction.setServerFirstMode(this.gameMode === 'multiplayer');
+      this.prediction.setServerFirstMode(false);
+      this.mpLocalInputQueue = [];
+      this.mpLastAppliedSeq = me.lastInputSeq;
       return;
     }
 
-    // Multiplayer local player is server-first: authoritative position from snapshots only.
-    this.setLocalPlayerPosition(me.x, me.y);
     this.prediction.reconcile({
       serverX: me.x,
       serverY: me.y,
       localX,
       localY,
       lastInputSeq: me.lastInputSeq,
-      setPosition: () => undefined,
-      applyMove: () => undefined,
+      setPosition: (x, y) => this.setLocalPlayerPosition(x, y),
+      applyMove: (dx, dy) => this.applyPredictedLocalMoveStep(dx, dy),
     });
+
+    this.mpLocalInputQueue = this.mpLocalInputQueue.filter((queued) => queued.seq > me.lastInputSeq);
+    this.mpLastAppliedSeq = Math.max(this.mpLastAppliedSeq, me.lastInputSeq);
+    this.tryStartMpBufferedMove(this.time.now);
   }
 
 
