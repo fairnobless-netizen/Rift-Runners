@@ -426,7 +426,7 @@ function applyPlayerDamage(match: MatchState, player: PlayerState, events: Match
 }
 function maybeEndMatch(match: MatchState, events: MatchEvent[]): void {
   const alive = Array.from(match.players.values())
-    .filter((player) => player.state !== 'eliminated' && !match.disconnectedPlayers.has(player.tgUserId))
+    .filter((player) => player.state !== 'eliminated')
     .map((player) => player.tgUserId);
   if (alive.length > 1) return;
 
