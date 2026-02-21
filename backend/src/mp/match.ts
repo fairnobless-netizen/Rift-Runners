@@ -18,6 +18,7 @@ const MOVE_DURATION_TICKS = 6;
 const ENEMY_HIT_COOLDOWN_TICKS = 12;
 const LOG_MOVEMENT_STATE = false;
 const LOG_EXPLOSION_DAMAGE = false;
+export const REJOIN_GRACE_MS = 60_000;
 
 type MatchEvent = MatchBombSpawned | MatchBombExploded | MatchTilesDestroyed | MatchPlayerDamaged | MatchPlayerRespawned | MatchPlayerEliminated | MatchEnd;
 
@@ -38,6 +39,7 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
 
   const events: MatchEvent[] = [];
 
+  pruneExpiredDisconnectedPlayers(match);
   processRespawns(match, events);
 
   while (match.inputQueue.length > 0) {
@@ -118,18 +120,64 @@ export function markPlayerDisconnected(match: MatchState, tgUserId: string): boo
   if (!player) return false;
 
   match.disconnectedPlayers.add(tgUserId);
-  if (player.state !== 'eliminated') {
+  match.disconnectedAtMsByUserId.set(tgUserId, Date.now());
+  match.inputQueue = match.inputQueue.filter((entry) => entry.tgUserId !== tgUserId);
+  return true;
+}
+
+export function isPlayerRejoinable(match: MatchState, tgUserId: string, nowMs = Date.now()): boolean {
+  if (!match.disconnectedPlayers.has(tgUserId)) {
+    return false;
+  }
+
+  const disconnectedAtMs = match.disconnectedAtMsByUserId.get(tgUserId);
+  if (typeof disconnectedAtMs !== 'number') {
+    return false;
+  }
+
+  return nowMs - disconnectedAtMs <= REJOIN_GRACE_MS;
+}
+
+export function markPlayerReconnected(match: MatchState, tgUserId: string): boolean {
+  if (!match.players.has(tgUserId)) {
+    return false;
+  }
+
+  const hadDisconnected = match.disconnectedPlayers.delete(tgUserId);
+  match.disconnectedAtMsByUserId.delete(tgUserId);
+  return hadDisconnected;
+}
+
+export function pruneExpiredDisconnectedPlayers(match: MatchState, nowMs = Date.now()): string[] {
+  const expired: string[] = [];
+
+  for (const tgUserId of match.disconnectedPlayers) {
+    if (isPlayerRejoinable(match, tgUserId, nowMs)) {
+      continue;
+    }
+
+    expired.push(tgUserId);
+    match.disconnectedPlayers.delete(tgUserId);
+    match.disconnectedAtMsByUserId.delete(tgUserId);
+
+    const player = match.players.get(tgUserId);
+    if (!player || player.state === 'eliminated') {
+      continue;
+    }
+
     player.state = 'eliminated';
-    resetPlayerMovementState(player, match.tick, Date.now());
+    resetPlayerMovementState(player, match.tick, nowMs);
     player.respawnAtTick = null;
     player.invulnUntilTick = 0;
     match.eliminatedPlayers.add(tgUserId);
     match.playerLives.set(tgUserId, 0);
+
   }
 
-  match.inputQueue = match.inputQueue.filter((entry) => entry.tgUserId !== tgUserId);
-  return true;
+  return expired;
 }
+
+
 
 export function tryPlaceBomb(match: MatchState, tgUserId: string, x: number, y: number): MatchBombSpawned | null {
   const player = match.players.get(tgUserId);
@@ -378,7 +426,7 @@ function applyPlayerDamage(match: MatchState, player: PlayerState, events: Match
 }
 function maybeEndMatch(match: MatchState, events: MatchEvent[]): void {
   const alive = Array.from(match.players.values())
-    .filter((player) => player.state !== 'eliminated')
+    .filter((player) => player.state !== 'eliminated' && !match.disconnectedPlayers.has(player.tgUserId))
     .map((player) => player.tgUserId);
   if (alive.length > 1) return;
 

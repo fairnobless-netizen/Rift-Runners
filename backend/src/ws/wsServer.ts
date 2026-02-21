@@ -4,7 +4,7 @@ import type { RawData, Server as WebSocketServer } from 'ws';
 
 import type { MatchClientMessage, MatchServerMessage } from '../mp/protocol';
 import type { MatchState } from '../mp/types';
-import { markPlayerDisconnected, startMatch, tryPlaceBomb } from '../mp/match';
+import { isPlayerRejoinable, markPlayerDisconnected, markPlayerReconnected, startMatch, tryPlaceBomb } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 
 // ✅ add DB cleanup
@@ -57,6 +57,22 @@ const roomRegistry = new RoomRegistry();
 
 const STALE_CONNECTION_MS = 60_000;
 const INACTIVE_ROOM_MS = 90_000;
+
+
+function roomHasRejoinablePlayer(roomId: string, nowMs = Date.now()): boolean {
+  const roomMatch = getMatchByRoom(roomId);
+  if (!roomMatch) {
+    return false;
+  }
+
+  for (const tgUserId of roomMatch.disconnectedPlayers) {
+    if (isPlayerRejoinable(roomMatch, tgUserId, nowMs)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 async function finalizeAndDeleteRoom(roomId: string) {
   logWsEvent('ws_room_auto_cleanup_start', { roomId });
@@ -125,6 +141,10 @@ setInterval(() => {
   for (const roomId of sweep.removableRoomIds) {
     const room = rooms.get(roomId);
     if (room && room.players.size > 0) {
+      continue;
+    }
+
+    if (roomHasRejoinablePlayer(roomId, now)) {
       continue;
     }
 
@@ -503,7 +523,7 @@ async function handlePlayerLeftInActiveMatch(roomId: string, tgUserId: string): 
     return;
   }
 
-  logWsEvent('ws_player_left_match', {
+  logWsEvent('ws_player_marked_disconnected', {
     roomId,
     matchId: match.matchId,
     tgUserId,
@@ -518,6 +538,7 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
   const roomId = ctx.roomId;
   const leavingTgUserId = ctx.tgUserId;
   const room = rooms.get(roomId);
+  let keepRoomForRejoin = false;
   if (room) {
     room.players.delete(leavingTgUserId);
 
@@ -531,11 +552,18 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
     }
 
     if (room.players.size === 0) {
-      void finalizeAndDeleteRoom(room.roomId);
+      if (roomHasRejoinablePlayer(room.roomId)) {
+        keepRoomForRejoin = true;
+      } else {
+        void finalizeAndDeleteRoom(room.roomId);
+      }
     }
   }
 
   roomRegistry.detachConnection(ctx.connectionId);
+  if (keepRoomForRejoin) {
+    roomRegistry.ensureRoom(roomId);
+  }
 
   ctx.roomId = null;
   ctx.matchId = null;
@@ -600,19 +628,40 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
       }
 
-      if (String(dbRoom.phase ?? 'LOBBY') !== 'LOBBY') {
+      const roomPhase = String(dbRoom.phase ?? 'LOBBY');
+      const activeMatch = getMatchByRoom(msg.roomId);
+      const isStartedPhase = roomPhase === 'STARTED';
+      const canRejoinStarted = activeMatch !== null
+        && isStartedPhase
+        && activeMatch.players.has(ctx.tgUserId)
+        && isPlayerRejoinable(activeMatch, ctx.tgUserId);
+
+      if (roomPhase !== 'LOBBY' && !canRejoinStarted) {
         roomRegistry.markStarted(msg.roomId);
         return send(ctx.socket, { type: 'match:error', error: 'room_started' });
       }
 
       attachClientToRoom(ctx, msg.roomId);
+      if (activeMatch && roomPhase === 'STARTED') {
+        markPlayerReconnected(activeMatch, ctx.tgUserId);
+        const room = getRoom(msg.roomId);
+        if (room) {
+          room.matchId = activeMatch.matchId;
+        }
+        ctx.matchId = activeMatch.matchId;
+      }
       sendRejoinSyncIfActiveMatch(ctx, msg.roomId);
       return;
     }
 
 
     case 'room:leave': {
+      const roomCode = ctx.roomId;
+      const tgUserId = ctx.tgUserId;
       detachClientFromRoom(ctx, 'intentional_leave');
+      if (roomCode) {
+        void detachClientFromRoomDb(roomCode, tgUserId);
+      }
       return;
     }
 
@@ -1021,9 +1070,6 @@ export function registerWsHandlers(wss: WebSocketServer) {
       detachClientFromRoom(ctx, 'disconnect');
       clients.delete(ctx);
 
-      if (roomCode) {
-        void detachClientFromRoomDb(roomCode, tgUserId);
-      }
     });
   });
 }

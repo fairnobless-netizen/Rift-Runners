@@ -46,6 +46,7 @@ export type MatchState = {
 
   players: Map<string, PlayerState>;
   disconnectedPlayers: Set<string>;
+  disconnectedAtMsByUserId: Map<string, number>;
   playerLives: Map<string, number>;
   eliminatedPlayers: Set<string>;
 

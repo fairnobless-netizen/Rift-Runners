@@ -69,6 +69,7 @@ import { useWsClient } from '../ws/useWsClient';
 import type { WsDebugMetrics } from '../ws/wsTypes';
 import { resolveDevIdentity } from '../utils/devIdentity';
 import { API_BASE, apiUrl } from '../utils/apiBase';
+import { canResumeSession, clearLastSession, loadLastSession, saveLastSession } from '../utils/sessionStorage';
 import { RROverlayModal } from './RROverlayModal';
 import { MultiplayerModal } from './MultiplayerModal';
 import { isDebugEnabled } from '../debug/debugFlags';
@@ -342,6 +343,7 @@ export default function GameView(): JSX.Element {
   const processedWsMessagesRef = useRef(0);
 
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
+  const resumePromptShownRef = useRef(false);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
@@ -1098,6 +1100,7 @@ export default function GameView(): JSX.Element {
       processedWsMessagesRef.current = 0;
     }
   }, [currentRoom?.roomCode]);
+
 
   useEffect(() => {
     if (!ws.connected || !currentRoom?.roomCode || !localTgUserId) return;
@@ -1964,6 +1967,36 @@ export default function GameView(): JSX.Element {
     }
   }, [currentRoom?.roomCode, isMultiplayerDebugEnabled, joiningRoomCode]);
 
+  useEffect(() => {
+    if (currentRoom?.roomCode) {
+      saveLastSession({ roomCode: currentRoom.roomCode, lastActivityAtMs: Date.now() });
+      return;
+    }
+
+    if (!ws.connected || resumePromptShownRef.current) {
+      return;
+    }
+
+    const lastSession = loadLastSession();
+    if (!lastSession) {
+      return;
+    }
+
+    if (!canResumeSession(lastSession)) {
+      clearLastSession();
+      return;
+    }
+
+    resumePromptShownRef.current = true;
+    const shouldResume = window.confirm('Return to previous game?');
+    if (!shouldResume) {
+      clearLastSession();
+      return;
+    }
+
+    void joinRoomByCode(lastSession.roomCode);
+  }, [currentRoom?.roomCode, joinRoomByCode, ws.connected]);
+
   const onCreateRoom = useCallback(async (capacity: 2 | 3 | 4): Promise<void> => {
     setRoomsError(null);
     if (isMultiplayerDebugEnabled) diagnosticsStore.log('UI', 'INFO', 'onCreateRoom:start', { capacity });
@@ -1981,6 +2014,7 @@ export default function GameView(): JSX.Element {
 
   const clearMultiplayerSessionState = useCallback((): void => {
     ws.send({ type: 'room:leave' });
+    clearLastSession();
     setMultiplayerUiOpen(false);
     setDeepLinkJoinCode(null);
     setCurrentRoom(null);
@@ -2006,6 +2040,7 @@ export default function GameView(): JSX.Element {
   const onLeaveMultiplayerMatch = useCallback(async (): Promise<void> => {
     const roomCode = currentRoom?.roomCode;
     clearMultiplayerSessionState();
+    clearLastSession();
 
     if (roomCode) {
       try {
@@ -2036,6 +2071,7 @@ export default function GameView(): JSX.Element {
     }
 
     ws.send({ type: 'room:leave' });
+    clearLastSession();
     setCurrentRoom(null);
     setCurrentRoomMembers([]);
     setCurrentMatchId(null);
@@ -2062,6 +2098,7 @@ export default function GameView(): JSX.Element {
     }
 
     ws.send({ type: 'room:leave' });
+    clearLastSession();
     setCurrentRoom(null);
     setCurrentRoomMembers([]);
     setCurrentMatchId(null);
