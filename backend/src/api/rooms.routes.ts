@@ -59,6 +59,7 @@ roomsRouter.post('/:code/join', async (req, res) => {
   } catch (error: any) {
     if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });
     if (error?.code === 'ROOM_FULL') return res.status(409).json({ ok: false, error: 'room_full' });
+    if (error?.code === 'ROOM_STARTED') return res.status(409).json({ ok: false, error: 'room_started' });
     if (error?.code === 'WRONG_PASSWORD') return res.status(403).json({ ok: false, error: 'wrong_password' });
     return res.status(500).json({ ok: false, error: 'internal_error' });
   }

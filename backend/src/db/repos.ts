@@ -1933,6 +1933,7 @@ export async function listPublicRooms(query?: string): Promise<RoomModel[]> {
     LEFT JOIN room_members rm ON rm.room_code = r.room_code
     WHERE r.status = 'OPEN'
       AND r.is_public = TRUE
+      AND COALESCE(r.phase, 'LOBBY') <> 'STARTED'
       AND (
         $1 = ''
         OR LOWER(COALESCE(r.name, '')) LIKE $2
@@ -1968,8 +1969,8 @@ export async function joinRoomWithPassword(params: { tgUserId: string; roomCode:
   try {
     await client.query('BEGIN');
 
-    const roomRes = await client.query<{ room_code: string; capacity: number; has_password: boolean; password_hash: string | null; password_salt: string | null; status: string }>(
-      `SELECT room_code, capacity, has_password, password_hash, password_salt, status FROM rooms WHERE room_code = $1 FOR UPDATE`,
+    const roomRes = await client.query<{ room_code: string; capacity: number; has_password: boolean; password_hash: string | null; password_salt: string | null; status: string; phase: string | null }>(
+      `SELECT room_code, capacity, has_password, password_hash, password_salt, status, phase FROM rooms WHERE room_code = $1 FOR UPDATE`,
       [normalizedCode],
     );
     const room = roomRes.rows[0];
@@ -1977,6 +1978,12 @@ export async function joinRoomWithPassword(params: { tgUserId: string; roomCode:
     if (!room || String(room.status) !== 'OPEN') {
       const error = new Error('room_not_found');
       (error as any).code = 'ROOM_NOT_FOUND';
+      throw error;
+    }
+
+    if (String(room.phase ?? 'LOBBY') === 'STARTED') {
+      const error = new Error('room_started');
+      (error as any).code = 'ROOM_STARTED';
       throw error;
     }
 
@@ -2031,6 +2038,16 @@ export async function joinRoomWithPassword(params: { tgUserId: string; roomCode:
     throw error;
   }
   return roomModel;
+}
+
+export async function removeRoomCascade(roomCode: string): Promise<void> {
+  const normalizedCode = String(roomCode ?? '').trim().toUpperCase();
+  if (!normalizedCode) {
+    return;
+  }
+
+  await pgQuery(`DELETE FROM room_members WHERE room_code = $1`, [normalizedCode]);
+  await pgQuery(`DELETE FROM rooms WHERE room_code = $1`, [normalizedCode]);
 }
 
 export async function leaveRoomV2(params: { tgUserId: string; roomCode: string }): Promise<void> {

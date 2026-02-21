@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import type { RawData, Server as WebSocketServer } from 'ws';
 
@@ -7,9 +8,11 @@ import { startMatch, tryPlaceBomb } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 
 // ✅ add DB cleanup
-import { closeRoomTx, getRoomByCode, leaveRoomV2, setRoomPhase } from '../db/repos';
+import { closeRoomTx, getRoomByCode, leaveRoomV2, removeRoomCascade, setRoomPhase } from '../db/repos';
+import { RoomRegistry } from './roomRegistry';
 
 type ClientCtx = {
+  connectionId: string;
   socket: WebSocket;
   tgUserId: string;
   roomId: string | null; // (roomCode)
@@ -50,15 +53,49 @@ type ServerMessage =
 const rooms = new Map<string, RoomState>();
 const clients = new Set<ClientCtx>();
 const restartVotes = new Map<string, RestartVoteState>();
+const roomRegistry = new RoomRegistry();
+
+const STALE_CONNECTION_MS = 60_000;
+const INACTIVE_ROOM_MS = 90_000;
+
+async function cleanupRoomLifecycle(roomId: string) {
+  const room = rooms.get(roomId);
+  if (room?.matchId) {
+    endMatch(room.matchId);
+  }
+
+  rooms.delete(roomId);
+  restartVotes.delete(roomId);
+  try {
+    await removeRoomCascade(roomId);
+  } catch {}
+}
 
 setInterval(() => {
   const now = Date.now();
-  for (const c of clients) {
-    if (now - c.lastSeenMs > 60_000) {
+  const sweep = roomRegistry.sweep({
+    nowMs: now,
+    staleConnectionMs: STALE_CONNECTION_MS,
+    inactiveRoomMs: INACTIVE_ROOM_MS,
+  });
+
+  for (const connectionId of sweep.staleConnectionIds) {
+    for (const c of clients) {
+      if (c.connectionId !== connectionId) continue;
       try {
         c.socket.terminate();
       } catch {}
+      break;
     }
+  }
+
+  for (const roomId of sweep.removableRoomIds) {
+    const room = rooms.get(roomId);
+    if (room && room.players.size > 0) {
+      continue;
+    }
+
+    void cleanupRoomLifecycle(roomId);
   }
 }, 10_000);
 
@@ -306,6 +343,7 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
   }
 
   const room = getOrCreateRoom(roomId);
+  roomRegistry.ensureRoom(roomId);
 
   for (const [tgUserId, socket] of room.players.entries()) {
     if (socket === ctx.socket && tgUserId !== ctx.tgUserId) {
@@ -315,6 +353,7 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
   }
 
   room.players.set(ctx.tgUserId, ctx.socket);
+  roomRegistry.touchConnection(roomId, ctx.connectionId);
 
   const roomMatch = getMatchByRoom(roomId);
   room.matchId = roomMatch?.matchId ?? null;
@@ -434,12 +473,11 @@ function detachClientFromRoom(ctx: ClientCtx) {
     }
 
     if (room.players.size === 0) {
-      if (room.matchId) {
-        endMatch(room.matchId);
-      }
-      rooms.delete(room.roomId);
+      void cleanupRoomLifecycle(room.roomId);
     }
   }
+
+  roomRegistry.detachConnection(ctx.connectionId);
 
   ctx.roomId = null;
   ctx.matchId = null;
@@ -496,6 +534,16 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         ctx.tgUserId = msg.tgUserId;
       }
 
+      const dbRoom = await getRoomByCode(msg.roomId);
+      if (!dbRoom) {
+        return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
+      }
+
+      if (String(dbRoom.phase ?? 'LOBBY') === 'STARTED') {
+        roomRegistry.markStarted(msg.roomId);
+        return send(ctx.socket, { type: 'match:error', error: 'room_started' });
+      }
+
       attachClientToRoom(ctx, msg.roomId);
       sendRejoinSyncIfActiveMatch(ctx, msg.roomId);
       return;
@@ -540,6 +588,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       room.matchId = match.matchId;
       clearRestartVote(room.roomId);
       await setRoomPhase(room.roomId, 'STARTED');
+      roomRegistry.markStarted(room.roomId);
 
       for (const client of clients) {
         if (client.roomId === room.roomId && isSocketAttachedToRoom(client, room)) {
@@ -597,6 +646,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
           if (event.type === 'match:end') {
             void setRoomPhase(activeRoom.roomId, 'FINISHED');
+            roomRegistry.markLobby(activeRoom.roomId);
           }
 
           broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
@@ -805,6 +855,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       });
 
       await setRoomPhase(room.roomId, 'STARTED');
+      roomRegistry.markStarted(room.roomId);
 
       const players = Array.from(room.players.keys());
       const match = createMatch(room.roomId, players);
@@ -850,6 +901,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         for (const event of events) {
           if (event.type === 'match:end') {
             void setRoomPhase(activeRoom.roomId, 'FINISHED');
+            roomRegistry.markLobby(activeRoom.roomId);
           }
           broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
         }
@@ -878,6 +930,7 @@ export function registerWsHandlers(wss: WebSocketServer) {
     const tgUserId = url.searchParams.get('tgUserId') ?? `guest_${Math.random().toString(36).slice(2, 10)}`;
 
     const ctx: ClientCtx = {
+      connectionId: randomUUID(),
       socket,
       tgUserId,
       roomId: null,
@@ -899,6 +952,7 @@ export function registerWsHandlers(wss: WebSocketServer) {
         return;
       }
       ctx.lastSeenMs = Date.now();
+      roomRegistry.heartbeat(ctx.connectionId, ctx.lastSeenMs);
       void handleMessage(ctx, msg);
     });
 
