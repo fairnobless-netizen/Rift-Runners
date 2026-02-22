@@ -358,6 +358,7 @@ export default function GameView(): JSX.Element {
   const resumePromptShownRef = useRef(false);
   const resumeRoomCodeRef = useRef<string | null>(null);
   const resumeExpectedMatchIdRef = useRef<string | null>(null);
+  const rejoinAttemptIdRef = useRef<string | null>(null);
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
 
@@ -366,6 +367,7 @@ export default function GameView(): JSX.Element {
     setRejoinPhase(nextPhase);
     resumeRoomCodeRef.current = null;
     resumeExpectedMatchIdRef.current = null;
+    rejoinAttemptIdRef.current = null;
   }, []);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
@@ -1162,6 +1164,8 @@ export default function GameView(): JSX.Element {
       setMultiplayerLivesByUserId({});
       setMultiplayerDisconnectedByUserId({});
       handledMatchEventIdsRef.current.clear();
+      rejoinAttemptIdRef.current = null;
+      setRejoinPhase('idle');
       sceneRef.current?.resetMultiplayerNetState();
     }
   }, [ws.connected]);
@@ -1176,6 +1180,12 @@ export default function GameView(): JSX.Element {
 
     const expectedRoomCode = expectedRoomCodeRef.current;
     if (!expectedRoomCode || lastAck.roomCode !== expectedRoomCode) {
+      diagnosticsStore.log('ROOM', 'WARN', 'rejoin:drop_ack_room_mismatch', {
+        expectedRoomCode,
+        gotRoomCode: lastAck.roomCode ?? null,
+        gotMatchId: lastAck.matchId ?? null,
+        gotAttemptId: lastAck.rejoinAttemptId ?? null,
+      });
       return;
     }
 
@@ -1186,6 +1196,7 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    rejoinAttemptIdRef.current = lastAck.rejoinAttemptId;
     setRejoinPhase('rejoin_resetting');
     expectedMatchIdRef.current = lastAck.matchId;
     setCurrentMatchId(lastAck.matchId);
@@ -1197,15 +1208,26 @@ export default function GameView(): JSX.Element {
     sceneRef.current?.setActiveMultiplayerSession(lastAck.roomCode, lastAck.matchId);
     sceneRef.current?.resetMultiplayerNetState();
 
-    ws.send({ type: 'mp:rejoin_ready', roomCode: lastAck.roomCode, matchId: lastAck.matchId }, {
+    ws.send({
+      type: 'mp:rejoin_ready',
+      roomCode: lastAck.roomCode,
+      matchId: lastAck.matchId,
+      rejoinAttemptId: lastAck.rejoinAttemptId,
+    }, {
       roomCode: lastAck.roomCode,
       expectedMatchId: lastAck.matchId,
     });
 
-    diagnosticsStore.log('ROOM', 'INFO', 'rejoin:ready_sent', {
+    diagnosticsStore.log('ROOM', 'INFO', 'rejoin:ack', {
       roomCode: lastAck.roomCode,
       matchId: lastAck.matchId,
       serverTime: lastAck.serverTime,
+      attemptId: lastAck.rejoinAttemptId,
+    });
+    diagnosticsStore.log('ROOM', 'INFO', 'rejoin:ready_sent', {
+      roomCode: lastAck.roomCode,
+      matchId: lastAck.matchId,
+      attemptId: lastAck.rejoinAttemptId,
     });
 
     setRejoinPhase('rejoin_ready');
@@ -1465,6 +1487,15 @@ export default function GameView(): JSX.Element {
     const scene = sceneRef.current;
     if (!scene) return;
 
+    if (resumeJoinInProgress && rejoinPhase === 'rejoin_wait_ack') {
+      diagnosticsStore.log('ROOM', 'WARN', 'rejoin:drop_world_init_wait_ack', {
+        roomCode: gotRoomCode,
+        matchId: gotMatchId,
+        rejoinPhase,
+      });
+      return;
+    }
+
     if (resumeJoinInProgress && !(rejoinPhase === 'rejoin_ready' || rejoinPhase === 'rejoin_applying')) {
       diagnosticsStore.log('ROOM', 'WARN', 'rejoin:drop_world_init_not_ready', {
         roomCode: gotRoomCode,
@@ -1500,7 +1531,11 @@ export default function GameView(): JSX.Element {
       if (resumeJoinInProgress) {
         setResumeJoinInProgress(false);
         setRejoinPhase('rejoin_complete');
-        ws.send({ type: 'mp:snapshot_applied', matchId: pendingSnapshot.matchId }, { roomCode: pendingSnapshot.roomCode, expectedMatchId: pendingSnapshot.matchId });
+        ws.send({
+          type: 'mp:snapshot_applied',
+          matchId: pendingSnapshot.matchId,
+          rejoinAttemptId: rejoinAttemptIdRef.current ?? undefined,
+        }, { roomCode: pendingSnapshot.roomCode, expectedMatchId: pendingSnapshot.matchId });
       }
       diagnosticsStore.log('ROOM', 'INFO', 'snapshot:applied_pending_after_world_init', {
         roomCode: pendingSnapshot.roomCode ?? null,
@@ -1561,6 +1596,17 @@ export default function GameView(): JSX.Element {
         expectedRoomCode,
         gotRoomCode,
         gotMatchId,
+        snapTick: snapshot.tick ?? null,
+      });
+      return;
+    }
+
+    if (resumeJoinInProgress && rejoinPhase === 'rejoin_wait_ack') {
+      diagnosticsStore.log('ROOM', 'WARN', 'rejoin:drop_snapshot_wait_ack', {
+        expectedRoomCode,
+        gotRoomCode,
+        gotMatchId,
+        rejoinPhase,
         snapTick: snapshot.tick ?? null,
       });
       return;
@@ -1644,7 +1690,11 @@ export default function GameView(): JSX.Element {
     scene.applyMatchSnapshot(snapshot, localTgUserId);
     if (resumeJoinInProgress) {
       resetResumeAttemptState('rejoin_complete');
-      ws.send({ type: 'mp:snapshot_applied', matchId: snapshot.matchId }, { roomCode: snapshot.roomCode, expectedMatchId: snapshot.matchId });
+      ws.send({
+        type: 'mp:snapshot_applied',
+        matchId: snapshot.matchId,
+        rejoinAttemptId: rejoinAttemptIdRef.current ?? undefined,
+      }, { roomCode: snapshot.roomCode, expectedMatchId: snapshot.matchId });
     }
     firstSnapshotReadyRef.current = true;
     lastAppliedSnapshotTickRef.current = snapshot.tick;
