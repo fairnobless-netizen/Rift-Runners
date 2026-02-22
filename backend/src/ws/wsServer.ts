@@ -633,6 +633,21 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
   const leavingTgUserId = ctx.tgUserId;
   const room = rooms.get(roomId);
   let keepRoomForRejoin = false;
+
+  if (reason === 'disconnect' && room?.matchId) {
+    const match = getMatch(room.matchId);
+    if (match && match.roomId === roomId) {
+      const changed = markPlayerDisconnected(match, leavingTgUserId);
+      if (changed) {
+        logWsEvent('ws_player_marked_disconnected', {
+          roomId,
+          matchId: match.matchId,
+          tgUserId: leavingTgUserId,
+        });
+      }
+    }
+  }
+
   if (room) {
     room.players.delete(leavingTgUserId);
 
