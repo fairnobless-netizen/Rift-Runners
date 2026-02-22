@@ -356,7 +356,7 @@ export default function GameView(): JSX.Element {
   const processedWsMessagesRef = useRef(0);
 
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
-  const appBootAtRef = useRef<number>(Date.now());
+  const authReadyAtRef = useRef<number | null>(null);
   const userInteractedRef = useRef(false);
   const resumePromptShownRef = useRef(false);
   const pendingResumeIntentRef = useRef<{ roomCode: string; matchId: string | null } | null>(null);
@@ -1177,6 +1177,14 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     sceneRef.current?.setLocalTgUserId(localTgUserId);
+  }, [localTgUserId]);
+
+  useEffect(() => {
+    if (!localTgUserId || authReadyAtRef.current != null) {
+      return;
+    }
+
+    authReadyAtRef.current = Date.now();
   }, [localTgUserId]);
 
   useEffect(() => {
@@ -2393,14 +2401,21 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    if (Date.now() - appBootAtRef.current >= 8000) {
+    if (authReadyAtRef.current == null) {
+      return;
+    }
+
+    if (Date.now() - authReadyAtRef.current >= 30_000) {
       if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_outside_startup_window');
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_outside_auth_window');
       }
       return;
     }
 
     if (multiplayerUiOpen) {
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_multiplayer_ui_open');
+      }
       return;
     }
 
