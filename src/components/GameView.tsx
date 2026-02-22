@@ -343,6 +343,7 @@ export default function GameView(): JSX.Element {
   const expectedMatchIdRef = useRef<string | null>(null);
   const worldReadyRef = useRef(false);
   const firstSnapshotReadyRef = useRef(false);
+  const pendingWorldInitRef = useRef<MatchWorldInitMessage | null>(null);
   const pendingSnapshotRef = useRef<MatchSnapshotMessage['snapshot'] | null>(null);
   const lastAppliedSnapshotTickRef = useRef<number | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -1108,6 +1109,7 @@ export default function GameView(): JSX.Element {
       expectedMatchIdRef.current = null;
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
+      pendingWorldInitRef.current = null;
       pendingSnapshotRef.current = null;
       lastAppliedSnapshotTickRef.current = null;
       setCurrentMatchId(null);
@@ -1144,6 +1146,7 @@ export default function GameView(): JSX.Element {
     wsJoinedRoomCodeRef.current = null;
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
+    pendingWorldInitRef.current = null;
     pendingSnapshotRef.current = null;
     lastAppliedSnapshotTickRef.current = null;
     setCurrentMatchId(null);
@@ -1158,6 +1161,7 @@ export default function GameView(): JSX.Element {
       expectedMatchIdRef.current = null;
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
+      pendingWorldInitRef.current = null;
       pendingSnapshotRef.current = null;
       lastAppliedSnapshotTickRef.current = null;
       setCurrentMatchId(null);
@@ -1202,6 +1206,7 @@ export default function GameView(): JSX.Element {
     setCurrentMatchId(lastAck.matchId);
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
+    pendingWorldInitRef.current = null;
     pendingSnapshotRef.current = null;
     lastAppliedSnapshotTickRef.current = null;
     handledMatchEventIdsRef.current.clear();
@@ -1262,6 +1267,7 @@ export default function GameView(): JSX.Element {
     expectedMatchIdRef.current = lastStarted.matchId;
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
+    pendingWorldInitRef.current = null;
     pendingSnapshotRef.current = null;
     lastAppliedSnapshotTickRef.current = null;
     setCurrentMatchId(lastStarted.matchId);
@@ -1356,6 +1362,7 @@ export default function GameView(): JSX.Element {
           setWrongMatchDrops((v) => v + 1);
           worldReadyRef.current = false;
           firstSnapshotReadyRef.current = false;
+          pendingWorldInitRef.current = null;
           pendingSnapshotRef.current = null;
           sceneRef.current?.triggerNetResync('wrong_match_snapshot');
           diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot_match_mismatch', {
@@ -1460,6 +1467,7 @@ export default function GameView(): JSX.Element {
       sceneRef.current?.setActiveMultiplayerSession(expectedRoomCode, gotMatchId);
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
+      pendingWorldInitRef.current = null;
       pendingSnapshotRef.current = null;
       lastAppliedSnapshotTickRef.current = null;
       diagnosticsStore.log('ROOM', 'INFO', 'firewall:bind_expected_match_from_world_init', {
@@ -1473,6 +1481,7 @@ export default function GameView(): JSX.Element {
       setWrongMatchDrops((v) => v + 1);
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
+      pendingWorldInitRef.current = null;
       pendingSnapshotRef.current = null;
       sceneRef.current?.triggerNetResync('wrong_match_world_init');
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_world_init_match_mismatch', {
@@ -1487,17 +1496,9 @@ export default function GameView(): JSX.Element {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    if (resumeJoinInProgress && rejoinPhase === 'rejoin_wait_ack') {
-      diagnosticsStore.log('ROOM', 'WARN', 'rejoin:drop_world_init_wait_ack', {
-        roomCode: gotRoomCode,
-        matchId: gotMatchId,
-        rejoinPhase,
-      });
-      return;
-    }
-
     if (resumeJoinInProgress && !(rejoinPhase === 'rejoin_ready' || rejoinPhase === 'rejoin_applying')) {
-      diagnosticsStore.log('ROOM', 'WARN', 'rejoin:drop_world_init_not_ready', {
+      pendingWorldInitRef.current = lastWorldInit;
+      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:buffer_world_init_not_ready', {
         roomCode: gotRoomCode,
         matchId: gotMatchId,
         rejoinPhase,
@@ -1509,6 +1510,7 @@ export default function GameView(): JSX.Element {
       setRejoinPhase('rejoin_applying');
     }
 
+    pendingWorldInitRef.current = null;
     scene.applyMatchWorldInit(lastWorldInit);
     const { gridW, gridH } = lastWorldInit.world;
     worldReadyRef.current = true;
@@ -1544,6 +1546,53 @@ export default function GameView(): JSX.Element {
       });
     }
   }, [localTgUserId, rejoinPhase, resumeJoinInProgress, ws, ws.messages]);
+
+  useEffect(() => {
+    const pendingWorldInit = pendingWorldInitRef.current;
+    if (!pendingWorldInit) return;
+    if (!resumeJoinInProgress) return;
+    if (!(rejoinPhase === 'rejoin_ready' || rejoinPhase === 'rejoin_applying')) return;
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    const gotRoomCode = pendingWorldInit.roomCode ?? null;
+    const gotMatchId = pendingWorldInit.matchId ?? null;
+    if (!expectedRoomCode || gotRoomCode !== expectedRoomCode || !expectedMatchId || gotMatchId !== expectedMatchId) {
+      pendingWorldInitRef.current = null;
+      return;
+    }
+
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    setRejoinPhase('rejoin_applying');
+    pendingWorldInitRef.current = null;
+    scene.applyMatchWorldInit(pendingWorldInit);
+    worldReadyRef.current = true;
+
+    const pendingSnapshot = pendingSnapshotRef.current;
+    if (!pendingSnapshot) return;
+    if (pendingSnapshot.roomCode !== expectedRoomCode || pendingSnapshot.matchId !== expectedMatchId) {
+      pendingSnapshotRef.current = null;
+      return;
+    }
+    if (typeof lastAppliedSnapshotTickRef.current === 'number' && pendingSnapshot.tick <= lastAppliedSnapshotTickRef.current) {
+      pendingSnapshotRef.current = null;
+      return;
+    }
+
+    scene.applyMatchSnapshot(pendingSnapshot, localTgUserId);
+    firstSnapshotReadyRef.current = true;
+    lastAppliedSnapshotTickRef.current = pendingSnapshot.tick;
+    pendingSnapshotRef.current = null;
+    const rejoinAttemptId = rejoinAttemptIdRef.current ?? undefined;
+    ws.send({
+      type: 'mp:snapshot_applied',
+      matchId: pendingSnapshot.matchId,
+      rejoinAttemptId,
+    }, { roomCode: pendingSnapshot.roomCode, expectedMatchId: pendingSnapshot.matchId });
+    resetResumeAttemptState('rejoin_complete');
+  }, [localTgUserId, rejoinPhase, resetResumeAttemptState, resumeJoinInProgress, ws]);
 
 
   useEffect(() => {
@@ -1601,19 +1650,12 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    if (resumeJoinInProgress && rejoinPhase === 'rejoin_wait_ack') {
-      diagnosticsStore.log('ROOM', 'WARN', 'rejoin:drop_snapshot_wait_ack', {
-        expectedRoomCode,
-        gotRoomCode,
-        gotMatchId,
-        rejoinPhase,
-        snapTick: snapshot.tick ?? null,
-      });
-      return;
-    }
-
     if (resumeJoinInProgress && !(rejoinPhase === 'rejoin_ready' || rejoinPhase === 'rejoin_applying')) {
-      diagnosticsStore.log('ROOM', 'WARN', 'rejoin:drop_snapshot_not_ready', {
+      const pendingSnapshot = pendingSnapshotRef.current;
+      if (!pendingSnapshot || snapshot.tick > pendingSnapshot.tick) {
+        pendingSnapshotRef.current = snapshot;
+      }
+      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:buffer_snapshot_not_ready', {
         expectedRoomCode,
         gotRoomCode,
         gotMatchId,
@@ -1627,6 +1669,7 @@ export default function GameView(): JSX.Element {
       setWrongMatchDrops((v) => v + 1);
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
+      pendingWorldInitRef.current = null;
       pendingSnapshotRef.current = null;
       sceneRef.current?.triggerNetResync('wrong_match_snapshot');
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot_match_mismatch', {
@@ -2303,6 +2346,7 @@ export default function GameView(): JSX.Element {
     expectedMatchIdRef.current = null;
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
+    pendingWorldInitRef.current = null;
     pendingSnapshotRef.current = null;
     lastAppliedSnapshotTickRef.current = null;
     handledMatchEventIdsRef.current.clear();
