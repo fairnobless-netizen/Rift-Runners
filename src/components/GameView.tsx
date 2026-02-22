@@ -357,6 +357,7 @@ export default function GameView(): JSX.Element {
 
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
   const resumePromptShownRef = useRef(false);
+  const pendingResumeIntentRef = useRef<{ roomCode: string; matchId: string | null } | null>(null);
   const resumeRoomCodeRef = useRef<string | null>(null);
   const resumeExpectedMatchIdRef = useRef<string | null>(null);
   const rejoinAttemptIdRef = useRef<string | null>(null);
@@ -373,6 +374,7 @@ export default function GameView(): JSX.Element {
     pendingWorldInitRef.current = null;
     pendingSnapshotRef.current = null;
     rejoinCompletionSentRef.current = false;
+    pendingResumeIntentRef.current = null;
   }, []);
   const handleResumeFailure = useCallback((message: string, options?: { stale?: boolean; nextPhase?: RejoinPhase }): void => {
     setRoomsError(message);
@@ -2297,7 +2299,7 @@ export default function GameView(): JSX.Element {
   }, [currentRoom?.phase, currentRoom?.roomCode, localTgUserId, persistSessionActivity]);
 
   useEffect(() => {
-    if (!ws.connected || currentRoom?.roomCode || resumePromptShownRef.current || !localTgUserId) {
+    if (currentRoom?.roomCode || resumePromptShownRef.current || !localTgUserId) {
       return;
     }
 
@@ -2318,6 +2320,12 @@ export default function GameView(): JSX.Element {
 
     // Mark prompt as shown only after basic validation passes
     resumePromptShownRef.current = true;
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_shown', {
+        roomCode: lastSession.roomCode,
+        matchId: lastSession.matchId ?? null,
+      });
+    }
 
     let cancelled = false;
 
@@ -2351,8 +2359,36 @@ export default function GameView(): JSX.Element {
         if (cancelled) return;
 
         if (!shouldResume) {
+          if (isMultiplayerDebugEnabled) {
+            diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_cancelled', {
+              roomCode: lastSession.roomCode,
+              matchId: lastSession.matchId ?? null,
+            });
+          }
           clearLastSession();
           resetResumeAttemptState('idle');
+          return;
+        }
+
+        if (isMultiplayerDebugEnabled) {
+          diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_accepted', {
+            roomCode: lastSession.roomCode,
+            matchId: lastSession.matchId ?? null,
+            wsConnected: ws.connected,
+          });
+        }
+
+        if (!ws.connected) {
+          pendingResumeIntentRef.current = {
+            roomCode: lastSession.roomCode,
+            matchId: lastSession.matchId ?? null,
+          };
+          if (isMultiplayerDebugEnabled) {
+            diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_queued_waiting_ws', {
+              roomCode: lastSession.roomCode,
+              matchId: lastSession.matchId ?? null,
+            });
+          }
           return;
         }
 
@@ -2380,6 +2416,22 @@ export default function GameView(): JSX.Element {
     resumeRoomByCode,
     ws.connected,
   ]);
+
+  useEffect(() => {
+    if (!ws.connected) return;
+    if (resumeJoinInProgress) return;
+    const pendingIntent = pendingResumeIntentRef.current;
+    if (!pendingIntent) return;
+
+    pendingResumeIntentRef.current = null;
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_started_after_ws_connected', {
+        roomCode: pendingIntent.roomCode,
+        matchId: pendingIntent.matchId,
+      });
+    }
+    void resumeRoomByCode(pendingIntent.roomCode, pendingIntent.matchId);
+  }, [isMultiplayerDebugEnabled, resumeJoinInProgress, resumeRoomByCode, ws.connected]);
 
   useEffect(() => {
     if (!resumeJoinInProgress) return;
