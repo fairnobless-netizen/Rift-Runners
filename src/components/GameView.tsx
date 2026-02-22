@@ -360,6 +360,7 @@ export default function GameView(): JSX.Element {
   const resumeRoomCodeRef = useRef<string | null>(null);
   const resumeExpectedMatchIdRef = useRef<string | null>(null);
   const rejoinAttemptIdRef = useRef<string | null>(null);
+  const rejoinCompletionSentRef = useRef(false);
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
 
@@ -369,7 +370,38 @@ export default function GameView(): JSX.Element {
     resumeRoomCodeRef.current = null;
     resumeExpectedMatchIdRef.current = null;
     rejoinAttemptIdRef.current = null;
+    rejoinCompletionSentRef.current = false;
   }, []);
+
+  const completeRejoinFromSnapshot = useCallback((snapshot: MatchSnapshotMessage['snapshot']): void => {
+    if (!resumeJoinInProgress || rejoinCompletionSentRef.current) {
+      return;
+    }
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    if (!expectedRoomCode || !expectedMatchId) {
+      return;
+    }
+    if (snapshot.roomCode !== expectedRoomCode || snapshot.matchId !== expectedMatchId) {
+      return;
+    }
+
+    rejoinCompletionSentRef.current = true;
+    worldReadyRef.current = true;
+    firstSnapshotReadyRef.current = true;
+    lastAppliedSnapshotTickRef.current = snapshot.tick;
+    pendingWorldInitRef.current = null;
+    pendingSnapshotRef.current = null;
+
+    ws.send({
+      type: 'mp:snapshot_applied',
+      matchId: snapshot.matchId,
+      rejoinAttemptId: rejoinAttemptIdRef.current ?? undefined,
+    }, { roomCode: snapshot.roomCode, expectedMatchId: snapshot.matchId });
+
+    resetResumeAttemptState('rejoin_complete');
+  }, [resetResumeAttemptState, resumeJoinInProgress, ws]);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
@@ -1201,6 +1233,7 @@ export default function GameView(): JSX.Element {
     }
 
     rejoinAttemptIdRef.current = lastAck.rejoinAttemptId;
+    rejoinCompletionSentRef.current = false;
     setRejoinPhase('rejoin_resetting');
     expectedMatchIdRef.current = lastAck.matchId;
     setCurrentMatchId(lastAck.matchId);
@@ -1530,22 +1563,14 @@ export default function GameView(): JSX.Element {
       firstSnapshotReadyRef.current = true;
       lastAppliedSnapshotTickRef.current = pendingSnapshot.tick;
       pendingSnapshotRef.current = null;
-      if (resumeJoinInProgress) {
-        setResumeJoinInProgress(false);
-        setRejoinPhase('rejoin_complete');
-        ws.send({
-          type: 'mp:snapshot_applied',
-          matchId: pendingSnapshot.matchId,
-          rejoinAttemptId: rejoinAttemptIdRef.current ?? undefined,
-        }, { roomCode: pendingSnapshot.roomCode, expectedMatchId: pendingSnapshot.matchId });
-      }
+      completeRejoinFromSnapshot(pendingSnapshot);
       diagnosticsStore.log('ROOM', 'INFO', 'snapshot:applied_pending_after_world_init', {
         roomCode: pendingSnapshot.roomCode ?? null,
         matchId: pendingSnapshot.matchId ?? null,
         snapTick: pendingSnapshot.tick ?? null,
       });
     }
-  }, [localTgUserId, rejoinPhase, resumeJoinInProgress, ws, ws.messages]);
+  }, [completeRejoinFromSnapshot, localTgUserId, rejoinPhase, resumeJoinInProgress, ws, ws.messages]);
 
   useEffect(() => {
     const pendingWorldInit = pendingWorldInitRef.current;
@@ -1585,14 +1610,8 @@ export default function GameView(): JSX.Element {
     firstSnapshotReadyRef.current = true;
     lastAppliedSnapshotTickRef.current = pendingSnapshot.tick;
     pendingSnapshotRef.current = null;
-    const rejoinAttemptId = rejoinAttemptIdRef.current ?? undefined;
-    ws.send({
-      type: 'mp:snapshot_applied',
-      matchId: pendingSnapshot.matchId,
-      rejoinAttemptId,
-    }, { roomCode: pendingSnapshot.roomCode, expectedMatchId: pendingSnapshot.matchId });
-    resetResumeAttemptState('rejoin_complete');
-  }, [localTgUserId, rejoinPhase, resetResumeAttemptState, resumeJoinInProgress, ws]);
+    completeRejoinFromSnapshot(pendingSnapshot);
+  }, [completeRejoinFromSnapshot, localTgUserId, rejoinPhase, resumeJoinInProgress]);
 
 
   useEffect(() => {
@@ -1731,14 +1750,7 @@ export default function GameView(): JSX.Element {
     if (!scene) return;
 
     scene.applyMatchSnapshot(snapshot, localTgUserId);
-    if (resumeJoinInProgress) {
-      resetResumeAttemptState('rejoin_complete');
-      ws.send({
-        type: 'mp:snapshot_applied',
-        matchId: snapshot.matchId,
-        rejoinAttemptId: rejoinAttemptIdRef.current ?? undefined,
-      }, { roomCode: snapshot.roomCode, expectedMatchId: snapshot.matchId });
-    }
+    completeRejoinFromSnapshot(snapshot);
     firstSnapshotReadyRef.current = true;
     lastAppliedSnapshotTickRef.current = snapshot.tick;
 
@@ -2183,6 +2195,7 @@ export default function GameView(): JSX.Element {
     }
 
     setRoomsError(null);
+    rejoinCompletionSentRef.current = false;
     setResumeJoinInProgress(true);
     setRejoinPhase('rejoin_wait_ack');
     resumeRoomCodeRef.current = roomCode;
