@@ -374,6 +374,26 @@ export default function GameView(): JSX.Element {
     pendingSnapshotRef.current = null;
     rejoinCompletionSentRef.current = false;
   }, []);
+  const handleResumeFailure = useCallback((message: string, options?: { stale?: boolean; nextPhase?: RejoinPhase }): void => {
+    setRoomsError(message);
+    if (options?.stale !== false) {
+      clearLastSession();
+    }
+    resetResumeAttemptState(options?.nextPhase ?? 'rejoin_failed');
+    setMultiplayerUiOpen(false);
+    setDeepLinkJoinCode(null);
+  }, [resetResumeAttemptState]);
+  const cancelResumeAttemptByUser = useCallback((): void => {
+    const cancellable = rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying';
+    if (!resumeJoinInProgress || !cancellable) return;
+
+    resetResumeAttemptState('idle');
+    setMultiplayerUiOpen(false);
+    setDeepLinkJoinCode(null);
+    if (isDebugEnabled(window.location.search)) {
+      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:cancelled_by_user', { phase: rejoinPhase });
+    }
+  }, [rejoinPhase, resetResumeAttemptState, resumeJoinInProgress]);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
@@ -1223,9 +1243,7 @@ export default function GameView(): JSX.Element {
     }
 
     if (resumeExpectedMatchIdRef.current && resumeExpectedMatchIdRef.current !== lastAck.matchId) {
-      setRoomsError('Resume failed: match changed, old resume context discarded.');
-      clearLastSession();
-      resetResumeAttemptState('rejoin_failed');
+      handleResumeFailure('Resume failed: match changed, old resume context discarded.');
       return;
     }
 
@@ -1266,7 +1284,7 @@ export default function GameView(): JSX.Element {
     });
 
     setRejoinPhase('rejoin_ready');
-  }, [rejoinPhase, resetResumeAttemptState, resumeJoinInProgress, ws, ws.messages]);
+  }, [handleResumeFailure, rejoinPhase, resumeJoinInProgress, ws, ws.messages]);
 
 
   useEffect(() => {
@@ -1320,7 +1338,8 @@ export default function GameView(): JSX.Element {
     if (!lastError || lastError.type !== 'match:error') return;
 
     if (resumeJoinInProgress) {
-      resetResumeAttemptState('rejoin_failed');
+      handleResumeFailure(`WS: ${lastError.error}`);
+      return;
     }
 
     if (lastError.error === 'not_enough_ws_players') {
@@ -1329,7 +1348,7 @@ export default function GameView(): JSX.Element {
     }
 
     setRoomsError(`WS: ${lastError.error}`);
-  }, [resumeJoinInProgress, resetResumeAttemptState, ws.messages]);
+  }, [handleResumeFailure, resumeJoinInProgress, ws.messages]);
 
   const activeLeaderboardMode: LeaderboardMode = !isMultiplayerMode
     ? 'solo'
@@ -2186,8 +2205,7 @@ export default function GameView(): JSX.Element {
     }
 
     if (!localTgUserId) {
-      setRoomsError('Resume failed: player identity is unavailable.');
-      clearLastSession();
+      handleResumeFailure('Resume failed: player identity is unavailable.');
       return;
     }
 
@@ -2201,24 +2219,23 @@ export default function GameView(): JSX.Element {
     try {
       const roomData = await fetchRoom(roomCode);
       if (!roomData) {
-        setRoomsError('Resume failed: unable to fetch room.');
-        clearLastSession();
-        resetResumeAttemptState('rejoin_failed');
+        handleResumeFailure('Resume failed: unable to fetch room.');
         return;
       }
 
       if (roomData.error) {
-        setRoomsError(`Resume failed: ${mapRoomError(roomData.error)}`);
-        clearLastSession();
-        resetResumeAttemptState('rejoin_failed');
+        handleResumeFailure(`Resume failed: ${mapRoomError(roomData.error)}`);
         return;
       }
 
       const isMember = roomData.members.some((member) => String(member.tgUserId) === String(localTgUserId));
       if (!isMember) {
-        setRoomsError('Resume failed: you are no longer a member of this room.');
-        clearLastSession();
-        resetResumeAttemptState('rejoin_failed');
+        handleResumeFailure('Resume failed: you are no longer a member of this room.');
+        return;
+      }
+
+      if (roomData.room.phase !== 'STARTED') {
+        handleResumeFailure('Resume failed: room is no longer in active match.');
         return;
       }
 
@@ -2229,11 +2246,9 @@ export default function GameView(): JSX.Element {
       setMultiplayerUiOpen(false);
       setDeepLinkJoinCode(null);
     } catch {
-      setRoomsError('Resume failed: unexpected error while restoring room.');
-      clearLastSession();
-      resetResumeAttemptState('rejoin_failed');
+      handleResumeFailure('Resume failed: unexpected error while restoring room.');
     }
-  }, [localTgUserId, resetResumeAttemptState]);
+  }, [handleResumeFailure, localTgUserId]);
 
   const persistSessionActivity = useCallback((atMs = Date.now()): void => {
     if (!currentRoom?.roomCode || !localTgUserId) {
@@ -2286,6 +2301,8 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    resumePromptShownRef.current = true;
+
     const lastSession = loadLastSession();
     if (!lastSession) {
       return;
@@ -2301,28 +2318,77 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    resumePromptShownRef.current = true;
-    const shouldResume = window.confirm('Return to previous multiplayer game?');
-    if (!shouldResume) {
-      clearLastSession();
-      resetResumeAttemptState('idle');
-      return;
-    }
+    void (async () => {
+      try {
+        const roomData = await fetchRoom(lastSession.roomCode);
+        const roomExists = Boolean(roomData && !roomData.error);
+        const isMember = Boolean(roomData?.members.some((member) => String(member.tgUserId) === String(localTgUserId)));
+        const isStarted = roomData?.room.phase === 'STARTED';
 
-    void resumeRoomByCode(lastSession.roomCode, lastSession.matchId ?? null);
+        if (!roomExists || !isMember || !isStarted) {
+          clearLastSession();
+          if (isMultiplayerDebugEnabled) {
+            diagnosticsStore.log('ROOM', 'INFO', 'rejoin:stale_last_session_cleared', {
+              roomCode: lastSession.roomCode,
+              roomExists,
+              isMember,
+              isStarted,
+            });
+          }
+          return;
+        }
+      } catch {
+        clearLastSession();
+        if (isMultiplayerDebugEnabled) {
+          diagnosticsStore.log('ROOM', 'WARN', 'rejoin:stale_last_session_cleared', {
+            roomCode: lastSession.roomCode,
+            reason: 'fetch_failed',
+          });
+        }
+        return;
+      }
+
+      const shouldResume = window.confirm('Return to previous multiplayer game?');
+      if (!shouldResume) {
+        clearLastSession();
+        resetResumeAttemptState('idle');
+        return;
+      }
+
+      void resumeRoomByCode(lastSession.roomCode, lastSession.matchId ?? null);
+    })();
   }, [currentRoom?.roomCode, localTgUserId, resetResumeAttemptState, resumeRoomByCode, ws.connected]);
 
   useEffect(() => {
     if (!resumeJoinInProgress) return;
     if (!ws.lastError) return;
 
-    setRoomsError(`Resume failed: WS ${ws.lastError}`);
-    clearLastSession();
-    resetResumeAttemptState('rejoin_failed');
+    handleResumeFailure(`Resume failed: WS ${ws.lastError}`);
     setCurrentRoom(null);
     setCurrentRoomMembers([]);
     setCurrentMatchId(null);
-  }, [resetResumeAttemptState, resumeJoinInProgress, ws.lastError]);
+  }, [handleResumeFailure, resumeJoinInProgress, ws.lastError]);
+
+  useEffect(() => {
+    const appliedTick = lastAppliedSnapshotTickRef.current;
+    if (!worldReadyRef.current || !firstSnapshotReadyRef.current || appliedTick === null) return;
+    if (resumeJoinInProgress) return;
+
+    if (multiplayerUiOpen || deepLinkJoinCode || rejoinOverlayActive) {
+      setMultiplayerUiOpen(false);
+      setDeepLinkJoinCode(null);
+      if (rejoinOverlayActive) {
+        setRejoinPhase('rejoin_complete');
+      }
+
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:ui_force_close', {
+          phase: rejoinPhase,
+          appliedTick,
+        });
+      }
+    }
+  }, [deepLinkJoinCode, isMultiplayerDebugEnabled, multiplayerUiOpen, rejoinOverlayActive, rejoinPhase, resumeJoinInProgress, ws.messages]);
 
   const onCreateRoom = useCallback(async (capacity: 2 | 3 | 4): Promise<void> => {
     setRoomsError(null);
@@ -3124,6 +3190,15 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
+      {gameFlowPhase === 'playing' && resumeJoinInProgress && (rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying') && (
+        <div className="waiting-overlay" role="status" aria-live="polite">
+          <div className="waiting-overlay__card">
+            <strong>Rejoining match…</strong>
+            <p>Phase: {rejoinPhase}</p>
+            <button type="button" onClick={cancelResumeAttemptByUser}>Cancel rejoin</button>
+          </div>
+        </div>
+      )}
       {gameFlowPhase === 'playing' && lifeState.awaitingContinue && (
         <div className="waiting-overlay" role="dialog" aria-modal="true" aria-label="Continue overlay">
           <div className="waiting-overlay__card">
@@ -3456,7 +3531,10 @@ export default function GameView(): JSX.Element {
 
       <MultiplayerModal
         open={multiplayerUiOpen}
-        onClose={() => setMultiplayerUiOpen(false)}
+        onClose={() => {
+          cancelResumeAttemptByUser();
+          setMultiplayerUiOpen(false);
+        }}
         initialTab={deepLinkJoinCode ? 'room' : undefined}
         initialRoomTab={deepLinkJoinCode ? 'join' : undefined}
         initialJoinCode={deepLinkJoinCode ?? undefined}
