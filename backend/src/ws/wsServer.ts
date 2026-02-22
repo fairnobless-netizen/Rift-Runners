@@ -29,6 +29,8 @@ type RoomState = {
 type PendingRejoinHandshake = {
   roomCode: string;
   matchId: string;
+  rejoinAttemptId: string;
+  createdAtMs: number;
   timeoutId: NodeJS.Timeout;
 };
 
@@ -60,7 +62,7 @@ const rooms = new Map<string, RoomState>();
 const clients = new Set<ClientCtx>();
 const restartVotes = new Map<string, RestartVoteState>();
 const roomRegistry = new RoomRegistry();
-const pendingRejoinHandshakes = new Map<string, PendingRejoinHandshake>();
+const pendingRejoinHandshakes = new Map<string, PendingRejoinHandshake>(); // key: connectionId
 
 const STALE_CONNECTION_MS = 60_000;
 const INACTIVE_ROOM_MS = 90_000;
@@ -428,14 +430,14 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
   });
 }
 
-function clearPendingRejoinHandshake(tgUserId: string): void {
-  const pending = pendingRejoinHandshakes.get(tgUserId);
+function clearPendingRejoinHandshake(connectionId: string): void {
+  const pending = pendingRejoinHandshakes.get(connectionId);
   if (!pending) {
     return;
   }
 
   clearTimeout(pending.timeoutId);
-  pendingRejoinHandshakes.delete(tgUserId);
+  pendingRejoinHandshakes.delete(connectionId);
 }
 
 function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchState, reason: 'ready' | 'timeout'): void {
@@ -476,7 +478,9 @@ function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchSt
 }
 
 function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState): void {
-  clearPendingRejoinHandshake(ctx.tgUserId);
+  clearPendingRejoinHandshake(ctx.connectionId);
+  const rejoinAttemptId = randomUUID();
+  const createdAtMs = Date.now();
 
   send(ctx.socket, {
     type: 'match:started',
@@ -488,22 +492,30 @@ function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState)
     type: 'mp:rejoin_ack',
     roomCode: roomId,
     matchId: match.matchId,
-    serverTime: Date.now(),
+    serverTime: createdAtMs,
+    rejoinAttemptId,
   });
 
   logWsEvent('ws_rejoin_ack_sent', {
+    connectionId: ctx.connectionId,
     tgUserId: ctx.tgUserId,
     roomId,
     matchId: match.matchId,
+    rejoinAttemptId,
   });
 
   const timeoutId = setTimeout(() => {
-    const pending = pendingRejoinHandshakes.get(ctx.tgUserId);
-    if (!pending || pending.matchId !== match.matchId || pending.roomCode !== roomId) {
+    const pending = pendingRejoinHandshakes.get(ctx.connectionId);
+    if (
+      !pending
+      || pending.matchId !== match.matchId
+      || pending.roomCode !== roomId
+      || pending.rejoinAttemptId !== rejoinAttemptId
+    ) {
       return;
     }
 
-    pendingRejoinHandshakes.delete(ctx.tgUserId);
+    pendingRejoinHandshakes.delete(ctx.connectionId);
 
     const activeMatch = getMatch(match.matchId);
     if (!activeMatch || activeMatch.roomId !== roomId) {
@@ -512,15 +524,20 @@ function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState)
 
     sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'timeout');
     logWsEvent('ws_rejoin_ready_timeout_fallback', {
+      connectionId: ctx.connectionId,
       tgUserId: ctx.tgUserId,
       roomId,
       matchId: match.matchId,
+      rejoinAttemptId,
+      createdAtMs,
     });
   }, 4_000);
 
-  pendingRejoinHandshakes.set(ctx.tgUserId, {
+  pendingRejoinHandshakes.set(ctx.connectionId, {
     roomCode: roomId,
     matchId: match.matchId,
+    rejoinAttemptId,
+    createdAtMs,
     timeoutId,
   });
 }
@@ -642,7 +659,7 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
     roomRegistry.ensureRoom(roomId);
   }
 
-  clearPendingRejoinHandshake(ctx.tgUserId);
+  clearPendingRejoinHandshake(ctx.connectionId);
 
   ctx.roomId = null;
   ctx.matchId = null;
@@ -766,22 +783,74 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return;
       }
 
-      if (msg.roomCode !== ctx.roomId || msg.matchId !== ctx.matchId) {
-        logInboundDrop(ctx, msg, 'rejoin_ready_payload_mismatch', room);
+      if (msg.roomCode !== ctx.roomId) {
+        logWsEvent('ws_rejoin_ready_drop_mismatch_roomCode', {
+          connectionId: ctx.connectionId,
+          tgUserId: ctx.tgUserId,
+          roomId: ctx.roomId,
+          ctxMatchId: ctx.matchId,
+          gotRoomCode: msg.roomCode,
+          gotMatchId: msg.matchId,
+          gotAttemptId: msg.rejoinAttemptId,
+        });
         return;
       }
 
-      const pending = pendingRejoinHandshakes.get(ctx.tgUserId);
-      if (!pending || pending.roomCode !== ctx.roomId || pending.matchId !== ctx.matchId) {
-        logInboundDrop(ctx, msg, 'rejoin_ready_no_pending', room);
+      if (msg.matchId !== ctx.matchId) {
+        logWsEvent('ws_rejoin_ready_drop_mismatch_matchId', {
+          connectionId: ctx.connectionId,
+          tgUserId: ctx.tgUserId,
+          roomId: ctx.roomId,
+          ctxMatchId: ctx.matchId,
+          gotRoomCode: msg.roomCode,
+          gotMatchId: msg.matchId,
+          gotAttemptId: msg.rejoinAttemptId,
+        });
         return;
       }
 
-      clearPendingRejoinHandshake(ctx.tgUserId);
+      const pending = pendingRejoinHandshakes.get(ctx.connectionId);
+      if (!pending) {
+        logWsEvent('ws_rejoin_ready_drop_no_pending', {
+          connectionId: ctx.connectionId,
+          tgUserId: ctx.tgUserId,
+          roomId: ctx.roomId,
+          matchId: ctx.matchId,
+          gotAttemptId: msg.rejoinAttemptId,
+        });
+        return;
+      }
+
+      if (pending.roomCode !== ctx.roomId || pending.matchId !== ctx.matchId) {
+        logInboundDrop(ctx, msg, 'rejoin_ready_pending_mismatch', room);
+        return;
+      }
+
+      if (pending.rejoinAttemptId !== msg.rejoinAttemptId) {
+        logWsEvent('ws_rejoin_ready_drop_mismatch_attempt', {
+          connectionId: ctx.connectionId,
+          tgUserId: ctx.tgUserId,
+          roomId: ctx.roomId,
+          matchId: ctx.matchId,
+          expectedAttemptId: pending.rejoinAttemptId,
+          gotAttemptId: msg.rejoinAttemptId,
+        });
+        return;
+      }
+
+      clearPendingRejoinHandshake(ctx.connectionId);
       const activeMatch = getMatch(ctx.matchId);
       if (!activeMatch || activeMatch.roomId !== ctx.roomId) {
         return;
       }
+
+      logWsEvent('ws_rejoin_ready_accepted', {
+        connectionId: ctx.connectionId,
+        tgUserId: ctx.tgUserId,
+        roomId: ctx.roomId,
+        matchId: ctx.matchId,
+        rejoinAttemptId: msg.rejoinAttemptId,
+      });
 
       sendRejoinSnapshotBundle(ctx, ctx.roomId, activeMatch, 'ready');
       return;
@@ -793,6 +862,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         roomId: ctx.roomId,
         ctxMatchId: ctx.matchId,
         matchId: msg.matchId,
+        rejoinAttemptId: msg.rejoinAttemptId ?? null,
       });
       return;
     }
