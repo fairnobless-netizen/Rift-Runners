@@ -356,6 +356,8 @@ export default function GameView(): JSX.Element {
   const processedWsMessagesRef = useRef(0);
 
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
+  const appBootAtRef = useRef<number>(Date.now());
+  const userInteractedRef = useRef(false);
   const resumePromptShownRef = useRef(false);
   const pendingResumeIntentRef = useRef<{ roomCode: string; matchId: string | null } | null>(null);
   const resumeIntentExecutedRef = useRef(false);
@@ -400,6 +402,7 @@ export default function GameView(): JSX.Element {
     }
   }, [rejoinPhase, resetResumeAttemptState, resumeJoinInProgress]);
   const [settingReady, setSettingReady] = useState(false);
+  const [creatingRoom, setCreatingRoom] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [friendsError, setFriendsError] = useState<string | null>(null);
@@ -430,6 +433,10 @@ export default function GameView(): JSX.Element {
     height: window.innerHeight,
   }));
   const ws = useWsClient(token || undefined);
+  const markUserInteracted = useCallback((): void => {
+    userInteractedRef.current = true;
+  }, []);
+
   const maybeCompleteRejoinFromAppliedSnapshot = useCallback((appliedSnapshot: MatchSnapshotMessage['snapshot']): void => {
     if (!resumeJoinInProgress || rejoinCompletionSentRef.current) return;
 
@@ -2198,6 +2205,7 @@ export default function GameView(): JSX.Element {
   }, [currentRoom?.roomCode]);
 
   const joinRoomByCode = useCallback(async (roomCodeRaw: string): Promise<void> => {
+    markUserInteracted();
     const roomCode = roomCodeRaw.trim().toUpperCase();
     if (!roomCode) return;
     if (currentRoom?.roomCode === roomCode) return;
@@ -2230,7 +2238,7 @@ export default function GameView(): JSX.Element {
     } finally {
       setJoiningRoomCode((prev) => (prev === roomCode ? null : prev));
     }
-  }, [currentRoom?.roomCode, isMultiplayerDebugEnabled, joiningRoomCode]);
+  }, [currentRoom?.roomCode, isMultiplayerDebugEnabled, joiningRoomCode, markUserInteracted]);
 
   const resumeRoomByCode = useCallback(async (roomCodeRaw: string, expectedMatchId: string | null = null): Promise<void> => {
     const roomCode = roomCodeRaw.trim().toUpperCase();
@@ -2385,6 +2393,24 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    if (Date.now() - appBootAtRef.current >= 8000) {
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_outside_startup_window');
+      }
+      return;
+    }
+
+    if (multiplayerUiOpen) {
+      return;
+    }
+
+    if (userInteractedRef.current) {
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_user_interacted');
+      }
+      return;
+    }
+
     if (!localTgUserId) {
       if (isMultiplayerDebugEnabled) {
         diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_no_localTgUserId');
@@ -2449,9 +2475,7 @@ export default function GameView(): JSX.Element {
     currentRoom?.roomCode,
     isMultiplayerDebugEnabled,
     localTgUserId,
-    resetResumeAttemptState,
-    resumeRoomByCode,
-    ws.connected,
+    multiplayerUiOpen,
   ]);
 
   const onCancelResumePrompt = useCallback((): void => {
@@ -2551,18 +2575,24 @@ export default function GameView(): JSX.Element {
   }, [deepLinkJoinCode, isMultiplayerDebugEnabled, multiplayerUiOpen, rejoinOverlayActive, rejoinPhase, resumeJoinInProgress, ws.messages]);
 
   const onCreateRoom = useCallback(async (capacity: 2 | 3 | 4): Promise<void> => {
+    markUserInteracted();
     setRoomsError(null);
+    setCreatingRoom(true);
     if (isMultiplayerDebugEnabled) diagnosticsStore.log('UI', 'INFO', 'onCreateRoom:start', { capacity });
-    const created = await createRoom(capacity);
-    if (!created) {
-      setRoomsError('Failed to create room');
-      if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'ERROR', 'onCreateRoom:failed');
-      return;
-    }
+    try {
+      const created = await createRoom(capacity);
+      if (!created) {
+        setRoomsError('Failed to create room');
+        if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'ERROR', 'onCreateRoom:failed');
+        return;
+      }
 
-    if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'onCreateRoom:success', { roomCode: created.roomCode, capacity });
-    await joinRoomByCode(created.roomCode);
-  }, [isMultiplayerDebugEnabled, joinRoomByCode]);
+      if (isMultiplayerDebugEnabled) diagnosticsStore.log('ROOM', 'INFO', 'onCreateRoom:success', { roomCode: created.roomCode, capacity });
+      await joinRoomByCode(created.roomCode);
+    } finally {
+      setCreatingRoom(false);
+    }
+  }, [isMultiplayerDebugEnabled, joinRoomByCode, markUserInteracted]);
 
 
   const clearMultiplayerSessionState = useCallback((): void => {
@@ -3223,6 +3253,7 @@ export default function GameView(): JSX.Element {
   };
 
   const onStartGame = (): void => {
+    markUserInteracted();
     void requestTelegramFullscreenBestEffort();
     if (shouldShowRotateOverlay) return;
     const minZoom = zoomBounds.min;
@@ -3493,7 +3524,10 @@ export default function GameView(): JSX.Element {
                     </span>
                   </button>
                 ) : (
-                  <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => setMultiplayerUiOpen(true)}>
+                  <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => {
+                    markUserInteracted();
+                    setMultiplayerUiOpen(true);
+                  }}>
                     <span className="nav-btn__plate" aria-hidden="true">
                       <span className="nav-btn__icon" aria-hidden="true">👥</span>
                     </span>
@@ -3723,6 +3757,7 @@ export default function GameView(): JSX.Element {
         currentRoom={currentRoom}
         currentRoomMembers={currentRoomMembers}
         joiningRoomCode={joiningRoomCode}
+        creatingRoom={creatingRoom}
         settingReady={settingReady}
         startingRoom={startingRoom}
         onCreateRoom={onCreateRoom}

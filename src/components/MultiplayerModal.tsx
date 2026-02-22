@@ -37,6 +37,7 @@ type Props = {
   currentRoom: RoomState | null;
   currentRoomMembers: RoomMember[];
   joiningRoomCode: string | null;
+  creatingRoom: boolean;
   settingReady: boolean;
   startingRoom: boolean;
   onCreateRoom: (capacity: 2 | 3 | 4) => Promise<void>;
@@ -78,6 +79,7 @@ export function MultiplayerModal({
   currentRoom,
   currentRoomMembers,
   joiningRoomCode,
+  creatingRoom,
   settingReady,
   startingRoom,
   onCreateRoom,
@@ -419,8 +421,8 @@ export function MultiplayerModal({
                     })}
 
                     <div className="rr-room-board-center">
-                      <button type="button" disabled={Boolean(roomNameError) || Boolean(joiningRoomCode)} onClick={() => { void handleCreate(); }}>
-                        {joiningRoomCode ? 'Creating...' : 'Create'}
+                      <button type="button" disabled={Boolean(roomNameError) || creatingRoom} onClick={() => { void handleCreate(); }}>
+                        {creatingRoom ? 'Creating...' : 'Create'}
                       </button>
                       <span className="rr-mp-empty">Players: {desiredCapacity} requested ({apiCapacity} API)</span>
                     </div>
