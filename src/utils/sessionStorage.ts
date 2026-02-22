@@ -5,7 +5,7 @@ export type SessionMode = 'mp' | 'sp';
 
 export type LastSessionMeta = {
   roomCode: string;
-  tgUserId: string;
+  tgUserId: string | null;
   mode: SessionMode;
   matchId: string | null;
   lastActivityAtMs: number;
@@ -27,15 +27,17 @@ export function loadLastSession(): LastSessionMeta | null {
       return null;
     }
 
-    if (typeof parsed.tgUserId !== 'string' || !parsed.tgUserId) {
+    if (parsed.tgUserId != null && (typeof parsed.tgUserId !== 'string' || !parsed.tgUserId)) {
       return null;
     }
 
-    if (parsed.mode !== 'mp' && parsed.mode !== 'sp') {
+    const mode = parsed.mode ?? 'mp';
+    if (mode !== 'mp' && mode !== 'sp') {
       return null;
     }
 
-    if (typeof parsed.matchId !== 'string' && parsed.matchId !== null) {
+    const matchId = parsed.matchId ?? null;
+    if (typeof matchId !== 'string' && matchId !== null) {
       return null;
     }
 
@@ -45,9 +47,9 @@ export function loadLastSession(): LastSessionMeta | null {
 
     return {
       roomCode: parsed.roomCode,
-      tgUserId: parsed.tgUserId,
-      mode: parsed.mode,
-      matchId: parsed.matchId,
+      tgUserId: parsed.tgUserId ?? null,
+      mode,
+      matchId,
       lastActivityAtMs: parsed.lastActivityAtMs,
     };
   } catch {
