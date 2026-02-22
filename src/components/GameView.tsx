@@ -884,13 +884,43 @@ export default function GameView(): JSX.Element {
       setAuthDiag(null);
 
       try {
-        const tgInitData = (window as any)?.Telegram?.WebApp?.initData ?? '';
-        const initDataLen = typeof tgInitData === 'string' ? tgInitData.length : 0;
+        const initDataRetryIntervalMs = 150;
+        const initDataMaxAttempts = 20;
+        let tgInitData = (window as any)?.Telegram?.WebApp?.initData ?? '';
+        let initDataLen = typeof tgInitData === 'string' ? tgInitData.length : 0;
+        let initDataAttemptCount = 0;
 
         if (!tgInitData || initDataLen === 0) {
-          setAuthDiag('Auth failed: Telegram initData is empty. Please reopen from Telegram.');
-          return;
+          if (isMultiplayerDebugEnabled) {
+            diagnosticsStore.log('ROOM', 'INFO', 'auth:initData_empty_initial', { attemptCount: initDataAttemptCount });
+          }
+
+          while (initDataAttemptCount < initDataMaxAttempts && (!tgInitData || initDataLen === 0)) {
+            initDataAttemptCount += 1;
+            await new Promise<void>((resolve) => window.setTimeout(resolve, initDataRetryIntervalMs));
+            tgInitData = (window as any)?.Telegram?.WebApp?.initData ?? '';
+            initDataLen = typeof tgInitData === 'string' ? tgInitData.length : 0;
+          }
+
+          if (tgInitData && initDataLen > 0) {
+            if (isMultiplayerDebugEnabled) {
+              diagnosticsStore.log('ROOM', 'INFO', 'auth:initData_available_after_retry', {
+                attemptCount: initDataAttemptCount,
+                initDataLen,
+              });
+            }
+          } else {
+            if (isMultiplayerDebugEnabled) {
+              diagnosticsStore.log('ROOM', 'WARN', 'auth:initData_empty_exhausted', {
+                attemptCount: initDataAttemptCount,
+              });
+            }
+            setAuthDiag('Auth failed: Telegram initData is empty. Please reopen from Telegram.');
+            return;
+          }
         }
+
+        initDataLen = typeof tgInitData === 'string' ? tgInitData.length : 0;
 
         const authRes = await fetch(apiUrl('/api/auth/telegram'), {
           method: 'POST',
@@ -1009,7 +1039,7 @@ export default function GameView(): JSX.Element {
 
     // TODO backend: in production handle auth errors + refresh/retry strategy
     runAuth();
-  }, [devIdentity.displayNameOverride, loadSettingsAndAccount]);
+  }, [devIdentity.displayNameOverride, isMultiplayerDebugEnabled, loadSettingsAndAccount]);
 
 
   useEffect(() => {
@@ -2351,26 +2381,53 @@ export default function GameView(): JSX.Element {
   }, [currentRoom?.phase, currentRoom?.roomCode, localTgUserId, persistSessionActivity]);
 
   useEffect(() => {
-    if (currentRoom?.roomCode || resumePromptShownRef.current || !localTgUserId) {
+    if (currentRoom?.roomCode || resumePromptShownRef.current) {
+      return;
+    }
+
+    if (!localTgUserId) {
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_no_localTgUserId');
+      }
       return;
     }
 
     const lastSession = loadLastSession();
     if (!lastSession) {
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_no_lastSession');
+      }
       return;
     }
 
     if (!canResumeSession(lastSession)) {
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_stale', {
+          roomCode: lastSession.roomCode,
+          matchId: lastSession.matchId ?? null,
+        });
+      }
       clearLastSession();
       return;
     }
 
     if (lastSession.mode !== 'mp') {
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_mode_mismatch', {
+          mode: lastSession.mode,
+        });
+      }
       clearLastSession();
       return;
     }
 
     if (lastSession.tgUserId != null && String(lastSession.tgUserId) !== String(localTgUserId)) {
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_user_mismatch', {
+          sessionTgUserId: String(lastSession.tgUserId),
+          localTgUserId: String(localTgUserId),
+        });
+      }
       clearLastSession();
       return;
     }
