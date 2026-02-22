@@ -360,6 +360,7 @@ export default function GameView(): JSX.Element {
   const resumeRoomCodeRef = useRef<string | null>(null);
   const resumeExpectedMatchIdRef = useRef<string | null>(null);
   const rejoinAttemptIdRef = useRef<string | null>(null);
+  const rejoinCompletionSentRef = useRef(false);
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
 
@@ -369,6 +370,9 @@ export default function GameView(): JSX.Element {
     resumeRoomCodeRef.current = null;
     resumeExpectedMatchIdRef.current = null;
     rejoinAttemptIdRef.current = null;
+    pendingWorldInitRef.current = null;
+    pendingSnapshotRef.current = null;
+    rejoinCompletionSentRef.current = false;
   }, []);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
@@ -401,6 +405,31 @@ export default function GameView(): JSX.Element {
     height: window.innerHeight,
   }));
   const ws = useWsClient(token || undefined);
+  const maybeCompleteRejoinFromAppliedSnapshot = useCallback((appliedSnapshot: MatchSnapshotMessage['snapshot']): void => {
+    if (!resumeJoinInProgress || rejoinCompletionSentRef.current) return;
+
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    const gotRoomCode = appliedSnapshot.roomCode ?? null;
+    const gotMatchId = appliedSnapshot.matchId ?? null;
+    if (!expectedRoomCode || !expectedMatchId || gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId) {
+      return;
+    }
+
+    rejoinCompletionSentRef.current = true;
+    worldReadyRef.current = true;
+    firstSnapshotReadyRef.current = true;
+    lastAppliedSnapshotTickRef.current = appliedSnapshot.tick;
+
+    ws.send({
+      type: 'mp:snapshot_applied',
+      matchId: appliedSnapshot.matchId,
+      rejoinAttemptId: rejoinAttemptIdRef.current ?? undefined,
+    }, { roomCode: appliedSnapshot.roomCode, expectedMatchId: appliedSnapshot.matchId });
+
+    resetResumeAttemptState('rejoin_complete');
+  }, [resetResumeAttemptState, resumeJoinInProgress, ws]);
+
   const sendMatchMove = useCallback((dir: Direction): void => {
     if (!ws.connected) return;
     const scene = sceneRef.current;
@@ -1206,6 +1235,7 @@ export default function GameView(): JSX.Element {
     setCurrentMatchId(lastAck.matchId);
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
+    rejoinCompletionSentRef.current = false;
     pendingWorldInitRef.current = null;
     pendingSnapshotRef.current = null;
     lastAppliedSnapshotTickRef.current = null;
@@ -1530,22 +1560,14 @@ export default function GameView(): JSX.Element {
       firstSnapshotReadyRef.current = true;
       lastAppliedSnapshotTickRef.current = pendingSnapshot.tick;
       pendingSnapshotRef.current = null;
-      if (resumeJoinInProgress) {
-        setResumeJoinInProgress(false);
-        setRejoinPhase('rejoin_complete');
-        ws.send({
-          type: 'mp:snapshot_applied',
-          matchId: pendingSnapshot.matchId,
-          rejoinAttemptId: rejoinAttemptIdRef.current ?? undefined,
-        }, { roomCode: pendingSnapshot.roomCode, expectedMatchId: pendingSnapshot.matchId });
-      }
+      maybeCompleteRejoinFromAppliedSnapshot(pendingSnapshot);
       diagnosticsStore.log('ROOM', 'INFO', 'snapshot:applied_pending_after_world_init', {
         roomCode: pendingSnapshot.roomCode ?? null,
         matchId: pendingSnapshot.matchId ?? null,
         snapTick: pendingSnapshot.tick ?? null,
       });
     }
-  }, [localTgUserId, rejoinPhase, resumeJoinInProgress, ws, ws.messages]);
+  }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, ws.messages]);
 
   useEffect(() => {
     const pendingWorldInit = pendingWorldInitRef.current;
@@ -1585,14 +1607,8 @@ export default function GameView(): JSX.Element {
     firstSnapshotReadyRef.current = true;
     lastAppliedSnapshotTickRef.current = pendingSnapshot.tick;
     pendingSnapshotRef.current = null;
-    const rejoinAttemptId = rejoinAttemptIdRef.current ?? undefined;
-    ws.send({
-      type: 'mp:snapshot_applied',
-      matchId: pendingSnapshot.matchId,
-      rejoinAttemptId,
-    }, { roomCode: pendingSnapshot.roomCode, expectedMatchId: pendingSnapshot.matchId });
-    resetResumeAttemptState('rejoin_complete');
-  }, [localTgUserId, rejoinPhase, resetResumeAttemptState, resumeJoinInProgress, ws]);
+    maybeCompleteRejoinFromAppliedSnapshot(pendingSnapshot);
+  }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress]);
 
 
   useEffect(() => {
@@ -1731,16 +1747,9 @@ export default function GameView(): JSX.Element {
     if (!scene) return;
 
     scene.applyMatchSnapshot(snapshot, localTgUserId);
-    if (resumeJoinInProgress) {
-      resetResumeAttemptState('rejoin_complete');
-      ws.send({
-        type: 'mp:snapshot_applied',
-        matchId: snapshot.matchId,
-        rejoinAttemptId: rejoinAttemptIdRef.current ?? undefined,
-      }, { roomCode: snapshot.roomCode, expectedMatchId: snapshot.matchId });
-    }
     firstSnapshotReadyRef.current = true;
     lastAppliedSnapshotTickRef.current = snapshot.tick;
+    maybeCompleteRejoinFromAppliedSnapshot(snapshot);
 
     // If WS snapshots are flowing, match is live → ensure lobby overlay is gone for everyone.
     if (multiplayerUiOpen) {
@@ -1753,7 +1762,7 @@ export default function GameView(): JSX.Element {
         });
       }
     }
-  }, [ws, ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode, rejoinPhase, resumeJoinInProgress]);
+  }, [ws, ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress]);
 
 
   useEffect(() => {
@@ -2185,6 +2194,7 @@ export default function GameView(): JSX.Element {
     setRoomsError(null);
     setResumeJoinInProgress(true);
     setRejoinPhase('rejoin_wait_ack');
+    rejoinCompletionSentRef.current = false;
     resumeRoomCodeRef.current = roomCode;
     resumeExpectedMatchIdRef.current = expectedMatchId;
 
