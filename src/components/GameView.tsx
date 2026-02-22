@@ -344,6 +344,8 @@ export default function GameView(): JSX.Element {
 
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
   const resumePromptShownRef = useRef(false);
+  const resumeRoomCodeRef = useRef<string | null>(null);
+  const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [settingReady, setSettingReady] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
@@ -1182,11 +1184,15 @@ export default function GameView(): JSX.Element {
       if (prev.phase === 'STARTED') return prev;
       return { ...prev, phase: 'STARTED' };
     });
+    if (resumeJoinInProgress) {
+      setResumeJoinInProgress(false);
+      resumeRoomCodeRef.current = null;
+    }
     diagnosticsStore.log('ROOM', 'INFO', 'match:started:accepted', {
       roomCode: expectedRoomCode,
       matchId: lastStarted.matchId,
     });
-  }, [ws.messages]);
+  }, [resumeJoinInProgress, ws.messages]);
 
   useEffect(() => {
     const lastError = [...ws.messages].reverse().find((message) => message.type === 'match:error');
@@ -1198,7 +1204,7 @@ export default function GameView(): JSX.Element {
     }
 
     setRoomsError(`WS: ${lastError.error}`);
-  }, [ws.messages]);
+  }, [resumeJoinInProgress, ws.messages]);
 
   const activeLeaderboardMode: LeaderboardMode = !isMultiplayerMode
     ? 'solo'
@@ -1329,7 +1335,7 @@ export default function GameView(): JSX.Element {
         }
       }
     }
-  }, [ws.messages]);
+  }, [resumeJoinInProgress, ws.messages]);
 
   useEffect(() => {
     const lastWorldInit = [...ws.messages].reverse().find(isMatchWorldInit);
@@ -1395,6 +1401,10 @@ export default function GameView(): JSX.Element {
     scene.applyMatchWorldInit(lastWorldInit);
     const { gridW, gridH } = lastWorldInit.world;
     worldReadyRef.current = true;
+    if (resumeJoinInProgress) {
+      setResumeJoinInProgress(false);
+      resumeRoomCodeRef.current = null;
+    }
     diagnosticsStore.log('ROOM', 'INFO', 'world_init:accepted', {
       roomCode: gotRoomCode,
       matchId: activeExpectedMatchId,
@@ -1414,7 +1424,7 @@ export default function GameView(): JSX.Element {
         snapTick: pendingSnapshot.tick ?? null,
       });
     }
-  }, [ws.messages, localTgUserId]);
+  }, [localTgUserId, resumeJoinInProgress, ws.messages]);
 
 
   useEffect(() => {
@@ -1537,6 +1547,10 @@ export default function GameView(): JSX.Element {
     if (!scene) return;
 
     scene.applyMatchSnapshot(snapshot, localTgUserId);
+    if (resumeJoinInProgress) {
+      setResumeJoinInProgress(false);
+      resumeRoomCodeRef.current = null;
+    }
     firstSnapshotReadyRef.current = true;
     lastAppliedSnapshotTickRef.current = snapshot.tick;
 
@@ -1551,7 +1565,7 @@ export default function GameView(): JSX.Element {
         });
       }
     }
-  }, [ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode]);
+  }, [ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode, resumeJoinInProgress]);
 
 
   useEffect(() => {
@@ -1967,6 +1981,63 @@ export default function GameView(): JSX.Element {
     }
   }, [currentRoom?.roomCode, isMultiplayerDebugEnabled, joiningRoomCode]);
 
+  const resumeRoomByCode = useCallback(async (roomCodeRaw: string): Promise<void> => {
+    const roomCode = roomCodeRaw.trim().toUpperCase();
+    if (!roomCode) {
+      clearLastSession();
+      return;
+    }
+
+    if (!localTgUserId) {
+      setRoomsError('Resume failed: player identity is unavailable.');
+      clearLastSession();
+      return;
+    }
+
+    setRoomsError(null);
+    setResumeJoinInProgress(true);
+    resumeRoomCodeRef.current = roomCode;
+
+    try {
+      const roomData = await fetchRoom(roomCode);
+      if (!roomData) {
+        setRoomsError('Resume failed: unable to fetch room.');
+        clearLastSession();
+        setResumeJoinInProgress(false);
+        resumeRoomCodeRef.current = null;
+        return;
+      }
+
+      if (roomData.error) {
+        setRoomsError(`Resume failed: ${mapRoomError(roomData.error)}`);
+        clearLastSession();
+        setResumeJoinInProgress(false);
+        resumeRoomCodeRef.current = null;
+        return;
+      }
+
+      const isMember = roomData.members.some((member) => String(member.tgUserId) === String(localTgUserId));
+      if (!isMember) {
+        setRoomsError('Resume failed: you are no longer a member of this room.');
+        clearLastSession();
+        setResumeJoinInProgress(false);
+        resumeRoomCodeRef.current = null;
+        return;
+      }
+
+      setCurrentRoom(roomData.room);
+      setCurrentRoomMembers(roomData.members);
+      setCurrentMatchId(null);
+      setMultiplayerUiOpen(false);
+      setDeepLinkJoinCode(null);
+    } catch {
+      setRoomsError('Resume failed: unexpected error while restoring room.');
+      clearLastSession();
+      setResumeJoinInProgress(false);
+      resumeRoomCodeRef.current = null;
+    }
+  }, [localTgUserId]);
+
   useEffect(() => {
     if (currentRoom?.roomCode) {
       saveLastSession({ roomCode: currentRoom.roomCode, lastActivityAtMs: Date.now() });
@@ -1994,8 +2065,21 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    void joinRoomByCode(lastSession.roomCode);
-  }, [currentRoom?.roomCode, joinRoomByCode, ws.connected]);
+    void resumeRoomByCode(lastSession.roomCode);
+  }, [currentRoom?.roomCode, resumeRoomByCode, ws.connected]);
+
+  useEffect(() => {
+    if (!resumeJoinInProgress) return;
+    if (!ws.lastError) return;
+
+    setRoomsError(`Resume failed: WS ${ws.lastError}`);
+    clearLastSession();
+    setResumeJoinInProgress(false);
+    resumeRoomCodeRef.current = null;
+    setCurrentRoom(null);
+    setCurrentRoomMembers([]);
+    setCurrentMatchId(null);
+  }, [resumeJoinInProgress, ws.lastError]);
 
   const onCreateRoom = useCallback(async (capacity: 2 | 3 | 4): Promise<void> => {
     setRoomsError(null);
@@ -2024,6 +2108,8 @@ export default function GameView(): JSX.Element {
     setMultiplayerDisconnectedByUserId({});
     setRestartVote(null);
     setMatchEndState(null);
+    setResumeJoinInProgress(false);
+    resumeRoomCodeRef.current = null;
     expectedRoomCodeRef.current = null;
     expectedMatchIdRef.current = null;
     worldReadyRef.current = false;
@@ -2720,7 +2806,7 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {!showBootSplash && gameFlowPhase !== 'playing' && (
+      {!showBootSplash && gameFlowPhase !== 'playing' && !resumeJoinInProgress && (
         <div className="game-flow-overlay" role="status" aria-live="polite">
           {gameFlowPhase === 'intro' ? (
             <div className="intro-layer" aria-label="Rift Runners intro animation">
