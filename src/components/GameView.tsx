@@ -2302,7 +2302,9 @@ export default function GameView(): JSX.Element {
     }
 
     const lastSession = loadLastSession();
-    if (!lastSession) return;
+    if (!lastSession) {
+      return;
+    }
 
     if (!canResumeSession(lastSession)) {
       clearLastSession();
@@ -2314,6 +2316,9 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    // Mark prompt as shown only after basic validation passes
+    resumePromptShownRef.current = true;
+
     let cancelled = false;
 
     void (async () => {
@@ -2321,12 +2326,11 @@ export default function GameView(): JSX.Element {
         const roomData = await fetchRoom(lastSession.roomCode);
         if (cancelled) return;
 
-        const roomExists = Boolean(roomData && !roomData.error && roomData.room);
+        const roomExists = Boolean(roomData && !roomData.error);
         const isMember = Boolean(
-          roomData?.members?.some((m) => String(m.tgUserId) === String(localTgUserId))
+          roomData?.members.some((member) => String(member.tgUserId) === String(localTgUserId))
         );
-        const roomPhase = roomData?.room?.phase ?? 'LOBBY';
-        const isStarted = roomPhase === 'STARTED';
+        const isStarted = roomData?.room?.phase === 'STARTED';
 
         if (!roomExists || !isMember || !isStarted) {
           clearLastSession();
@@ -2335,15 +2339,13 @@ export default function GameView(): JSX.Element {
               roomCode: lastSession.roomCode,
               roomExists,
               isMember,
-              roomPhase,
+              isStarted,
               roomError: roomData?.error ?? null,
+              roomPhase: roomData?.room?.phase ?? null,
             });
           }
           return;
         }
-
-        // IMPORTANT: mark prompt shown only when we are actually about to prompt
-        resumePromptShownRef.current = true;
 
         const shouldResume = window.confirm('Return to previous multiplayer game?');
         if (cancelled) return;
@@ -2357,8 +2359,6 @@ export default function GameView(): JSX.Element {
         void resumeRoomByCode(lastSession.roomCode, lastSession.matchId ?? null);
       } catch {
         if (cancelled) return;
-
-        // fetch failed: treat as stale for now (keeps behavior), but log details
         clearLastSession();
         if (isMultiplayerDebugEnabled) {
           diagnosticsStore.log('ROOM', 'WARN', 'rejoin:stale_last_session_cleared', {
@@ -3212,7 +3212,7 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {resumeJoinInProgress && (rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying') && (
+      {gameFlowPhase === 'playing' && resumeJoinInProgress && (rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying') && (
         <div className="waiting-overlay" role="status" aria-live="polite">
           <div className="waiting-overlay__card">
             <strong>Rejoining match…</strong>
