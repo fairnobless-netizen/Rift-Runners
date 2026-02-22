@@ -10,6 +10,8 @@ export type MatchClientMessage =
   | { type: 'match:start' }
   | { type: 'match:input'; seq: number; payload: MatchInputPayload }
   | { type: 'match:bomb_place'; payload: { x: number; y: number } }
+  | { type: 'mp:rejoin_ready'; roomCode: string; matchId: string }
+  | { type: 'mp:snapshot_applied'; matchId: string }
   | { type: 'room:restart_propose' }
   | { type: 'room:restart_vote'; vote: 'yes' | 'no' };
 
@@ -191,6 +193,8 @@ export type MatchSnapshotV1 = MatchSnapshot;
 
 export type MatchServerMessage =
   | { type: 'match:started'; roomCode: string; matchId: string }
+  | { type: 'mp:rejoin_ack'; roomCode: string; matchId: string; serverTime: number }
+  | { type: 'mp:rejoin_sync'; matchId: string }
   | MatchWorldInit
   | MatchBombSpawned
   | MatchBombExploded

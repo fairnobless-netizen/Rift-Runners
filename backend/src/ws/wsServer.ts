@@ -26,6 +26,12 @@ type RoomState = {
   matchId: string | null;
 };
 
+type PendingRejoinHandshake = {
+  roomCode: string;
+  matchId: string;
+  timeoutId: NodeJS.Timeout;
+};
+
 type RestartVoteState = {
   active: boolean;
   yes: Set<string>;
@@ -54,6 +60,7 @@ const rooms = new Map<string, RoomState>();
 const clients = new Set<ClientCtx>();
 const restartVotes = new Map<string, RestartVoteState>();
 const roomRegistry = new RoomRegistry();
+const pendingRejoinHandshakes = new Map<string, PendingRejoinHandshake>();
 
 const STALE_CONNECTION_MS = 60_000;
 const INACTIVE_ROOM_MS = 90_000;
@@ -421,6 +428,103 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
   });
 }
 
+function clearPendingRejoinHandshake(tgUserId: string): void {
+  const pending = pendingRejoinHandshakes.get(tgUserId);
+  if (!pending) {
+    return;
+  }
+
+  clearTimeout(pending.timeoutId);
+  pendingRejoinHandshakes.delete(tgUserId);
+}
+
+function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchState, reason: 'ready' | 'timeout'): void {
+  send(ctx.socket, {
+    type: 'match:started',
+    roomCode: roomId,
+    matchId: match.matchId,
+  });
+
+  send(ctx.socket, {
+    type: 'mp:rejoin_sync',
+    matchId: match.matchId,
+  });
+
+  send(ctx.socket, {
+    type: 'match:world_init',
+    roomCode: roomId,
+    matchId: match.matchId,
+    world: {
+      gridW: match.world.gridW,
+      gridH: match.world.gridH,
+      tiles: [...match.world.tiles],
+      worldHash: match.world.worldHash,
+    },
+  });
+
+  send(ctx.socket, {
+    type: 'match:snapshot',
+    snapshot: buildSnapshotFromMatch(match),
+  });
+
+  logWsEvent('ws_rejoin_sync_sent', {
+    tgUserId: ctx.tgUserId,
+    roomId,
+    matchId: match.matchId,
+    reason,
+  });
+}
+
+function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState): void {
+  clearPendingRejoinHandshake(ctx.tgUserId);
+
+  send(ctx.socket, {
+    type: 'match:started',
+    roomCode: roomId,
+    matchId: match.matchId,
+  });
+
+  send(ctx.socket, {
+    type: 'mp:rejoin_ack',
+    roomCode: roomId,
+    matchId: match.matchId,
+    serverTime: Date.now(),
+  });
+
+  logWsEvent('ws_rejoin_ack_sent', {
+    tgUserId: ctx.tgUserId,
+    roomId,
+    matchId: match.matchId,
+  });
+
+  const timeoutId = setTimeout(() => {
+    const pending = pendingRejoinHandshakes.get(ctx.tgUserId);
+    if (!pending || pending.matchId !== match.matchId || pending.roomCode !== roomId) {
+      return;
+    }
+
+    pendingRejoinHandshakes.delete(ctx.tgUserId);
+
+    const activeMatch = getMatch(match.matchId);
+    if (!activeMatch || activeMatch.roomId !== roomId) {
+      return;
+    }
+
+    sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'timeout');
+    logWsEvent('ws_rejoin_ready_timeout_fallback', {
+      tgUserId: ctx.tgUserId,
+      roomId,
+      matchId: match.matchId,
+    });
+  }, 4_000);
+
+  pendingRejoinHandshakes.set(ctx.tgUserId, {
+    roomCode: roomId,
+    matchId: match.matchId,
+    timeoutId,
+  });
+}
+
 function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
   const room = getRoom(roomId);
   if (!room) {
@@ -459,34 +563,7 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
     return;
   }
 
-  send(ctx.socket, {
-    type: 'match:started',
-    roomCode: roomId,
-    matchId: activeMatch.matchId,
-  });
-
-  send(ctx.socket, {
-    type: 'match:world_init',
-    roomCode: roomId,
-    matchId: activeMatch.matchId,
-    world: {
-      gridW: activeMatch.world.gridW,
-      gridH: activeMatch.world.gridH,
-      tiles: [...activeMatch.world.tiles],
-      worldHash: activeMatch.world.worldHash,
-    },
-  });
-
-  send(ctx.socket, {
-    type: 'match:snapshot',
-    snapshot: buildSnapshotFromMatch(activeMatch),
-  });
-
-  logWsEvent('ws_rejoin_sync_sent', {
-    tgUserId: ctx.tgUserId,
-    roomId,
-    matchId: activeMatch.matchId,
-  });
+  beginRejoinHandshake(ctx, roomId, activeMatch);
 }
 
 async function detachClientFromRoomDb(roomCode: string, tgUserId: string) {
@@ -564,6 +641,8 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
   if (keepRoomForRejoin) {
     roomRegistry.ensureRoom(roomId);
   }
+
+  clearPendingRejoinHandshake(ctx.tgUserId);
 
   ctx.roomId = null;
   ctx.matchId = null;
@@ -651,6 +730,50 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         ctx.matchId = activeMatch.matchId;
       }
       sendRejoinSyncIfActiveMatch(ctx, msg.roomId);
+      return;
+    }
+
+
+    case 'mp:rejoin_ready': {
+      if (!ctx.roomId || !ctx.matchId) {
+        logInboundDrop(ctx, msg, 'rejoin_ready_no_session');
+        return;
+      }
+
+      const room = rooms.get(ctx.roomId);
+      if (!room || !isSocketAttachedToRoom(ctx, room) || room.matchId !== ctx.matchId) {
+        logInboundDrop(ctx, msg, 'rejoin_ready_room_mismatch', room);
+        return;
+      }
+
+      if (msg.roomCode !== ctx.roomId || msg.matchId !== ctx.matchId) {
+        logInboundDrop(ctx, msg, 'rejoin_ready_payload_mismatch', room);
+        return;
+      }
+
+      const pending = pendingRejoinHandshakes.get(ctx.tgUserId);
+      if (!pending || pending.roomCode !== ctx.roomId || pending.matchId !== ctx.matchId) {
+        logInboundDrop(ctx, msg, 'rejoin_ready_no_pending', room);
+        return;
+      }
+
+      clearPendingRejoinHandshake(ctx.tgUserId);
+      const activeMatch = getMatch(ctx.matchId);
+      if (!activeMatch || activeMatch.roomId !== ctx.roomId) {
+        return;
+      }
+
+      sendRejoinSnapshotBundle(ctx, ctx.roomId, activeMatch, 'ready');
+      return;
+    }
+
+    case 'mp:snapshot_applied': {
+      logWsEvent('ws_snapshot_applied_ack', {
+        tgUserId: ctx.tgUserId,
+        roomId: ctx.roomId,
+        ctxMatchId: ctx.matchId,
+        matchId: msg.matchId,
+      });
       return;
     }
 
