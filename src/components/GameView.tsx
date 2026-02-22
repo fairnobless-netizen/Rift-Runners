@@ -2301,8 +2301,6 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    resumePromptShownRef.current = true;
-
     const lastSession = loadLastSession();
     if (!lastSession) {
       return;
@@ -2318,12 +2316,21 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    // Mark prompt as shown only after basic validation passes
+    resumePromptShownRef.current = true;
+
+    let cancelled = false;
+
     void (async () => {
       try {
         const roomData = await fetchRoom(lastSession.roomCode);
+        if (cancelled) return;
+
         const roomExists = Boolean(roomData && !roomData.error);
-        const isMember = Boolean(roomData?.members.some((member) => String(member.tgUserId) === String(localTgUserId)));
-        const isStarted = roomData?.room.phase === 'STARTED';
+        const isMember = Boolean(
+          roomData?.members.some((member) => String(member.tgUserId) === String(localTgUserId))
+        );
+        const isStarted = roomData?.room?.phase === 'STARTED';
 
         if (!roomExists || !isMember || !isStarted) {
           clearLastSession();
@@ -2333,11 +2340,25 @@ export default function GameView(): JSX.Element {
               roomExists,
               isMember,
               isStarted,
+              roomError: roomData?.error ?? null,
+              roomPhase: roomData?.room?.phase ?? null,
             });
           }
           return;
         }
+
+        const shouldResume = window.confirm('Return to previous multiplayer game?');
+        if (cancelled) return;
+
+        if (!shouldResume) {
+          clearLastSession();
+          resetResumeAttemptState('idle');
+          return;
+        }
+
+        void resumeRoomByCode(lastSession.roomCode, lastSession.matchId ?? null);
       } catch {
+        if (cancelled) return;
         clearLastSession();
         if (isMultiplayerDebugEnabled) {
           diagnosticsStore.log('ROOM', 'WARN', 'rejoin:stale_last_session_cleared', {
@@ -2345,19 +2366,20 @@ export default function GameView(): JSX.Element {
             reason: 'fetch_failed',
           });
         }
-        return;
       }
-
-      const shouldResume = window.confirm('Return to previous multiplayer game?');
-      if (!shouldResume) {
-        clearLastSession();
-        resetResumeAttemptState('idle');
-        return;
-      }
-
-      void resumeRoomByCode(lastSession.roomCode, lastSession.matchId ?? null);
     })();
-  }, [currentRoom?.roomCode, localTgUserId, resetResumeAttemptState, resumeRoomByCode, ws.connected]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentRoom?.roomCode,
+    isMultiplayerDebugEnabled,
+    localTgUserId,
+    resetResumeAttemptState,
+    resumeRoomByCode,
+    ws.connected,
+  ]);
 
   useEffect(() => {
     if (!resumeJoinInProgress) return;
