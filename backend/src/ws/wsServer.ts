@@ -649,7 +649,9 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
   }
 
   if (room) {
-    room.players.delete(leavingTgUserId);
+    if (room.players.get(leavingTgUserId) === ctx.socket) {
+      room.players.delete(leavingTgUserId);
+    }
 
     const vote = restartVotes.get(roomId);
     if (vote) {
@@ -743,11 +745,20 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       const activeMatch = getMatchByRoom(msg.roomId);
       const isStartedPhase = roomPhase === 'STARTED';
       const isKnownPlayerInActiveMatch = Boolean(activeMatch?.players.has(ctx.tgUserId));
+      const room = getRoom(msg.roomId);
+      const existingPlayerSocket = room?.players.get(ctx.tgUserId);
+      const canTakeoverStartedSocket = Boolean(
+        activeMatch
+        && isStartedPhase
+        && isKnownPlayerInActiveMatch
+        && existingPlayerSocket
+        && existingPlayerSocket !== ctx.socket,
+      );
       const canRejoinStarted = Boolean(
         activeMatch
         && isStartedPhase
         && isKnownPlayerInActiveMatch
-        && isPlayerRejoinable(activeMatch, ctx.tgUserId),
+        && (isPlayerRejoinable(activeMatch, ctx.tgUserId) || canTakeoverStartedSocket),
       );
 
       if (roomPhase !== 'LOBBY' && !canRejoinStarted) {
@@ -772,12 +783,23 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return send(ctx.socket, { type: 'match:error', error: `room_started:${rejoinReason}` });
       }
 
+      if (canTakeoverStartedSocket && existingPlayerSocket) {
+        logWsEvent('ws_rejoin_takeover', {
+          roomId: msg.roomId,
+          tgUserId: ctx.tgUserId,
+        });
+
+        try {
+          existingPlayerSocket.terminate();
+        } catch {}
+      }
+
       attachClientToRoom(ctx, msg.roomId);
       if (activeMatch && roomPhase === 'STARTED') {
         markPlayerReconnected(activeMatch, ctx.tgUserId);
-        const room = getRoom(msg.roomId);
-        if (room) {
-          room.matchId = activeMatch.matchId;
+        const joinedRoom = getRoom(msg.roomId);
+        if (joinedRoom) {
+          joinedRoom.matchId = activeMatch.matchId;
         }
         ctx.matchId = activeMatch.matchId;
       }
