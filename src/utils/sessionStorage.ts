@@ -1,8 +1,13 @@
 const RESUME_WINDOW_MS = 60_000;
 const LAST_SESSION_KEY = 'rr_last_session_v1';
 
+export type SessionMode = 'mp' | 'sp';
+
 export type LastSessionMeta = {
   roomCode: string;
+  tgUserId: string;
+  mode: SessionMode;
+  matchId: string | null;
   lastActivityAtMs: number;
 };
 
@@ -22,12 +27,27 @@ export function loadLastSession(): LastSessionMeta | null {
       return null;
     }
 
+    if (typeof parsed.tgUserId !== 'string' || !parsed.tgUserId) {
+      return null;
+    }
+
+    if (parsed.mode !== 'mp' && parsed.mode !== 'sp') {
+      return null;
+    }
+
+    if (typeof parsed.matchId !== 'string' && parsed.matchId !== null) {
+      return null;
+    }
+
     if (typeof parsed.lastActivityAtMs !== 'number' || !Number.isFinite(parsed.lastActivityAtMs)) {
       return null;
     }
 
     return {
       roomCode: parsed.roomCode,
+      tgUserId: parsed.tgUserId,
+      mode: parsed.mode,
+      matchId: parsed.matchId,
       lastActivityAtMs: parsed.lastActivityAtMs,
     };
   } catch {
