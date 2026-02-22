@@ -710,14 +710,34 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       const roomPhase = String(dbRoom.phase ?? 'LOBBY');
       const activeMatch = getMatchByRoom(msg.roomId);
       const isStartedPhase = roomPhase === 'STARTED';
-      const canRejoinStarted = activeMatch !== null
+      const isKnownPlayerInActiveMatch = Boolean(activeMatch?.players.has(ctx.tgUserId));
+      const canRejoinStarted = Boolean(
+        activeMatch
         && isStartedPhase
-        && activeMatch.players.has(ctx.tgUserId)
-        && isPlayerRejoinable(activeMatch, ctx.tgUserId);
+        && isKnownPlayerInActiveMatch
+        && isPlayerRejoinable(activeMatch, ctx.tgUserId),
+      );
 
       if (roomPhase !== 'LOBBY' && !canRejoinStarted) {
         roomRegistry.markStarted(msg.roomId);
-        return send(ctx.socket, { type: 'match:error', error: 'room_started' });
+
+        const rejoinReason = roomPhase !== 'STARTED'
+          ? 'room_not_in_started_phase'
+          : !activeMatch
+            ? 'active_match_missing'
+            : !isKnownPlayerInActiveMatch
+              ? 'player_not_in_match'
+              : 'rejoin_grace_expired';
+
+        logWsEvent('ws_rejoin_join_denied', {
+          roomId: msg.roomId,
+          tgUserId: ctx.tgUserId,
+          roomPhase,
+          activeMatchId: activeMatch?.matchId ?? null,
+          reason: rejoinReason,
+        });
+
+        return send(ctx.socket, { type: 'match:error', error: `room_started:${rejoinReason}` });
       }
 
       attachClientToRoom(ctx, msg.roomId);
