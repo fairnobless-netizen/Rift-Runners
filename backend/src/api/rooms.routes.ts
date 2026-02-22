@@ -13,6 +13,7 @@ import {
   listMyRoomsV2,
   listPublicRooms,
   listRoomMembers,
+  resumeRoomTx,
   setRoomMemberReadyTx,
   startRoomTx,
 } from '../db/repos';
@@ -138,6 +139,35 @@ roomsRouter.post('/join', async (req, res) => {
     if (error?.code === 'ROOM_FULL') return res.status(409).json({ ok: false, error: 'room_full' });
     if (error?.code === 'ROOM_CLOSED') return res.status(409).json({ ok: false, error: 'room_closed' });
     if (error?.code === 'ROOM_STARTED') return res.status(409).json({ ok: false, error: 'room_started' });
+    return res.status(500).json({ ok: false, error: 'internal_error' });
+  }
+});
+
+
+roomsRouter.post('/resume', async (req, res) => {
+  const session = await resolveSessionFromRequest(req as any);
+  if (!session) return res.status(401).json({ ok: false, error: 'unauthorized' });
+
+  const roomCode = String((req as any).body?.roomCode ?? '').trim().toUpperCase();
+  if (!roomCode) return res.status(400).json({ ok: false, error: 'room_code_required' });
+
+  try {
+    const result = await resumeRoomTx({ tgUserId: session.tgUserId, roomCode });
+    return res.status(200).json({
+      ok: true,
+      room: {
+        roomCode: result.room.roomCode,
+        ownerTgUserId: result.room.ownerTgUserId,
+        capacity: result.room.capacity,
+        status: result.room.status,
+        phase: result.room.phase ?? 'LOBBY',
+        createdAt: result.room.createdAt,
+      },
+      members: result.members.map((member) => ({ ...member, ready: member.ready ?? false })),
+    });
+  } catch (error: any) {
+    if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });
+    if (error?.code === 'FORBIDDEN') return res.status(403).json({ ok: false, error: 'forbidden' });
     return res.status(500).json({ ok: false, error: 'internal_error' });
   }
 });
