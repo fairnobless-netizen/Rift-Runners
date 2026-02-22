@@ -1122,6 +1122,75 @@ export async function listRoomMembers(roomCode: string): Promise<RoomMemberRecor
   }));
 }
 
+export async function resumeRoomTx(params: { tgUserId: string; roomCode: string }): Promise<{ room: RoomRecord; members: RoomMemberRecord[] }> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const roomRes = await client.query<{ room_code: string; owner_tg_user_id: string; capacity: number; status: string; phase: string | null; started_at: string | null; started_by_tg_user_id: string | null; created_at: string }>(
+      `SELECT room_code, owner_tg_user_id, capacity, status, COALESCE(phase, 'LOBBY') AS phase, started_at, started_by_tg_user_id, created_at FROM rooms WHERE room_code = $1 FOR UPDATE`,
+      [params.roomCode],
+    );
+
+    const roomRow = roomRes.rows[0];
+    if (!roomRow) {
+      const error = new Error('room_not_found');
+      (error as any).code = 'ROOM_NOT_FOUND';
+      throw error;
+    }
+
+    const memberRes = await client.query<{ exists: number }>(
+      `SELECT 1 AS exists FROM room_members WHERE room_code = $1 AND tg_user_id = $2 LIMIT 1`,
+      [params.roomCode, params.tgUserId],
+    );
+
+    if (!memberRes.rows[0]) {
+      const error = new Error('forbidden');
+      (error as any).code = 'FORBIDDEN';
+      throw error;
+    }
+
+    const membersRes = await client.query<{ tg_user_id: string; display_name: string; joined_at: string; ready: boolean | null }>(
+      `
+      SELECT rm.tg_user_id, u.display_name, rm.joined_at, rm.ready
+      FROM room_members rm
+      JOIN users u ON u.tg_user_id = rm.tg_user_id
+      WHERE rm.room_code = $1
+      ORDER BY rm.joined_at ASC
+      `,
+      [params.roomCode],
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      room: {
+        roomCode: String(roomRow.room_code),
+        ownerTgUserId: String(roomRow.owner_tg_user_id),
+        capacity: Number(roomRow.capacity),
+        status: String(roomRow.status),
+        phase: String(roomRow.phase ?? 'LOBBY'),
+        startedAt: roomRow.started_at == null ? null : String(roomRow.started_at),
+        startedByTgUserId: roomRow.started_by_tg_user_id == null ? null : String(roomRow.started_by_tg_user_id),
+        createdAt: String(roomRow.created_at),
+      },
+      members: membersRes.rows.map((row) => ({
+        tgUserId: String(row.tg_user_id),
+        displayName: String(row.display_name ?? 'Unknown'),
+        joinedAt: String(row.joined_at),
+        ready: Boolean(row.ready ?? false),
+      })),
+    };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function listMyRooms(tgUserId: string): Promise<MyRoomRecord[]> {
   const { rows } = await pgQuery<{
     room_code: string;
