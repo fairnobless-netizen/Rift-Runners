@@ -358,12 +358,14 @@ export default function GameView(): JSX.Element {
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
   const resumePromptShownRef = useRef(false);
   const pendingResumeIntentRef = useRef<{ roomCode: string; matchId: string | null } | null>(null);
+  const resumeIntentExecutedRef = useRef(false);
   const resumeRoomCodeRef = useRef<string | null>(null);
   const resumeExpectedMatchIdRef = useRef<string | null>(null);
   const rejoinAttemptIdRef = useRef<string | null>(null);
   const rejoinCompletionSentRef = useRef(false);
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
+  const [resumeModal, setResumeModal] = useState<{ open: boolean; roomCode: string; matchId: string | null } | null>(null);
 
   const resetResumeAttemptState = useCallback((nextPhase: RejoinPhase = 'idle'): void => {
     setResumeJoinInProgress(false);
@@ -375,6 +377,7 @@ export default function GameView(): JSX.Element {
     pendingSnapshotRef.current = null;
     rejoinCompletionSentRef.current = false;
     pendingResumeIntentRef.current = null;
+    resumeIntentExecutedRef.current = false;
   }, []);
   const handleResumeFailure = useCallback((message: string, options?: { stale?: boolean; nextPhase?: RejoinPhase }): void => {
     setRoomsError(message);
@@ -2218,7 +2221,7 @@ export default function GameView(): JSX.Element {
     }
 
     if (isMultiplayerDebugEnabled) {
-      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_started', {
+      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_execute_start', {
         roomCode,
         matchId: expectedMatchId,
       });
@@ -2235,9 +2238,10 @@ export default function GameView(): JSX.Element {
       const roomData = await fetchRoom(roomCode);
       if (!roomData) {
         if (isMultiplayerDebugEnabled) {
-          diagnosticsStore.log('ROOM', 'WARN', 'rejoin:resume_failed', {
+          diagnosticsStore.log('ROOM', 'WARN', 'rejoin:resume_execute_failed', {
             roomCode,
             reason: 'room_fetch_failed_transient',
+            lastSessionCleared: false,
           });
         }
         handleResumeFailure('Resume failed: unable to fetch room.', { stale: false });
@@ -2245,22 +2249,26 @@ export default function GameView(): JSX.Element {
       }
 
       if (roomData.error) {
+        const definitiveErrors = new Set(['room_not_found', 'forbidden', 'room_closed', 'room_finished', 'grace_expired']);
+        const shouldClearLastSession = definitiveErrors.has(roomData.error);
         if (isMultiplayerDebugEnabled) {
-          diagnosticsStore.log('ROOM', 'ERROR', 'rejoin:resume_failed', {
+          diagnosticsStore.log('ROOM', shouldClearLastSession ? 'ERROR' : 'WARN', 'rejoin:resume_execute_failed', {
             roomCode,
             reason: roomData.error,
+            lastSessionCleared: shouldClearLastSession,
           });
         }
-        handleResumeFailure(`Resume failed: ${mapRoomError(roomData.error)}`);
+        handleResumeFailure(`Resume failed: ${mapRoomError(roomData.error)}`, { stale: shouldClearLastSession });
         return;
       }
 
       const isMember = roomData.members.some((member) => String(member.tgUserId) === String(localTgUserId));
       if (!isMember) {
         if (isMultiplayerDebugEnabled) {
-          diagnosticsStore.log('ROOM', 'ERROR', 'rejoin:resume_failed', {
+          diagnosticsStore.log('ROOM', 'ERROR', 'rejoin:resume_execute_failed', {
             roomCode,
             reason: 'not_member',
+            lastSessionCleared: true,
           });
         }
         handleResumeFailure('Resume failed: you are no longer a member of this room.');
@@ -2269,9 +2277,10 @@ export default function GameView(): JSX.Element {
 
       if (roomData.room.phase !== 'STARTED') {
         if (isMultiplayerDebugEnabled) {
-          diagnosticsStore.log('ROOM', 'ERROR', 'rejoin:resume_failed', {
+          diagnosticsStore.log('ROOM', 'ERROR', 'rejoin:resume_execute_failed', {
             roomCode,
             reason: `room_phase_${roomData.room.phase ?? 'unknown'}`,
+            lastSessionCleared: true,
           });
         }
         handleResumeFailure('Resume failed: room is no longer in active match.');
@@ -2285,9 +2294,10 @@ export default function GameView(): JSX.Element {
       setDeepLinkJoinCode(null);
     } catch {
       if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'ERROR', 'rejoin:resume_failed', {
+        diagnosticsStore.log('ROOM', 'WARN', 'rejoin:resume_execute_failed', {
           roomCode,
           reason: 'unexpected_error',
+          lastSessionCleared: false,
         });
       }
       handleResumeFailure('Resume failed: unexpected error while restoring room.', { stale: false });
@@ -2373,43 +2383,11 @@ export default function GameView(): JSX.Element {
       });
     }
 
-    const shouldResume = window.confirm('Return to previous multiplayer game?');
-
-    if (!shouldResume) {
-      if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_cancelled', {
-          roomCode: lastSession.roomCode,
-          matchId: lastSession.matchId ?? null,
-        });
-      }
-      clearLastSession();
-      resetResumeAttemptState('idle');
-      return;
-    }
-
-    if (isMultiplayerDebugEnabled) {
-      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_accepted', {
-        roomCode: lastSession.roomCode,
-        matchId: lastSession.matchId ?? null,
-        wsConnected: ws.connected,
-      });
-    }
-
-    if (!ws.connected) {
-      pendingResumeIntentRef.current = {
-        roomCode: lastSession.roomCode,
-        matchId: lastSession.matchId ?? null,
-      };
-      if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_queued_waiting_ws', {
-          roomCode: lastSession.roomCode,
-          matchId: lastSession.matchId ?? null,
-        });
-      }
-      return;
-    }
-
-    void resumeRoomByCode(lastSession.roomCode, lastSession.matchId ?? null);
+    setResumeModal({
+      open: true,
+      roomCode: lastSession.roomCode,
+      matchId: lastSession.matchId ?? null,
+    });
   }, [
     currentRoom?.roomCode,
     isMultiplayerDebugEnabled,
@@ -2419,12 +2397,61 @@ export default function GameView(): JSX.Element {
     ws.connected,
   ]);
 
+  const onCancelResumePrompt = useCallback((): void => {
+    if (!resumeModal?.open) return;
+
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_cancelled', {
+        roomCode: resumeModal.roomCode,
+        matchId: resumeModal.matchId,
+      });
+    }
+
+    clearLastSession();
+    pendingResumeIntentRef.current = null;
+    setResumeModal(null);
+    resetResumeAttemptState('idle');
+  }, [isMultiplayerDebugEnabled, resetResumeAttemptState, resumeModal]);
+
+  const onAcceptResumePrompt = useCallback((): void => {
+    if (!resumeModal?.open) return;
+
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_accepted', {
+        roomCode: resumeModal.roomCode,
+        matchId: resumeModal.matchId,
+        wsConnected: ws.connected,
+      });
+    }
+
+    const pendingIntent = {
+      roomCode: resumeModal.roomCode,
+      matchId: resumeModal.matchId,
+    };
+    pendingResumeIntentRef.current = pendingIntent;
+    resumeIntentExecutedRef.current = false;
+    setResumeModal(null);
+
+    if (!ws.connected) {
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_queued_waiting_for_ws', pendingIntent);
+      }
+      return;
+    }
+
+    resumeIntentExecutedRef.current = true;
+    pendingResumeIntentRef.current = null;
+    void resumeRoomByCode(pendingIntent.roomCode, pendingIntent.matchId);
+  }, [isMultiplayerDebugEnabled, resumeModal, resumeRoomByCode, ws.connected]);
+
   useEffect(() => {
     if (!ws.connected) return;
     if (resumeJoinInProgress) return;
+    if (resumeIntentExecutedRef.current) return;
     const pendingIntent = pendingResumeIntentRef.current;
     if (!pendingIntent) return;
 
+    resumeIntentExecutedRef.current = true;
     pendingResumeIntentRef.current = null;
     if (isMultiplayerDebugEnabled) {
       diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_started_after_ws_connected', {
@@ -3272,6 +3299,24 @@ export default function GameView(): JSX.Element {
             <strong>Rejoining match…</strong>
             <p>Phase: {rejoinPhase}</p>
             <button type="button" onClick={cancelResumeAttemptByUser}>Cancel rejoin</button>
+          </div>
+        </div>
+      )}
+      {resumeModal?.open && !currentRoom?.roomCode && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Resume previous game"
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.6)', display: 'grid', placeItems: 'center', zIndex: 2500 }}
+        >
+          <div className="rr-overlay-modal" style={{ width: 'min(420px, calc(100vw - 2rem))' }}>
+            <div className="settings-header">
+              <strong>Return to your previous game?</strong>
+            </div>
+            <div className="settings-panel" style={{ display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
+              <button type="button" onClick={onAcceptResumePrompt}>Resume</button>
+              <button type="button" className="ghost" onClick={onCancelResumePrompt}>Cancel</button>
+            </div>
           </div>
         </div>
       )}
