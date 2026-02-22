@@ -6,6 +6,7 @@ import type { MatchClientMessage, MatchServerMessage } from '../mp/protocol';
 import type { MatchState } from '../mp/types';
 import { isPlayerRejoinable, markPlayerDisconnected, markPlayerReconnected, startMatch, tryPlaceBomb } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
+import { touchLastMpSession } from '../mp/lastSessionStore';
 
 // ✅ add DB cleanup
 import { closeRoomTx, getRoomByCode, leaveRoomV2, removeRoomCascade, setRoomPhase } from '../db/repos';
@@ -795,6 +796,11 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       }
 
       attachClientToRoom(ctx, msg.roomId);
+      touchLastMpSession({
+        tgUserId: ctx.tgUserId,
+        roomCode: msg.roomId,
+        matchId: activeMatch?.matchId ?? null,
+      });
       if (activeMatch && roomPhase === 'STARTED') {
         markPlayerReconnected(activeMatch, ctx.tgUserId);
         const joinedRoom = getRoom(msg.roomId);
@@ -1077,6 +1083,12 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
           seq,
           payload,
         });
+
+        touchLastMpSession({
+          tgUserId: ctx.tgUserId,
+          roomCode: ctx.roomId,
+          matchId: match.matchId,
+        });
       }
 
       return;
@@ -1110,6 +1122,12 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       if (!spawned) {
         return;
       }
+
+      touchLastMpSession({
+        tgUserId: ctx.tgUserId,
+        roomCode: ctx.roomId,
+        matchId: match.matchId,
+      });
 
       broadcastToRoomMatch(room.roomId, match.matchId, spawned);
       return;

@@ -17,6 +17,7 @@ import {
   setRoomMemberReadyTx,
   startRoomTx,
 } from '../db/repos';
+import { touchLastMpSession } from '../mp/lastSessionStore';
 
 export const roomsRouter = Router();
 
@@ -32,6 +33,7 @@ roomsRouter.post('/', async (req, res) => {
 
   try {
     const room = await createRoomPublic({ tgUserId: session.tgUserId, name, capacity: capacity as 2 | 3 | 4, password: password || undefined });
+    touchLastMpSession({ tgUserId: session.tgUserId, roomCode: room.code, matchId: null });
     return res.status(200).json({ room });
   } catch {
     return res.status(500).json({ ok: false, error: 'internal_error' });
@@ -56,6 +58,7 @@ roomsRouter.post('/:code/join', async (req, res) => {
 
   try {
     const room = await joinRoomWithPassword({ tgUserId: session.tgUserId, roomCode, password: String((req as any).body?.password ?? '') || undefined });
+    touchLastMpSession({ tgUserId: session.tgUserId, roomCode: room.code, matchId: null });
     return res.status(200).json({ room });
   } catch (error: any) {
     if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });
@@ -103,6 +106,7 @@ roomsRouter.post('/create', async (req, res) => {
 
   try {
     const created = await createRoomTx(session.tgUserId, capacity);
+    touchLastMpSession({ tgUserId: session.tgUserId, roomCode: created.roomCode, matchId: null });
     return res.status(200).json({ ok: true, roomCode: created.roomCode, capacity });
   } catch {
     return res.status(500).json({ ok: false, error: 'internal_error' });
@@ -118,6 +122,7 @@ roomsRouter.post('/join', async (req, res) => {
 
   try {
     const joined = await joinRoomTx(session.tgUserId, roomCode);
+    touchLastMpSession({ tgUserId: session.tgUserId, roomCode: joined.roomCode, matchId: null });
     const room = await getRoomByCode(joined.roomCode);
     if (!room) return res.status(404).json({ ok: false, error: 'room_not_found' });
 
@@ -153,6 +158,7 @@ roomsRouter.post('/resume', async (req, res) => {
 
   try {
     const result = await resumeRoomTx({ tgUserId: session.tgUserId, roomCode });
+    touchLastMpSession({ tgUserId: session.tgUserId, roomCode: result.room.roomCode, matchId: null });
     return res.status(200).json({
       ok: true,
       room: {

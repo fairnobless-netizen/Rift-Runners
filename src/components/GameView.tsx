@@ -70,9 +70,7 @@ import type { WsDebugMetrics } from '../ws/wsTypes';
 import { resolveDevIdentity } from '../utils/devIdentity';
 import { API_BASE, apiUrl } from '../utils/apiBase';
 import {
-  canResumeSession,
   clearLastSession,
-  loadLastSession,
   saveLastSession,
   type LastSessionMeta,
 } from '../utils/sessionStorage';
@@ -360,6 +358,7 @@ export default function GameView(): JSX.Element {
   const userInteractedRef = useRef(false);
   const resumePromptShownRef = useRef(false);
   const pendingResumeIntentRef = useRef<{ roomCode: string; matchId: string | null } | null>(null);
+  const resumeServerCheckDoneRef = useRef(false);
   const resumeIntentExecutedRef = useRef(false);
   const resumeRoomCodeRef = useRef<string | null>(null);
   const resumeExpectedMatchIdRef = useRef<string | null>(null);
@@ -2397,101 +2396,66 @@ export default function GameView(): JSX.Element {
   }, [currentRoom?.phase, currentRoom?.roomCode, localTgUserId, persistSessionActivity]);
 
   useEffect(() => {
-    if (currentRoom?.roomCode || resumePromptShownRef.current) {
-      return;
-    }
+    if (!token || !localTgUserId) return;
+    if (currentRoom?.roomCode || resumePromptShownRef.current || resumeServerCheckDoneRef.current) return;
 
-    if (authReadyAtRef.current == null) {
-      return;
-    }
+    resumeServerCheckDoneRef.current = true;
 
-    if (Date.now() - authReadyAtRef.current >= 30_000) {
+    const runServerResumeCheck = async (): Promise<void> => {
       if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_outside_auth_window');
+        diagnosticsStore.log('ROOM', 'INFO', 'resume:server_check_started');
       }
-      return;
-    }
 
-    if (multiplayerUiOpen) {
-      if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_multiplayer_ui_open');
-      }
-      return;
-    }
-
-    if (userInteractedRef.current) {
-      if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_user_interacted');
-      }
-      return;
-    }
-
-    if (!localTgUserId) {
-      if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_no_localTgUserId');
-      }
-      return;
-    }
-
-    const lastSession = loadLastSession();
-    if (!lastSession) {
-      if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_no_lastSession');
-      }
-      return;
-    }
-
-    if (!canResumeSession(lastSession)) {
-      if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_stale', {
-          roomCode: lastSession.roomCode,
-          matchId: lastSession.matchId ?? null,
+      try {
+        const response = await fetch(apiUrl('/api/resume'), {
+          headers: { Authorization: `Bearer ${token}` },
         });
-      }
-      clearLastSession();
-      return;
-    }
 
-    if (lastSession.mode !== 'mp') {
-      if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_mode_mismatch', {
-          mode: lastSession.mode,
+        if (!response.ok) {
+          throw new Error(`status_${response.status}`);
+        }
+
+        const payload = await response.json() as {
+          canResume?: boolean;
+          roomCode?: string;
+          matchId?: string | null;
+        };
+
+        if (isMultiplayerDebugEnabled) {
+          diagnosticsStore.log('ROOM', 'INFO', 'resume:server_check_result', {
+            canResume: Boolean(payload?.canResume),
+            roomCode: payload?.roomCode ? String(payload.roomCode) : null,
+          });
+        }
+
+        if (!payload?.canResume || !payload?.roomCode) {
+          return;
+        }
+
+        resumePromptShownRef.current = true;
+        if (isMultiplayerDebugEnabled) {
+          diagnosticsStore.log('ROOM', 'INFO', 'resume:server_prompt_shown_server_driven', {
+            roomCode: payload.roomCode,
+            matchId: payload.matchId ?? null,
+          });
+        }
+
+        setResumeModal({
+          open: true,
+          roomCode: String(payload.roomCode),
+          matchId: payload.matchId == null ? null : String(payload.matchId),
         });
+      } catch (error) {
+        if (isMultiplayerDebugEnabled) {
+          diagnosticsStore.log('ROOM', 'WARN', 'resume:server_check_failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
-      clearLastSession();
-      return;
-    }
+    };
 
-    if (lastSession.tgUserId != null && String(lastSession.tgUserId) !== String(localTgUserId)) {
-      if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_skipped_user_mismatch', {
-          sessionTgUserId: String(lastSession.tgUserId),
-          localTgUserId: String(localTgUserId),
-        });
-      }
-      clearLastSession();
-      return;
-    }
-
-    resumePromptShownRef.current = true;
-    if (isMultiplayerDebugEnabled) {
-      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:resume_prompt_shown', {
-        roomCode: lastSession.roomCode,
-        matchId: lastSession.matchId ?? null,
-      });
-    }
-
-    setResumeModal({
-      open: true,
-      roomCode: lastSession.roomCode,
-      matchId: lastSession.matchId ?? null,
-    });
-  }, [
-    currentRoom?.roomCode,
-    isMultiplayerDebugEnabled,
-    localTgUserId,
-    multiplayerUiOpen,
-  ]);
+    void runServerResumeCheck();
+  }, [currentRoom?.roomCode, isMultiplayerDebugEnabled, localTgUserId, token]);
 
   const onCancelResumePrompt = useCallback((): void => {
     if (!resumeModal?.open) return;
