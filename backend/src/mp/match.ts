@@ -488,10 +488,10 @@ function applyPlayerDamage(match: MatchState, player: PlayerState, events: Match
   player.invulnUntilTick = 0;
 }
 function maybeEndMatch(match: MatchState, events: MatchEvent[]): void {
-  const alive = Array.from(match.players.values())
-    .filter((player) => player.state !== 'eliminated')
-    .map((player) => player.tgUserId);
-  if (alive.length > 1) return;
+  if (match.ended) return;
+
+  const contenders = getRemainingContenders(match);
+  if (contenders.length > 1) return;
 
   match.ended = true;
   events.push({
@@ -500,9 +500,13 @@ function maybeEndMatch(match: MatchState, events: MatchEvent[]): void {
     matchId: match.matchId,
     serverTick: match.tick,
     tick: match.tick,
-    winnerTgUserId: alive[0] ?? null,
-    reason: alive.length === 1 ? 'elimination' : 'draw',
+    winnerTgUserId: contenders[0]?.tgUserId ?? null,
+    reason: contenders.length === 1 ? 'elimination' : 'draw',
   });
+}
+
+function getRemainingContenders(match: MatchState): PlayerState[] {
+  return Array.from(match.players.values()).filter((player) => player.state !== 'eliminated');
 }
 
 function collectExplosionImpacts(match: MatchState, x: number, y: number, range: number): Array<{ x: number; y: number }> {
