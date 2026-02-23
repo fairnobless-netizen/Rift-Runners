@@ -460,17 +460,11 @@ export default function GameView(): JSX.Element {
       return;
     }
 
+    rejoinCompletionSentRef.current = true;
     worldReadyRef.current = true;
     firstSnapshotReadyRef.current = true;
     lastAppliedSnapshotTickRef.current = appliedSnapshot.tick;
 
-    const scene = sceneRef.current;
-    const needsNetResync = scene?.getSnapshotRoutingStats().needsNetResync ?? true;
-    if (!scene || needsNetResync) {
-      return;
-    }
-
-    rejoinCompletionSentRef.current = true;
     ws.send({
       type: 'mp:snapshot_applied',
       matchId: appliedSnapshot.matchId,
@@ -604,20 +598,6 @@ export default function GameView(): JSX.Element {
   );
 
   const rejoinOverlayActive = rejoinPhase !== 'idle' && rejoinPhase !== 'rejoin_complete' && rejoinPhase !== 'rejoin_failed';
-  const resumeNeedsNetResync = sceneRef.current?.getSnapshotRoutingStats().needsNetResync ?? true;
-  const resumeInputGateReason = !expectedRoomCodeRef.current || !expectedMatchIdRef.current
-    ? 'no_match'
-    : !worldReadyRef.current
-      ? 'world_not_ready'
-      : resumeNeedsNetResync
-        ? 'await_net_resync'
-        : null;
-  const showResumeRejoinOverlay = gameFlowPhase === 'playing' && resumeJoinInProgress && (
-    rejoinPhase === 'rejoin_wait_ack'
-    || rejoinPhase === 'rejoin_resetting'
-    || rejoinPhase === 'rejoin_applying'
-    || resumeInputGateReason !== null
-  );
   const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive || waitingForOtherPlayer;
   const isMobileViewport = Math.min(viewportSize.width, viewportSize.height) < MOBILE_ROTATE_OVERLAY_BREAKPOINT;
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
@@ -3455,12 +3435,11 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {showResumeRejoinOverlay && (
+      {gameFlowPhase === 'playing' && resumeJoinInProgress && (rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying') && (
         <div className="waiting-overlay" role="status" aria-live="polite">
           <div className="waiting-overlay__card">
-            <strong>{resumeInputGateReason ? 'Syncing…' : 'Rejoining match…'}</strong>
+            <strong>Rejoining match…</strong>
             <p>Phase: {rejoinPhase}</p>
-            {resumeInputGateReason ? <p>Input gate: {resumeInputGateReason}</p> : null}
             <button type="button" onClick={cancelResumeAttemptByUser}>Cancel rejoin</button>
           </div>
         </div>
