@@ -64,35 +64,67 @@ function getCornerSpawnPosition(idx: number, gridW: number, gridH: number): Cell
 }
 
 
-function buildInitialEnemies(gridW: number, gridH: number, tiles: number[]): Map<string, EnemyState> {
+function shuffleCells(cells: Cell[], rng: () => number): Cell[] {
+  const shuffled = [...cells];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+function buildInitialEnemies(gridW: number, gridH: number, tiles: number[], seed: string): Map<string, EnemyState> {
   const enemies = new Map<string, EnemyState>();
   const desiredCount = 6;
   const spawnSafeCells = getSpawnSafeCells(gridW, gridH);
+  const rng = createSeededRng(seed);
+  const candidates: Cell[] = [];
 
-  for (let y = gridH - 2; y >= 1 && enemies.size < desiredCount; y -= 1) {
-    for (let x = gridW - 2; x >= 1 && enemies.size < desiredCount; x -= 1) {
+  for (let y = 1; y < gridH - 1; y += 1) {
+    for (let x = 1; x < gridW - 1; x += 1) {
       const idx = y * gridW + x;
       const tile = tiles[idx] ?? 1;
       if (tile !== 0) continue;
       if (spawnSafeCells.has(`${x},${y}`)) continue;
-
-      const id = `enemy_${enemies.size + 1}`;
-      enemies.set(id, {
-        id,
-        x,
-        y,
-        facing: 'left',
-        alive: true,
-        isMoving: false,
-        moveFromX: x,
-        moveFromY: y,
-        moveToX: x,
-        moveToY: y,
-        moveStartTick: 0,
-        moveDurationTicks: 0,
-        moveStartServerTimeMs: Date.now(),
-      });
+      candidates.push({ x, y });
     }
+  }
+
+  const shuffledCandidates = shuffleCells(candidates, rng);
+  const midY = Math.floor(gridH / 2);
+  const topHalf = shuffledCandidates.filter(({ y }) => y < midY);
+  const bottomHalf = shuffledCandidates.filter(({ y }) => y >= midY);
+  const topTarget = Math.ceil(desiredCount / 2);
+  const bottomTarget = desiredCount - topTarget;
+
+  const selected: Cell[] = [];
+  selected.push(...topHalf.slice(0, topTarget));
+  selected.push(...bottomHalf.slice(0, bottomTarget));
+
+  if (selected.length < desiredCount) {
+    const remainingTop = topHalf.slice(topTarget);
+    const remainingBottom = bottomHalf.slice(bottomTarget);
+    const fallback = [...remainingTop, ...remainingBottom];
+    selected.push(...fallback.slice(0, desiredCount - selected.length));
+  }
+
+  for (const { x, y } of selected) {
+    const id = `enemy_${enemies.size + 1}`;
+    enemies.set(id, {
+      id,
+      x,
+      y,
+      facing: 'left',
+      alive: true,
+      isMoving: false,
+      moveFromX: x,
+      moveFromY: y,
+      moveToX: x,
+      moveToY: y,
+      moveStartTick: 0,
+      moveDurationTicks: 0,
+      moveStartServerTimeMs: Date.now(),
+    });
   }
 
   return enemies;
@@ -167,7 +199,7 @@ export function createMatch(roomId: string, players: string[]): MatchState {
     maxBombsPerPlayer: 1,
     bombFuseTicks: 40,
     bombRange: 2,
-    enemies: buildInitialEnemies(gridW, gridH, worldTiles),
+    enemies: buildInitialEnemies(gridW, gridH, worldTiles, `${matchId}:enemies`),
     enemyMoveIntervalTicks: 5,
     eventSeq: 0,
     seenEventIds: [],
