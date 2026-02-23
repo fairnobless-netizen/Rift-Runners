@@ -17,6 +17,7 @@ export type PlayerState = {
   moveDurationTicks: number;
   moveStartServerTimeMs: number;
   intentDir: MoveDir | null;
+  intentLastSeenMs: number | null;
   state: 'alive' | 'dead_respawning' | 'eliminated';
   respawnAtTick: number | null;
   invulnUntilTick: number;
