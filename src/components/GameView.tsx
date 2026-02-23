@@ -262,6 +262,8 @@ export default function GameView(): JSX.Element {
   const joystickTouchZoneRef = useRef<HTMLDivElement | null>(null);
   const joystickPadRef = useRef<HTMLDivElement | null>(null);
   const joystickPointerIdRef = useRef<number | null>(null);
+  const joystickStartXRef = useRef(0);
+  const joystickStartYRef = useRef(0);
   const hudLivesRef = useRef<HTMLSpanElement | null>(null);
   const handledMatchEventIdsRef = useRef<Set<string>>(new Set());
   const bombBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -2045,25 +2047,20 @@ export default function GameView(): JSX.Element {
   const updateJoystickFromPointer = (clientX: number, clientY: number): void => {
     if (isInteractionBlocked) return;
 
-    const pad = joystickPadRef.current;
-    if (!pad) return;
-
-    const rect = pad.getBoundingClientRect();
-    const centerX = rect.left + (rect.width / 2);
-    const centerY = rect.top + (rect.height / 2);
-    const dx = clientX - centerX;
-    const dy = clientY - centerY;
+    const dx = clientX - joystickStartXRef.current;
+    const dy = clientY - joystickStartYRef.current;
     const distance = Math.hypot(dx, dy);
+
+    if (distance < JOYSTICK_DEADZONE) {
+      setJoystickOffset({ x: 0, y: 0 });
+      clearMovement();
+      return;
+    }
 
     const clampedScale = distance > JOYSTICK_RADIUS ? JOYSTICK_RADIUS / distance : 1;
     const clampedX = dx * clampedScale;
     const clampedY = dy * clampedScale;
     setJoystickOffset({ x: clampedX, y: clampedY });
-
-    if (distance < JOYSTICK_DEADZONE) {
-      clearMovement();
-      return;
-    }
 
     let direction: Direction;
     if (Math.abs(dx) >= Math.abs(dy)) {
@@ -2088,8 +2085,11 @@ export default function GameView(): JSX.Element {
       touchZone.setPointerCapture(event.pointerId);
     }
     joystickPointerIdRef.current = event.pointerId;
+    joystickStartXRef.current = event.clientX;
+    joystickStartYRef.current = event.clientY;
     setJoystickPressed(true);
-    updateJoystickFromPointer(event.clientX, event.clientY);
+    setJoystickOffset({ x: 0, y: 0 });
+    clearMovement();
   };
 
   const onJoystickPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
@@ -2108,10 +2108,14 @@ export default function GameView(): JSX.Element {
     if (touchZone && pointerId !== undefined && typeof touchZone.hasPointerCapture === 'function' && touchZone.hasPointerCapture(pointerId)) {
       touchZone.releasePointerCapture(pointerId);
     }
+    activeMoveDirRef.current = null;
+    clearMoveTimers();
     joystickPointerIdRef.current = null;
+    joystickStartXRef.current = 0;
+    joystickStartYRef.current = 0;
     setJoystickPressed(false);
     setJoystickOffset({ x: 0, y: 0 });
-    clearMovement();
+    setMovementFromDirection(null);
   };
 
   const onJoystickPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
@@ -2119,6 +2123,12 @@ export default function GameView(): JSX.Element {
 
     event.preventDefault();
     event.stopPropagation();
+
+    releaseJoystick(event.pointerId);
+  };
+
+  const onJoystickLostPointerCapture = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (joystickPointerIdRef.current !== event.pointerId) return;
 
     releaseJoystick(event.pointerId);
   };
@@ -3602,6 +3612,7 @@ export default function GameView(): JSX.Element {
                 onPointerUp={onJoystickPointerUp}
                 onPointerCancel={onJoystickPointerUp}
                 onPointerLeave={onJoystickPointerLeave}
+                onLostPointerCapture={onJoystickLostPointerCapture}
                 role="application"
                 aria-label="Virtual joystick"
               >
