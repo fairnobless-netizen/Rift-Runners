@@ -297,7 +297,7 @@ export function useWsClient(token?: string) {
 
         const delayMs = shouldSimulateSnapshot ? getNetDelayMs(config) : 0;
         window.setTimeout(() => {
-          setMessages((prev) => [...prev.slice(-50), msg]);
+          setMessages((prev) => [...prev.slice(-400), msg]);
         }, delayMs);
       },
     });
