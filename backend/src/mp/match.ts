@@ -16,7 +16,7 @@ const RESPAWN_DELAY_TICKS = 24;
 const INVULN_TICKS = 20;
 const MOVE_DURATION_TICKS = 6;
 const ENEMY_HIT_COOLDOWN_TICKS = 12;
-const INTENT_TTL_MS = 150;
+const INTENT_TTL_MS = 350;
 const LOG_MOVEMENT_STATE = false;
 const LOG_EXPLOSION_DAMAGE = false;
 export const REJOIN_GRACE_MS = 60_000;
@@ -572,10 +572,6 @@ function advancePlayerMovementStates(match: MatchState): void {
         player.x = player.moveToX;
         player.y = player.moveToY;
         resetPlayerMovementState(player, match.tick, now, false);
-        if (player.intentDir != null && player.intentLastSeenMs != null && now - player.intentLastSeenMs > INTENT_TTL_MS) {
-          player.intentDir = null;
-          player.intentLastSeenMs = null;
-        }
         if (LOG_MOVEMENT_STATE) {
           // eslint-disable-next-line no-console
           console.debug('[mp][move:end]', {
