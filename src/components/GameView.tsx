@@ -121,6 +121,8 @@ type AccountInfo = {
 
 type GameFlowPhase = 'intro' | 'start' | 'playing';
 type RejoinPhase = 'idle' | 'rejoin_wait_ack' | 'rejoin_resetting' | 'rejoin_ready' | 'rejoin_applying' | 'rejoin_complete' | 'rejoin_failed';
+type ResumeReadinessReason = 'no_match' | 'world_not_ready' | 'waiting_local_player';
+type ResumeReadiness = { ready: true; reason: null } | { ready: false; reason: ResumeReadinessReason };
 type NicknameCheckState =
   | 'idle'
   | 'checking'
@@ -474,7 +476,7 @@ export default function GameView(): JSX.Element {
     resetResumeAttemptState('rejoin_complete');
   }, [resetResumeAttemptState, resumeJoinInProgress, ws]);
 
-  const getResumeAuthoritativeReadiness = useCallback((): { ready: boolean; reason: 'no_match' | 'world_not_ready' | 'waiting_local_player' } => {
+  const getResumeAuthoritativeReadiness = useCallback((): ResumeReadiness => {
     const expectedRoomCode = expectedRoomCodeRef.current;
     const expectedMatchId = expectedMatchIdRef.current;
     if (!expectedRoomCode || !expectedMatchId) {
@@ -490,8 +492,8 @@ export default function GameView(): JSX.Element {
       return { ready: false, reason: 'waiting_local_player' };
     }
 
-    return { ready: true, reason: 'waiting_local_player' };
-  }, [lastSnapshotAt, rejoinPhase]);
+    return { ready: true, reason: null };
+  }, [lastSnapshotAt]);
 
   const sendMatchMove = useCallback((dir: Direction): void => {
     const expectedRoomCode = expectedRoomCodeRef.current;
@@ -509,13 +511,17 @@ export default function GameView(): JSX.Element {
     );
 
     let gateReason: string | null = null;
-    if (resumeJoinInProgress) {
+    let resumeReady: boolean | null = null;
+    let resumeReason: ResumeReadinessReason | null = null;
+    if (!ws.connected) {
+      gateReason = 'ws_not_ready';
+    } else if (resumeJoinInProgress) {
       const readiness = getResumeAuthoritativeReadiness();
+      resumeReady = readiness.ready;
+      resumeReason = readiness.reason;
       if (!readiness.ready) {
         gateReason = readiness.reason;
       }
-    } else if (!ws.connected) {
-      gateReason = 'ws_not_ready';
     } else if (!expectedRoomCode || !expectedMatchId) {
       gateReason = 'no_match';
     } else if (!worldReadyRef.current) {
@@ -534,6 +540,9 @@ export default function GameView(): JSX.Element {
       currentPhase: phase,
       matchPhase: gameFlowPhase,
       lastSnapshotAgeMs,
+      resumeJoinInProgress,
+      resumeReady,
+      resumeReason,
       gateDecision: gateReason == null ? 'allow' : 'deny',
       gateReason,
     });
@@ -2176,6 +2185,11 @@ export default function GameView(): JSX.Element {
       const hasWorldInit = worldReadyRef.current;
       const hasFirstSnapshot = firstSnapshotReadyRef.current;
       const needsNetResync = sceneRef.current?.getSnapshotRoutingStats().needsNetResync ?? true;
+      if (phase !== 'STARTED') {
+        setBombGateReason('phase_not_started');
+        return;
+      }
+
       if (resumeJoinInProgress) {
         const readiness = getResumeAuthoritativeReadiness();
         if (!readiness.ready) {
@@ -2183,10 +2197,6 @@ export default function GameView(): JSX.Element {
           return;
         }
       } else {
-        if (phase !== 'STARTED') {
-          setBombGateReason('phase_not_started');
-          return;
-        }
         if (!expectedRoomCode || !expectedMatchId) {
           setBombGateReason('await_match_context');
           return;
@@ -3474,7 +3484,7 @@ export default function GameView(): JSX.Element {
         <div className="waiting-overlay" role="status" aria-live="polite">
           <div className="waiting-overlay__card">
             <strong>Syncing…</strong>
-            <p>Reason: {resumeAuthoritativeReadiness.reason}</p>
+            {!resumeAuthoritativeReadiness.ready && <p>Reason: {resumeAuthoritativeReadiness.reason}</p>}
             {rejoinCancelable && <button type="button" onClick={cancelResumeAttemptByUser}>Cancel rejoin</button>}
           </div>
         </div>
