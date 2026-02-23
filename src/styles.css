@@ -369,6 +369,15 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+.joystick-touch-zone,
+.joystick-touch-zone * {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .joystick-touch-zone--active {
   background: radial-gradient(circle at center, #5568aa22, transparent 70%);
 }
