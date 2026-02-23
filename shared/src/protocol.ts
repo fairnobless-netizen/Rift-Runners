@@ -148,6 +148,15 @@ export type EnemySnapshot = {
   x: number;
   y: number;
   alive: boolean;
+  isMoving?: boolean;
+  moveFromX?: number;
+  moveFromY?: number;
+  moveToX?: number;
+  moveToY?: number;
+  moveStartTick?: number;
+  moveDurationTicks?: number;
+  moveStartServerTimeMs?: number;
+  moveDurationMs?: number;
 };
 
 export type MatchSnapshotPlayer = {

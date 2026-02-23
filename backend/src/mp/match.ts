@@ -108,6 +108,15 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
       x: enemy.x,
       y: enemy.y,
       alive: enemy.alive,
+      isMoving: enemy.isMoving,
+      moveFromX: enemy.isMoving ? enemy.moveFromX : enemy.x,
+      moveFromY: enemy.isMoving ? enemy.moveFromY : enemy.y,
+      moveToX: enemy.isMoving ? enemy.moveToX : enemy.x,
+      moveToY: enemy.isMoving ? enemy.moveToY : enemy.y,
+      moveStartTick: enemy.isMoving ? enemy.moveStartTick : match.tick,
+      moveDurationTicks: enemy.isMoving ? enemy.moveDurationTicks : 0,
+      moveStartServerTimeMs: enemy.isMoving ? enemy.moveStartServerTimeMs : now,
+      moveDurationMs: enemy.isMoving ? enemy.moveDurationTicks * TICK_RATE_MS : 0,
     })),
   };
 
@@ -321,15 +330,49 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
 
 function advanceEnemyMovementStates(match: MatchState): void {
   if (match.enemyMoveIntervalTicks <= 0) return;
-  if (match.tick % match.enemyMoveIntervalTicks !== 0) return;
+
+  const now = Date.now();
 
   for (const enemy of match.enemies.values()) {
     if (!enemy.alive) continue;
+
+    if (enemy.isMoving) {
+      const elapsed = match.tick - enemy.moveStartTick;
+      if (elapsed >= enemy.moveDurationTicks) {
+        enemy.x = enemy.moveToX;
+        enemy.y = enemy.moveToY;
+        resetEnemyMovementState(enemy, match.tick, now);
+      }
+    }
+
+    if (enemy.isMoving || match.tick % match.enemyMoveIntervalTicks !== 0) continue;
+
     const next = chooseEnemyNextCell(match, enemy);
     if (!next) continue;
+
+    enemy.isMoving = true;
+    enemy.moveFromX = enemy.x;
+    enemy.moveFromY = enemy.y;
+    enemy.moveToX = next.x;
+    enemy.moveToY = next.y;
+    enemy.moveStartTick = match.tick;
+    enemy.moveDurationTicks = match.enemyMoveIntervalTicks;
+    enemy.moveStartServerTimeMs = now;
+
     enemy.x = next.x;
     enemy.y = next.y;
   }
+}
+
+function resetEnemyMovementState(enemy: EnemyState, tick: number, now: number): void {
+  enemy.isMoving = false;
+  enemy.moveFromX = enemy.x;
+  enemy.moveFromY = enemy.y;
+  enemy.moveToX = enemy.x;
+  enemy.moveToY = enemy.y;
+  enemy.moveStartTick = tick;
+  enemy.moveDurationTicks = 0;
+  enemy.moveStartServerTimeMs = now;
 }
 
 function chooseEnemyNextCell(match: MatchState, enemy: EnemyState): { x: number; y: number } | null {

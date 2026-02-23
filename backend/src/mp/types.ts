@@ -30,6 +30,14 @@ export type EnemyState = {
   x: number;
   y: number;
   alive: boolean;
+  isMoving: boolean;
+  moveFromX: number;
+  moveFromY: number;
+  moveToX: number;
+  moveToY: number;
+  moveStartTick: number;
+  moveDurationTicks: number;
+  moveStartServerTimeMs: number;
   lastDir?: 0 | 1 | 2 | 3;
 };
 
