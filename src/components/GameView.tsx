@@ -1840,6 +1840,7 @@ export default function GameView(): JSX.Element {
       const me = players.find((player) => String(player?.tgUserId) === String(localTgUserId));
       if (typeof me?.lastInputSeq === 'number') {
         setAckLastInputSeq(me.lastInputSeq);
+        inputSeqRef.current = Math.max(inputSeqRef.current, me.lastInputSeq);
       }
     }
 
