@@ -30,6 +30,7 @@ export type EnemyState = {
   x: number;
   y: number;
   alive: boolean;
+  lastDir?: 0 | 1 | 2 | 3;
 };
 
 export type MatchState = {
