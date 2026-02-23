@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, type FormEvent } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
-import { GAME_CONFIG, scaleMovementDurationMs } from '../game/config';
+import { GAME_CONFIG } from '../game/config';
 
 import {
   EVENT_ASSET_PROGRESS,
@@ -255,8 +255,6 @@ export default function GameView(): JSX.Element {
   const gameRef = useRef<Phaser.Game | null>(null);
   const sceneRef = useRef<GameScene | null>(null);
   const inputSeqRef = useRef(0);
-  const moveRepeatTimerRef = useRef<number | null>(null);
-  const moveRepeatDelayTimerRef = useRef<number | null>(null);
   const activeMoveDirRef = useRef<Direction | null>(null);
 
   const joystickTouchZoneRef = useRef<HTMLDivElement | null>(null);
@@ -476,7 +474,7 @@ export default function GameView(): JSX.Element {
     resetResumeAttemptState('rejoin_complete');
   }, [resetResumeAttemptState, resumeJoinInProgress, ws]);
 
-  const sendMatchMove = useCallback((dir: Direction): void => {
+  const sendMatchMoveIntent = useCallback((dir: Direction | null): void => {
     const expectedRoomCode = expectedRoomCodeRef.current;
     const expectedMatchId = expectedMatchIdRef.current;
     const phase = currentRoom?.phase ?? 'LOBBY';
@@ -534,10 +532,12 @@ export default function GameView(): JSX.Element {
     const seq = inputSeqRef.current + 1;
     inputSeqRef.current = seq;
 
-    const dx = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
-    const dy = dir === 'up' ? -1 : dir === 'down' ? 1 : 0;
+    if (dir) {
+      const dx = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
+      const dy = dir === 'up' ? -1 : dir === 'down' ? 1 : 0;
+      scene.onLocalMatchInput({ seq, dx, dy });
+    }
 
-    scene.onLocalMatchInput({ seq, dx, dy });
     ws.send(
       { type: 'match:input', seq, payload: { kind: 'move', dir } },
       {
@@ -776,54 +776,23 @@ export default function GameView(): JSX.Element {
   }, [currentTutorialStep, tutorialActive]);
 
 
-  const clearMoveTimers = (): void => {
-    if (moveRepeatDelayTimerRef.current != null) {
-      window.clearTimeout(moveRepeatDelayTimerRef.current);
-      moveRepeatDelayTimerRef.current = null;
-    }
-
-    if (moveRepeatTimerRef.current != null) {
-      window.clearInterval(moveRepeatTimerRef.current);
-      moveRepeatTimerRef.current = null;
-    }
-  };
-
   const setMovementFromDirection = (direction: Direction | null): void => {
     controlsRef.current.up = direction === 'up';
     controlsRef.current.down = direction === 'down';
     controlsRef.current.left = direction === 'left';
     controlsRef.current.right = direction === 'right';
 
-    // Multiplayer: translate joystick intent into match:input (server authoritative).
-    // This ensures other clients see movement and prevents local-only drifting.
+    // Multiplayer movement uses intent-state updates only on transitions.
     if (!isMultiplayerMode || !currentRoom) {
       return;
     }
 
-    // Stop repeat when released
-    if (!direction) {
-      activeMoveDirRef.current = null;
-      clearMoveTimers();
+    if (activeMoveDirRef.current === direction) {
       return;
     }
 
-    // If direction changed -> restart repeat and send immediately
-    if (activeMoveDirRef.current !== direction) {
-      activeMoveDirRef.current = direction;
-      clearMoveTimers();
-
-      // immediate step
-      sendMatchMove(direction);
-
-      // Repeat steps while held using solo cadence config.
-      moveRepeatDelayTimerRef.current = window.setTimeout(() => {
-        moveRepeatDelayTimerRef.current = null;
-        moveRepeatTimerRef.current = window.setInterval(() => {
-          if (activeMoveDirRef.current !== direction) return;
-          sendMatchMove(direction);
-        }, scaleMovementDurationMs(GAME_CONFIG.moveRepeatIntervalMs));
-      }, scaleMovementDurationMs(GAME_CONFIG.moveRepeatDelayMs));
-    }
+    activeMoveDirRef.current = direction;
+    sendMatchMoveIntent(direction);
   };
 
   const clearMovement = (): void => {
@@ -2004,9 +1973,8 @@ export default function GameView(): JSX.Element {
 
   useEffect(
     () => () => {
-      clearMoveTimers();
-      activeMoveDirRef.current = null;
       clearMovement();
+      activeMoveDirRef.current = null;
     },
     [],
   );
@@ -2108,8 +2076,6 @@ export default function GameView(): JSX.Element {
     if (touchZone && pointerId !== undefined && typeof touchZone.hasPointerCapture === 'function' && touchZone.hasPointerCapture(pointerId)) {
       touchZone.releasePointerCapture(pointerId);
     }
-    activeMoveDirRef.current = null;
-    clearMoveTimers();
     joystickPointerIdRef.current = null;
     joystickStartXRef.current = 0;
     joystickStartYRef.current = 0;
@@ -3964,7 +3930,7 @@ export default function GameView(): JSX.Element {
         onStartMatch={() => ws.send({ type: 'match:start' })}
         getLocalPlayerPosition={() => sceneRef.current?.getLocalPlayerPosition() ?? null}
         onMove={(dir) => {
-          sendMatchMove(dir);
+          sendMatchMoveIntent(dir);
         }}
         inspectorEnabled={inspectorOpen}
         onToggleInspector={() => setInspectorOpen((v) => !v)}

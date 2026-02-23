@@ -1,9 +1,10 @@
 export type ProtocolVersion = 'match_v1';
 
 export type MoveDir = 'up' | 'down' | 'left' | 'right';
+export type MoveIntentDir = MoveDir | null;
 
 export type MatchInputPayload =
-  | { kind: 'move'; dir: MoveDir }
+  | { kind: 'move'; dir: MoveIntentDir }
   | { kind: 'bomb_place'; x: number; y: number };
 
 export type MatchClientMessage =
