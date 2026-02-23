@@ -384,34 +384,20 @@ function chooseEnemyNextCell(match: MatchState, enemy: EnemyState): { x: number;
 
   if (options.length === 0) return null;
 
-  const oppositeDir = enemy.lastDir == null ? null : (enemy.lastDir + 2) % dirs.length;
-  const nonBacktrackingOptions = oppositeDir == null || options.length < 2
-    ? options
-    : options.filter(({ dirIndex }) => dirIndex !== oppositeDir);
-  const rngOptions = nonBacktrackingOptions.length > 0 ? nonBacktrackingOptions : options;
-
   const continueOption = enemy.lastDir == null
     ? null
-    : rngOptions.find(({ dirIndex }) => dirIndex === enemy.lastDir);
+    : options.find(({ dirIndex }) => dirIndex === enemy.lastDir);
 
   let chosen = continueOption;
 
-  if (continueOption && rngOptions.length > 1) {
-    const turnChance = options.length >= 3 ? 0.45 : options.length === 2 ? 0.15 : 0;
-    const shouldTurn = deterministicRandom01(`${match.matchId}:${match.tick}:${enemy.id}:turn`) < turnChance;
-
-    if (shouldTurn) {
-      const turnOptions = rngOptions.filter(({ dirIndex }) => dirIndex !== continueOption.dirIndex);
-      if (turnOptions.length > 0) {
-        const turnRoll = deterministicRandom01(`${match.matchId}:${match.tick}:${enemy.id}:dir`);
-        const turnIndex = Math.floor(turnRoll * turnOptions.length);
-        chosen = turnOptions[turnIndex] ?? turnOptions[0];
-      }
-    }
-  }
-
   if (!chosen) {
-    const rand = deterministicRandom01(`${match.matchId}:${match.tick}:${enemy.id}:dir`);
+    const oppositeDir = enemy.lastDir == null ? null : (enemy.lastDir + 2) % dirs.length;
+    const nonBacktrackingOptions = oppositeDir == null || options.length < 2
+      ? options
+      : options.filter(({ dirIndex }) => dirIndex !== oppositeDir);
+
+    const rngOptions = nonBacktrackingOptions.length > 0 ? nonBacktrackingOptions : options;
+    const rand = deterministicRandom01(`${match.matchId}:${match.tick}:${enemy.id}`);
     const index = Math.floor(rand * rngOptions.length);
     chosen = rngOptions[index] ?? rngOptions[0];
   }
