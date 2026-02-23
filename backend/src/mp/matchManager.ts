@@ -19,13 +19,13 @@ function getSpawnSafeCells(gridW: number, gridH: number): Set<string> {
     { x: gridW - 3, y: 1 },
     { x: gridW - 2, y: 2 },
     // bottom-left
-    { x: 1, y: gridH - 2 },
-    { x: 2, y: gridH - 2 },
     { x: 1, y: gridH - 3 },
+    { x: 2, y: gridH - 3 },
+    { x: 1, y: gridH - 4 },
     // bottom-right
-    { x: gridW - 2, y: gridH - 2 },
-    { x: gridW - 3, y: gridH - 2 },
     { x: gridW - 2, y: gridH - 3 },
+    { x: gridW - 3, y: gridH - 3 },
+    { x: gridW - 2, y: gridH - 4 },
   ];
 
   return new Set(cells.map(({ x, y }) => `${x},${y}`));
@@ -55,9 +55,9 @@ function getCornerSpawnPosition(idx: number, gridW: number, gridH: number): Cell
     case 1:
       return { x: gridW - 2, y: 1 };
     case 2:
-      return { x: 1, y: gridH - 2 };
+      return { x: 1, y: gridH - 3 };
     case 3:
-      return { x: gridW - 2, y: gridH - 2 };
+      return { x: gridW - 2, y: gridH - 3 };
     default:
       return { x: 1, y: 1 };
   }
@@ -141,6 +141,10 @@ function buildWorldTiles(gridW: number, gridH: number, seed: string): number[] {
       const edge = x === 0 || y === 0 || x === gridW - 1 || y === gridH - 1;
       const pillar = x % 2 === 0 && y % 2 === 0;
       if (edge || pillar) {
+        if (spawnSafeCells.has(`${x},${y}`)) {
+          tiles.push(0);
+          continue;
+        }
         tiles.push(1); // hard wall
         continue;
       }
@@ -152,6 +156,16 @@ function buildWorldTiles(gridW: number, gridH: number, seed: string): number[] {
 
       const isBrick = rng() < breakableProbability;
       tiles.push(isBrick ? 2 : 0);
+    }
+  }
+
+  for (const cell of spawnSafeCells) {
+    const [xStr, yStr] = cell.split(',');
+    const x = Number(xStr);
+    const y = Number(yStr);
+    const idx = y * gridW + x;
+    if (tiles[idx] !== 0) {
+      tiles[idx] = 0;
     }
   }
 
