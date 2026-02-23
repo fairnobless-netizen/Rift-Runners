@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useCallback, type FormEvent } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG, scaleMovementDurationMs } from '../game/config';
@@ -460,17 +460,10 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    const scene = sceneRef.current;
-    const needsNetResync = scene?.getSnapshotRoutingStats().needsNetResync ?? true;
-    if (!scene || needsNetResync) {
-      lastAppliedSnapshotTickRef.current = appliedSnapshot.tick;
-      return;
-    }
-
+    rejoinCompletionSentRef.current = true;
     worldReadyRef.current = true;
     firstSnapshotReadyRef.current = true;
     lastAppliedSnapshotTickRef.current = appliedSnapshot.tick;
-    rejoinCompletionSentRef.current = true;
 
     ws.send({
       type: 'mp:snapshot_applied',
@@ -605,20 +598,6 @@ export default function GameView(): JSX.Element {
   );
 
   const rejoinOverlayActive = rejoinPhase !== 'idle' && rejoinPhase !== 'rejoin_complete' && rejoinPhase !== 'rejoin_failed';
-  const resumeGateReason = useMemo<string | null>(() => {
-    if (!resumeJoinInProgress) return null;
-
-    const expectedRoomCode = expectedRoomCodeRef.current;
-    const expectedMatchId = expectedMatchIdRef.current;
-    if (!expectedRoomCode || !expectedMatchId) return 'no_match';
-    if (!worldReadyRef.current) return 'world_not_ready';
-
-    const scene = sceneRef.current;
-    const needsNetResync = scene?.getSnapshotRoutingStats().needsNetResync ?? true;
-    if (needsNetResync) return 'await_net_resync';
-
-    return null;
-  }, [resumeJoinInProgress, rejoinPhase, ws.messages, gameFlowPhase]);
   const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive || waitingForOtherPlayer;
   const isMobileViewport = Math.min(viewportSize.width, viewportSize.height) < MOBILE_ROTATE_OVERLAY_BREAKPOINT;
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
@@ -3456,11 +3435,11 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {gameFlowPhase === 'playing' && resumeJoinInProgress && (rejoinOverlayActive || resumeGateReason !== null) && (
+      {gameFlowPhase === 'playing' && resumeJoinInProgress && (rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying') && (
         <div className="waiting-overlay" role="status" aria-live="polite">
           <div className="waiting-overlay__card">
-            <strong>{resumeGateReason ? 'Syncing…' : 'Rejoining match…'}</strong>
-            <p>{resumeGateReason ? `Reason: ${resumeGateReason}` : `Phase: ${rejoinPhase}`}</p>
+            <strong>Rejoining match…</strong>
+            <p>Phase: {rejoinPhase}</p>
             <button type="button" onClick={cancelResumeAttemptByUser}>Cancel rejoin</button>
           </div>
         </div>
