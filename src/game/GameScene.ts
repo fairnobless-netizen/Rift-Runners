@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { RemotePlayersRenderer } from './RemotePlayersRenderer';
 import { LocalPredictionController } from './LocalPredictionController';
-import type { MatchSnapshotPlayer, MatchSnapshotV1 } from '@shared/protocol';
+import type { EnemySnapshot, MatchSnapshotPlayer, MatchSnapshotV1 } from '@shared/protocol';
 import {
   canOccupyCell,
   createArena,
@@ -103,6 +103,8 @@ const INITIAL_LIVES = 3;
 const MAX_LIVES = 6;
 const EXTRA_LIFE_STEP_SCORE = 1000;
 const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / (1000 / 20)));
+// Enemy MP smoothing: local constant to avoid touching player movement pipeline.
+const MP_MOVE_TICK_MS_ENEMY = 1000 / 20;
 
 interface TileTweenSegment {
   fromX: number;
@@ -484,10 +486,10 @@ export class GameScene extends Phaser.Scene {
     let renderSimulationTick = 0;
     const latestSnapshot = this.snapshotBuffer.length > 0 ? this.snapshotBuffer[this.snapshotBuffer.length - 1] : undefined;
     const canUseMoveProgressRender = this.canUseMoveProgressRender(latestSnapshot);
+    const estimatedServerNowMs = canUseMoveProgressRender ? this.getEstimatedServerNowMs() : null;
     if (this.worldReady) {
       renderSimulationTick = this.simulationTick + this.accumulator / this.FIXED_DT;
       if (canUseMoveProgressRender && latestSnapshot) {
-        const estimatedServerNowMs = this.getEstimatedServerNowMs();
         if (estimatedServerNowMs !== null) {
           this.remotePlayers?.renderFromMoveProgress(
             latestSnapshot,
@@ -1875,13 +1877,41 @@ export class GameScene extends Phaser.Scene {
       if (!sprite) continue;
       const style = this.getAssetStyle('enemy', enemy.state, enemy.facing);
       const anim = this.getEnemyAnimationState(enemy, time);
+      const estimatedServerNowMs = this.getEstimatedServerNowMs();
+      const renderPos = this.gameMode === 'multiplayer'
+        ? this.getPlayerRenderPosFromMoveState(
+          {
+            tgUserId: enemy.key,
+            displayName: enemy.key,
+            colorId: 0,
+            skinId: 'default',
+            lastInputSeq: 0,
+            x: enemy.gridX,
+            y: enemy.gridY,
+            isMoving: enemy.isMoving,
+            moveFromX: enemy.moveFromX,
+            moveFromY: enemy.moveFromY,
+            moveToX: enemy.targetX,
+            moveToY: enemy.targetY,
+            moveStartServerTimeMs: enemy.moveStartedAtMs,
+            moveDurationMs: enemy.moveDurationMs,
+          },
+          estimatedServerNowMs ?? performance.now(),
+          tileSize,
+          this.simulationTick,
+        )
+        : null;
       const enemyDuration = Math.max(1, enemy.moveDurationMs);
       const enemyProgress = enemy.isMoving
         ? Phaser.Math.Clamp((time - enemy.moveStartedAtMs) / enemyDuration, 0, 1)
         : 1;
-      const renderGX = enemy.isMoving ? Phaser.Math.Linear(enemy.moveFromX, enemy.targetX, enemyProgress) : enemy.gridX;
-      const renderGY = enemy.isMoving ? Phaser.Math.Linear(enemy.moveFromY, enemy.targetY, enemyProgress) : enemy.gridY;
-      if (enemy.isMoving && enemyProgress >= 1) {
+      const renderGX = renderPos
+        ? ((renderPos.xPx - tileSize / 2) / tileSize)
+        : (enemy.isMoving ? Phaser.Math.Linear(enemy.moveFromX, enemy.targetX, enemyProgress) : enemy.gridX);
+      const renderGY = renderPos
+        ? ((renderPos.yPx - tileSize / 2) / tileSize)
+        : (enemy.isMoving ? Phaser.Math.Linear(enemy.moveFromY, enemy.targetY, enemyProgress) : enemy.gridY);
+      if (enemy.isMoving && enemyProgress >= 1 && this.gameMode !== 'multiplayer') {
         enemy.isMoving = false;
         enemy.moveStartedAtMs = 0;
       }
@@ -2688,7 +2718,7 @@ export class GameScene extends Phaser.Scene {
 
 
 
-  private syncEnemiesFromSnapshot(enemies: Array<{ id: string; x: number; y: number; alive: boolean }>): void {
+  private syncEnemiesFromSnapshot(enemies: EnemySnapshot[]): void {
     const seen = new Set<string>();
 
     for (const enemy of enemies) {
@@ -2698,31 +2728,39 @@ export class GameScene extends Phaser.Scene {
 
       const existing = this.enemies.get(key);
       if (existing) {
-        existing.moveFromX = existing.gridX;
-        existing.moveFromY = existing.gridY;
+        const enemyMoveDurationMs = typeof enemy.moveDurationMs === 'number'
+          ? enemy.moveDurationMs
+          : ((enemy.moveDurationTicks ?? 0) * MP_MOVE_TICK_MS_ENEMY);
+        existing.moveFromX = enemy.moveFromX ?? enemy.x;
+        existing.moveFromY = enemy.moveFromY ?? enemy.y;
         existing.gridX = enemy.x;
         existing.gridY = enemy.y;
-        existing.targetX = enemy.x;
-        existing.targetY = enemy.y;
-        existing.isMoving = false;
-        existing.moveStartedAtMs = 0;
-        existing.state = 'idle';
+        existing.targetX = enemy.moveToX ?? enemy.x;
+        existing.targetY = enemy.moveToY ?? enemy.y;
+        existing.isMoving = enemy.isMoving === true;
+        existing.moveDurationMs = Math.max(1, enemyMoveDurationMs);
+        existing.moveStartedAtMs = enemy.moveStartServerTimeMs ?? this.getEstimatedServerNowMs() ?? performance.now();
+        existing.state = existing.isMoving ? 'move' : 'idle';
         continue;
       }
+
+      const enemyMoveDurationMs = typeof enemy.moveDurationMs === 'number'
+        ? enemy.moveDurationMs
+        : ((enemy.moveDurationTicks ?? 0) * MP_MOVE_TICK_MS_ENEMY);
 
       this.enemies.set(key, {
         key,
         gridX: enemy.x,
         gridY: enemy.y,
-        moveFromX: enemy.x,
-        moveFromY: enemy.y,
-        targetX: enemy.x,
-        targetY: enemy.y,
-        moveStartedAtMs: 0,
-        moveDurationMs: this.getScaledEnemyMoveInterval('normal'),
-        isMoving: false,
+        moveFromX: enemy.moveFromX ?? enemy.x,
+        moveFromY: enemy.moveFromY ?? enemy.y,
+        targetX: enemy.moveToX ?? enemy.x,
+        targetY: enemy.moveToY ?? enemy.y,
+        moveStartedAtMs: enemy.moveStartServerTimeMs ?? this.getEstimatedServerNowMs() ?? performance.now(),
+        moveDurationMs: Math.max(1, enemyMoveDurationMs),
+        isMoving: enemy.isMoving === true,
         facing: 'left',
-        state: 'idle',
+        state: enemy.isMoving ? 'move' : 'idle',
         kind: 'normal',
         moveIntervalMs: this.getScaledEnemyMoveInterval('normal'),
       });

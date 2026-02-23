@@ -77,7 +77,20 @@ function buildInitialEnemies(gridW: number, gridH: number, tiles: number[]): Map
       if (spawnSafeCells.has(`${x},${y}`)) continue;
 
       const id = `enemy_${enemies.size + 1}`;
-      enemies.set(id, { id, x, y, alive: true });
+      enemies.set(id, {
+        id,
+        x,
+        y,
+        alive: true,
+        isMoving: false,
+        moveFromX: x,
+        moveFromY: y,
+        moveToX: x,
+        moveToY: y,
+        moveStartTick: 0,
+        moveDurationTicks: 0,
+        moveStartServerTimeMs: Date.now(),
+      });
     }
   }
 
