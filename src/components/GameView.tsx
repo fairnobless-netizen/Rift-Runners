@@ -121,6 +121,8 @@ type AccountInfo = {
 
 type GameFlowPhase = 'intro' | 'start' | 'playing';
 type RejoinPhase = 'idle' | 'rejoin_wait_ack' | 'rejoin_resetting' | 'rejoin_ready' | 'rejoin_applying' | 'rejoin_complete' | 'rejoin_failed';
+type ResumeReadinessReason = 'no_match' | 'world_not_ready' | 'waiting_local_player';
+type ResumeReadiness = { ready: true; reason: null } | { ready: false; reason: ResumeReadinessReason };
 type NicknameCheckState =
   | 'idle'
   | 'checking'
@@ -474,7 +476,7 @@ export default function GameView(): JSX.Element {
     resetResumeAttemptState('rejoin_complete');
   }, [resetResumeAttemptState, resumeJoinInProgress, ws]);
 
-  const getResumeAuthoritativeReadiness = useCallback((): { ready: boolean; reason: 'no_match' | 'world_not_ready' | 'waiting_local_player' } => {
+  const getResumeAuthoritativeReadiness = useCallback((): ResumeReadiness => {
     const expectedRoomCode = expectedRoomCodeRef.current;
     const expectedMatchId = expectedMatchIdRef.current;
     if (!expectedRoomCode || !expectedMatchId) {
@@ -490,8 +492,8 @@ export default function GameView(): JSX.Element {
       return { ready: false, reason: 'waiting_local_player' };
     }
 
-    return { ready: true, reason: 'waiting_local_player' };
-  }, [lastSnapshotAt, rejoinPhase]);
+    return { ready: true, reason: null };
+  }, [lastSnapshotAt]);
 
   const sendMatchMove = useCallback((dir: Direction): void => {
     const expectedRoomCode = expectedRoomCodeRef.current;
@@ -508,14 +510,15 @@ export default function GameView(): JSX.Element {
       && firstSnapshotReadyRef.current,
     );
 
+    const resumeReadiness = resumeJoinInProgress ? getResumeAuthoritativeReadiness() : null;
+
     let gateReason: string | null = null;
-    if (resumeJoinInProgress) {
-      const readiness = getResumeAuthoritativeReadiness();
-      if (!readiness.ready) {
-        gateReason = readiness.reason;
-      }
-    } else if (!ws.connected) {
+    if (!ws.connected) {
       gateReason = 'ws_not_ready';
+    } else if (resumeJoinInProgress) {
+      if (resumeReadiness && !resumeReadiness.ready) {
+        gateReason = resumeReadiness.reason;
+      }
     } else if (!expectedRoomCode || !expectedMatchId) {
       gateReason = 'no_match';
     } else if (!worldReadyRef.current) {
@@ -533,6 +536,9 @@ export default function GameView(): JSX.Element {
       worldReady: worldReadyRef.current,
       currentPhase: phase,
       matchPhase: gameFlowPhase,
+      resumeJoinInProgress,
+      resumeReady: resumeReadiness?.ready ?? null,
+      resumeReason: resumeReadiness && !resumeReadiness.ready ? resumeReadiness.reason : null,
       lastSnapshotAgeMs,
       gateDecision: gateReason == null ? 'allow' : 'deny',
       gateReason,
@@ -2182,11 +2188,14 @@ export default function GameView(): JSX.Element {
           setBombGateReason(readiness.reason);
           return;
         }
-      } else {
-        if (phase !== 'STARTED') {
-          setBombGateReason('phase_not_started');
-          return;
-        }
+      }
+
+      if (phase !== 'STARTED') {
+        setBombGateReason('phase_not_started');
+        return;
+      }
+
+      if (!resumeJoinInProgress) {
         if (!expectedRoomCode || !expectedMatchId) {
           setBombGateReason('await_match_context');
           return;
