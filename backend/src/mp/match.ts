@@ -488,10 +488,11 @@ function applyPlayerDamage(match: MatchState, player: PlayerState, events: Match
   player.invulnUntilTick = 0;
 }
 function maybeEndMatch(match: MatchState, events: MatchEvent[]): void {
-  const alive = Array.from(match.players.values())
-    .filter((player) => player.state !== 'eliminated')
-    .map((player) => player.tgUserId);
-  if (alive.length > 1) return;
+  if (match.ended) return;
+
+  const contenders = Array.from(match.players.values())
+    .filter((player) => player.state !== 'eliminated');
+  if (contenders.length > 0) return;
 
   match.ended = true;
   events.push({
@@ -500,8 +501,8 @@ function maybeEndMatch(match: MatchState, events: MatchEvent[]): void {
     matchId: match.matchId,
     serverTick: match.tick,
     tick: match.tick,
-    winnerTgUserId: alive[0] ?? null,
-    reason: alive.length === 1 ? 'elimination' : 'draw',
+    winnerTgUserId: null,
+    reason: 'draw',
   });
 }
 
