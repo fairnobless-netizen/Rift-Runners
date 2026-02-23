@@ -6,17 +6,75 @@ import { EnemyState, MatchState, PlayerState } from './types';
 const matches = new Map<string, MatchState>();
 const roomToMatch = new Map<string, string>();
 
+type Cell = { x: number; y: number };
+
+function getSpawnSafeCells(gridW: number, gridH: number): Set<string> {
+  const cells: Cell[] = [
+    // top-left
+    { x: 1, y: 1 },
+    { x: 2, y: 1 },
+    { x: 1, y: 2 },
+    // top-right
+    { x: gridW - 2, y: 1 },
+    { x: gridW - 3, y: 1 },
+    { x: gridW - 2, y: 2 },
+    // bottom-left
+    { x: 1, y: gridH - 2 },
+    { x: 2, y: gridH - 2 },
+    { x: 1, y: gridH - 3 },
+    // bottom-right
+    { x: gridW - 2, y: gridH - 2 },
+    { x: gridW - 3, y: gridH - 2 },
+    { x: gridW - 2, y: gridH - 3 },
+  ];
+
+  return new Set(cells.map(({ x, y }) => `${x},${y}`));
+}
+
+function createSeededRng(seed: string): () => number {
+  let state = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    state = Math.imul(state ^ seed.charCodeAt(i), 16777619) >>> 0;
+  }
+  if (state === 0) {
+    state = 0x9e3779b9;
+  }
+
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 0x100000000;
+  };
+}
+
+function getCornerSpawnPosition(idx: number, gridW: number, gridH: number): Cell {
+  switch (idx) {
+    case 0:
+      return { x: 1, y: 1 };
+    case 1:
+      return { x: gridW - 2, y: 1 };
+    case 2:
+      return { x: 1, y: gridH - 2 };
+    case 3:
+      return { x: gridW - 2, y: gridH - 2 };
+    default:
+      return { x: 1, y: 1 };
+  }
+}
+
 
 function buildInitialEnemies(gridW: number, gridH: number, tiles: number[]): Map<string, EnemyState> {
   const enemies = new Map<string, EnemyState>();
   const desiredCount = 6;
+  const spawnSafeCells = getSpawnSafeCells(gridW, gridH);
 
   for (let y = gridH - 2; y >= 1 && enemies.size < desiredCount; y -= 1) {
     for (let x = gridW - 2; x >= 1 && enemies.size < desiredCount; x -= 1) {
       const idx = y * gridW + x;
       const tile = tiles[idx] ?? 1;
       if (tile !== 0) continue;
-      if (x <= 4 && y <= 3) continue;
+      if (spawnSafeCells.has(`${x},${y}`)) continue;
 
       const id = `enemy_${enemies.size + 1}`;
       enemies.set(id, { id, x, y, alive: true });
@@ -26,8 +84,12 @@ function buildInitialEnemies(gridW: number, gridH: number, tiles: number[]): Map
   return enemies;
 }
 
-function buildWorldTiles(gridW: number, gridH: number): number[] {
+function buildWorldTiles(gridW: number, gridH: number, seed: string): number[] {
+  const spawnSafeCells = getSpawnSafeCells(gridW, gridH);
+  const rng = createSeededRng(seed);
+  const breakableProbability = 0.32;
   const tiles: number[] = [];
+
   for (let y = 0; y < gridH; y += 1) {
     for (let x = 0; x < gridW; x += 1) {
       const edge = x === 0 || y === 0 || x === gridW - 1 || y === gridH - 1;
@@ -37,17 +99,16 @@ function buildWorldTiles(gridW: number, gridH: number): number[] {
         continue;
       }
 
-      const spawnSafe = (x <= 2 && y <= 2);
-      if (spawnSafe) {
+      if (spawnSafeCells.has(`${x},${y}`)) {
         tiles.push(0);
         continue;
       }
 
-      // deterministic checker brick pattern for v1 sync
-      const isBrick = (x + y) % 3 === 0;
+      const isBrick = rng() < breakableProbability;
       tiles.push(isBrick ? 2 : 0);
     }
   }
+
   return tiles;
 }
 
@@ -75,7 +136,7 @@ export function createMatch(roomId: string, players: string[]): MatchState {
   const gridW = 27;
   const gridH = 14;
 
-  const worldTiles = buildWorldTiles(gridW, gridH);
+  const worldTiles = buildWorldTiles(gridW, gridH, matchId);
   const worldHash = hashWorldTiles(worldTiles);
 
   const state: MatchState = {
@@ -100,10 +161,9 @@ export function createMatch(roomId: string, players: string[]): MatchState {
     ended: false,
   };
 
-  // Deterministic spawns by join order: spread along top row
+  // Deterministic corner spawns by join order
   players.forEach((tgUserId, idx) => {
-    const x = Math.min(gridW - 1, 1 + idx * 2);
-    const y = 1;
+    const { x, y } = getCornerSpawnPosition(idx, gridW, gridH);
 
     state.players.set(tgUserId, {
       tgUserId,
