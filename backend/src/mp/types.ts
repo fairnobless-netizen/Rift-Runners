@@ -29,6 +29,7 @@ export type EnemyState = {
   id: string;
   x: number;
   y: number;
+  facing: MoveDir;
   alive: boolean;
   isMoving: boolean;
   moveFromX: number;
@@ -38,7 +39,6 @@ export type EnemyState = {
   moveStartTick: number;
   moveDurationTicks: number;
   moveStartServerTimeMs: number;
-  lastDir?: 0 | 1 | 2 | 3;
 };
 
 export type MatchState = {

@@ -81,6 +81,7 @@ function buildInitialEnemies(gridW: number, gridH: number, tiles: number[]): Map
         id,
         x,
         y,
+        facing: 'left',
         alive: true,
         isMoving: false,
         moveFromX: x,

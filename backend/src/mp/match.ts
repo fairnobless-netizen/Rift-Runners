@@ -360,52 +360,40 @@ function advanceEnemyMovementStates(match: MatchState): void {
 }
 
 function chooseEnemyNextCell(match: MatchState, enemy: EnemyState): { x: number; y: number } | null {
-  const dirs: ReadonlyArray<{ dx: number; dy: number }> = [
-    { dx: 1, dy: 0 },
-    { dx: 0, dy: 1 },
-    { dx: -1, dy: 0 },
-    { dx: 0, dy: -1 },
-  ];
+  const dirs: ReadonlyArray<MoveDir> = ['up', 'down', 'left', 'right'];
 
-  const options = dirs
-    .map((dir, dirIndex) => ({ dir, dirIndex }))
-    .filter(({ dir }) => {
-      const nx = enemy.x + dir.dx;
-      const ny = enemy.y + dir.dy;
-      if (!canOccupyWorldCell(match, nx, ny)) return false;
-      const occupiedByEnemy = Array.from(match.enemies.values()).some((other) => (
-        other.id !== enemy.id
-        && other.alive
-        && other.x === nx
-        && other.y === ny
-      ));
-      return !occupiedByEnemy;
-    });
+  const valid = dirs.filter((dir) => {
+    const { dx, dy } = toDelta(dir);
+    const nx = enemy.x + dx;
+    const ny = enemy.y + dy;
 
-  if (options.length === 0) return null;
+    if (!canOccupyWorldCell(match, nx, ny)) return false;
 
-  const continueOption = enemy.lastDir == null
-    ? null
-    : options.find(({ dirIndex }) => dirIndex === enemy.lastDir);
+    const occupiedByEnemy = Array.from(match.enemies.values()).some((other) => (
+      other.id !== enemy.id
+      && other.alive
+      && other.x === nx
+      && other.y === ny
+    ));
 
-  let chosen = continueOption;
+    return !occupiedByEnemy;
+  });
 
-  if (!chosen) {
-    const oppositeDir = enemy.lastDir == null ? null : (enemy.lastDir + 2) % dirs.length;
-    const nonBacktrackingOptions = oppositeDir == null || options.length < 2
-      ? options
-      : options.filter(({ dirIndex }) => dirIndex !== oppositeDir);
+  if (valid.length === 0) return null;
 
-    const rngOptions = nonBacktrackingOptions.length > 0 ? nonBacktrackingOptions : options;
-    const rand = deterministicRandom01(`${match.matchId}:${match.tick}:${enemy.id}`);
-    const index = Math.floor(rand * rngOptions.length);
-    chosen = rngOptions[index] ?? rngOptions[0];
+  let chosen: MoveDir;
+  const forwardBias = 0.65;
+  if (valid.includes(enemy.facing) && deterministicRandom01(`${match.matchId}:${match.tick}:${enemy.id}:forward`) < forwardBias) {
+    chosen = enemy.facing;
+  } else {
+    const rand = deterministicRandom01(`${match.matchId}:${match.tick}:${enemy.id}:pick`);
+    const index = Math.floor(rand * valid.length);
+    chosen = valid[index] ?? valid[0];
   }
 
-  const nx = enemy.x + chosen.dir.dx;
-  const ny = enemy.y + chosen.dir.dy;
-  enemy.lastDir = chosen.dirIndex as 0 | 1 | 2 | 3;
-  return { x: nx, y: ny };
+  const { dx, dy } = toDelta(chosen);
+  enemy.facing = chosen;
+  return { x: enemy.x + dx, y: enemy.y + dy };
 }
 
 function deterministicRandom01(seed: string): number {
@@ -417,6 +405,21 @@ function deterministicRandom01(seed: string): number {
   }
 
   return (hash >>> 0) / 4294967296;
+}
+
+function toDelta(dir: MoveDir): { dx: number; dy: number } {
+  switch (dir) {
+    case 'up':
+      return { dx: 0, dy: -1 };
+    case 'down':
+      return { dx: 0, dy: 1 };
+    case 'left':
+      return { dx: -1, dy: 0 };
+    case 'right':
+      return { dx: 1, dy: 0 };
+    default:
+      return { dx: 0, dy: 0 };
+  }
 }
 
 function processEnemyContactDamage(match: MatchState, events: MatchEvent[]): void {
