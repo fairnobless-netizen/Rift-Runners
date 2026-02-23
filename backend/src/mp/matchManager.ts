@@ -242,6 +242,7 @@ export function createMatch(roomId: string, players: string[]): MatchState {
       moveDurationTicks: 0,
       moveStartServerTimeMs: Date.now(),
       intentDir: null,
+      intentLastSeenMs: null,
       state: 'alive',
       respawnAtTick: null,
       invulnUntilTick: 0,

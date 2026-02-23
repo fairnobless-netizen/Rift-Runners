@@ -16,6 +16,7 @@ const RESPAWN_DELAY_TICKS = 24;
 const INVULN_TICKS = 20;
 const MOVE_DURATION_TICKS = 6;
 const ENEMY_HIT_COOLDOWN_TICKS = 12;
+const INTENT_TTL_MS = 350;
 const LOG_MOVEMENT_STATE = false;
 const LOG_EXPLOSION_DAMAGE = false;
 export const REJOIN_GRACE_MS = 60_000;
@@ -546,6 +547,7 @@ function applyInput(match: MatchState, tgUserId: string, seq: number, payload: {
 
   if (payload.kind === 'move') {
     p.intentDir = payload.dir;
+    p.intentLastSeenMs = Date.now();
     p.lastInputSeq = seq;
     return;
   }
@@ -558,6 +560,11 @@ function advancePlayerMovementStates(match: MatchState): void {
 
   for (const player of match.players.values()) {
     if (player.state !== 'alive') continue;
+
+    if (player.intentDir != null && player.intentLastSeenMs != null && now - player.intentLastSeenMs > INTENT_TTL_MS) {
+      player.intentDir = null;
+      player.intentLastSeenMs = null;
+    }
 
     if (player.isMoving) {
       const elapsed = match.tick - player.moveStartTick;
@@ -643,6 +650,7 @@ function resetPlayerMovementState(player: PlayerState, tick: number, now: number
   player.moveStartServerTimeMs = now;
   if (clearIntent) {
     player.intentDir = null;
+    player.intentLastSeenMs = null;
   }
 }
 
