@@ -474,6 +474,25 @@ export default function GameView(): JSX.Element {
     resetResumeAttemptState('rejoin_complete');
   }, [resetResumeAttemptState, resumeJoinInProgress, ws]);
 
+  const getResumeAuthoritativeReadiness = useCallback((): { ready: boolean; reason: 'no_match' | 'world_not_ready' | 'waiting_local_player' } => {
+    const expectedRoomCode = expectedRoomCodeRef.current;
+    const expectedMatchId = expectedMatchIdRef.current;
+    if (!expectedRoomCode || !expectedMatchId) {
+      return { ready: false, reason: 'no_match' };
+    }
+
+    const routingStats = sceneRef.current?.getSnapshotRoutingStats();
+    if (routingStats?.worldReady !== true) {
+      return { ready: false, reason: 'world_not_ready' };
+    }
+
+    if (routingStats?.lastSnapshotHasLocalPlayer !== true) {
+      return { ready: false, reason: 'waiting_local_player' };
+    }
+
+    return { ready: true, reason: 'waiting_local_player' };
+  }, [lastSnapshotAt, rejoinPhase]);
+
   const sendMatchMove = useCallback((dir: Direction): void => {
     const expectedRoomCode = expectedRoomCodeRef.current;
     const expectedMatchId = expectedMatchIdRef.current;
@@ -490,7 +509,12 @@ export default function GameView(): JSX.Element {
     );
 
     let gateReason: string | null = null;
-    if (!ws.connected) {
+    if (resumeJoinInProgress) {
+      const readiness = getResumeAuthoritativeReadiness();
+      if (!readiness.ready) {
+        gateReason = readiness.reason;
+      }
+    } else if (!ws.connected) {
       gateReason = 'ws_not_ready';
     } else if (!expectedRoomCode || !expectedMatchId) {
       gateReason = 'no_match';
@@ -543,7 +567,7 @@ export default function GameView(): JSX.Element {
         expectedMatchId,
       },
     );
-  }, [currentRoom?.phase, currentRoom?.roomCode, gameFlowPhase, lastSnapshotAt, ws]);
+  }, [currentRoom?.phase, currentRoom?.roomCode, gameFlowPhase, getResumeAuthoritativeReadiness, lastSnapshotAt, resumeJoinInProgress, ws]);
 
   const isMultiplayerDebugEnabled = isDebugEnabled(window.location.search);
   const wsDiagnostics = {
@@ -598,6 +622,9 @@ export default function GameView(): JSX.Element {
   );
 
   const rejoinOverlayActive = rejoinPhase !== 'idle' && rejoinPhase !== 'rejoin_complete' && rejoinPhase !== 'rejoin_failed';
+  const resumeAuthoritativeReadiness = getResumeAuthoritativeReadiness();
+  const showResumeSyncOverlay = gameFlowPhase === 'playing' && resumeJoinInProgress && !resumeAuthoritativeReadiness.ready;
+  const rejoinCancelable = rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying';
   const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive || waitingForOtherPlayer;
   const isMobileViewport = Math.min(viewportSize.width, viewportSize.height) < MOBILE_ROTATE_OVERLAY_BREAKPOINT;
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
@@ -2149,25 +2176,33 @@ export default function GameView(): JSX.Element {
       const hasWorldInit = worldReadyRef.current;
       const hasFirstSnapshot = firstSnapshotReadyRef.current;
       const needsNetResync = sceneRef.current?.getSnapshotRoutingStats().needsNetResync ?? true;
-      if (phase !== 'STARTED') {
-        setBombGateReason('phase_not_started');
-        return;
-      }
-      if (!expectedRoomCode || !expectedMatchId) {
-        setBombGateReason('await_match_context');
-        return;
-      }
-      if (!hasWorldInit) {
-        setBombGateReason('await_world_init');
-        return;
-      }
-      if (needsNetResync) {
-        setBombGateReason('await_net_resync');
-        return;
-      }
-      if (!hasFirstSnapshot) {
-        setBombGateReason('await_first_snapshot');
-        return;
+      if (resumeJoinInProgress) {
+        const readiness = getResumeAuthoritativeReadiness();
+        if (!readiness.ready) {
+          setBombGateReason(readiness.reason);
+          return;
+        }
+      } else {
+        if (phase !== 'STARTED') {
+          setBombGateReason('phase_not_started');
+          return;
+        }
+        if (!expectedRoomCode || !expectedMatchId) {
+          setBombGateReason('await_match_context');
+          return;
+        }
+        if (!hasWorldInit) {
+          setBombGateReason('await_world_init');
+          return;
+        }
+        if (needsNetResync) {
+          setBombGateReason('await_net_resync');
+          return;
+        }
+        if (!hasFirstSnapshot) {
+          setBombGateReason('await_first_snapshot');
+          return;
+        }
       }
     }
 
@@ -3435,12 +3470,12 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {gameFlowPhase === 'playing' && resumeJoinInProgress && (rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying') && (
+      {showResumeSyncOverlay && (
         <div className="waiting-overlay" role="status" aria-live="polite">
           <div className="waiting-overlay__card">
-            <strong>Rejoining match…</strong>
-            <p>Phase: {rejoinPhase}</p>
-            <button type="button" onClick={cancelResumeAttemptByUser}>Cancel rejoin</button>
+            <strong>Syncing…</strong>
+            <p>Reason: {resumeAuthoritativeReadiness.reason}</p>
+            {rejoinCancelable && <button type="button" onClick={cancelResumeAttemptByUser}>Cancel rejoin</button>}
           </div>
         </div>
       )}

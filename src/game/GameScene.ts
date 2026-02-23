@@ -167,6 +167,8 @@ export class GameScene extends Phaser.Scene {
   private hasServerTimeOffset = false;
   private invalidPosDrops = 0;
   private lastSnapshotRoom: string | null = null;
+  private lastSnapshotHasLocalPlayer = false;
+  private lastSnapshotLocalPlayerTick = -1;
   private needsNetResync = false;
   private netResyncReason: string | null = null;
   private lastInvalidPosWarnAtMs = 0;
@@ -2543,6 +2545,8 @@ export class GameScene extends Phaser.Scene {
     this.accumulator = 0;
     this.prediction.reset?.();
     this.worldReady = false;
+    this.lastSnapshotHasLocalPlayer = false;
+    this.lastSnapshotLocalPlayerTick = -1;
     this.localRenderPos = null;
     this.hasServerTimeOffset = false;
     this.serverTimeOffsetMs = 0;
@@ -2583,6 +2587,13 @@ export class GameScene extends Phaser.Scene {
 
     if (localTgUserId) {
       this.localTgUserId = localTgUserId;
+    }
+
+    const effectiveLocalId = localTgUserId ?? this.localTgUserId;
+    const hasLocalPlayer = Boolean(effectiveLocalId && snapshot.players?.some((p) => p.tgUserId === effectiveLocalId));
+    this.lastSnapshotHasLocalPlayer = hasLocalPlayer;
+    if (hasLocalPlayer) {
+      this.lastSnapshotLocalPlayerTick = snapshot.tick;
     }
 
     const isFirstSnapshot = this.lastSnapshotTick < 0 || this.snapshotBuffer.length === 0;
@@ -2967,6 +2978,8 @@ export class GameScene extends Phaser.Scene {
     currentRoomCode: string | null;
     currentMatchId: string | null;
     worldReady: boolean;
+    lastSnapshotHasLocalPlayer: boolean;
+    lastSnapshotLocalPlayerTick: number;
     worldHashServer: string | null;
     worldHashClient: string | null;
     needsNetResync: boolean;
@@ -2981,6 +2994,8 @@ export class GameScene extends Phaser.Scene {
       currentRoomCode: this.currentRoomCode,
       currentMatchId: this.currentMatchId,
       worldReady: this.worldReady,
+      lastSnapshotHasLocalPlayer: this.lastSnapshotHasLocalPlayer,
+      lastSnapshotLocalPlayerTick: this.lastSnapshotLocalPlayerTick,
       worldHashServer: this.worldHashServer,
       worldHashClient: this.worldHashClient,
       needsNetResync: this.needsNetResync,
