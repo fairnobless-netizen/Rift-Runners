@@ -2,6 +2,7 @@ export type {
   BombSnapshot,
   EnemySnapshot,
   MoveDir,
+  MoveIntentDir,
   MatchBombExploded,
   MatchBombExplodedEvent,
   MatchPlayerDamaged,

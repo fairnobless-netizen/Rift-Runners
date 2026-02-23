@@ -1076,7 +1076,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       // Minimal validation for v1
       if (payload.kind === 'move') {
         const dir = payload.dir;
-        if (dir !== 'up' && dir !== 'down' && dir !== 'left' && dir !== 'right') return;
+        if (dir !== null && dir !== 'up' && dir !== 'down' && dir !== 'left' && dir !== 'right') return;
 
         match.inputQueue.push({
           tgUserId: ctx.tgUserId,
