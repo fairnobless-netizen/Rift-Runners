@@ -119,15 +119,32 @@ export type MatchEnd = {
 export type RoomRestartProposed = {
   type: 'room:restart_proposed';
   roomCode: string;
-  byTgUserId: string;
-  expiresAt: number;
+  proposedByTgUserId: string;
+  proposedByDisplayName: string;
+  expiresAtMs: number;
 };
 
 export type RoomRestartVoteState = {
   type: 'room:restart_vote_state';
   roomCode: string;
+  proposedByTgUserId: string;
+  proposedByDisplayName: string;
   yesCount: number;
   total: number;
+  expiresAtMs: number;
+};
+
+export type RoomRestartTimeout = {
+  type: 'room:restart_timeout';
+  roomCode: string;
+  proposedByTgUserId: string;
+};
+
+export type RoomRestartRejected = {
+  type: 'room:restart_rejected';
+  roomCode: string;
+  reason: 'cooldown';
+  retryAtMs: number;
 };
 
 export type RoomRestartAccepted = {
@@ -217,5 +234,7 @@ export type MatchServerMessage =
   | RoomRestartVoteState
   | RoomRestartAccepted
   | RoomRestartCancelled
+  | RoomRestartTimeout
+  | RoomRestartRejected
   | { type: 'match:snapshot'; snapshot: MatchSnapshot }
   | { type: 'match:error'; error: string };

@@ -335,7 +335,10 @@ export default function GameView(): JSX.Element {
   const [multiplayerLivesByUserId, setMultiplayerLivesByUserId] = useState<Record<string, number>>({});
   const [multiplayerDisconnectedByUserId, setMultiplayerDisconnectedByUserId] = useState<Record<string, boolean>>({});
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
-  const [restartVote, setRestartVote] = useState<{ active: boolean; yesCount: number; total: number; expiresAt: number | null } | null>(null);
+  const [restartVote, setRestartVote] = useState<{ active: boolean; yesCount: number; total: number; expiresAtMs: number; proposedByTgUserId: string; proposedByDisplayName: string } | null>(null);
+  const [dismissedEliminatedPrompt, setDismissedEliminatedPrompt] = useState(false);
+  const [restartCooldownUntilMs, setRestartCooldownUntilMs] = useState<number | null>(null);
+  const [restartNowMs, setRestartNowMs] = useState(() => Date.now());
   const [matchEndState, setMatchEndState] = useState<{ winnerTgUserId: string | null; reason: 'elimination' | 'draw' } | null>(null);
   const expectedRoomCodeRef = useRef<string | null>(null);
   const expectedMatchIdRef = useRef<string | null>(null);
@@ -1937,23 +1940,55 @@ export default function GameView(): JSX.Element {
       }
 
       if (message.type === 'room:restart_proposed') {
-        setRestartVote({ active: true, yesCount: 1, total: currentRoomMembers.length, expiresAt: message.expiresAt });
+        setRestartVote({
+          active: true,
+          yesCount: 1,
+          total: currentRoomMembers.length,
+          expiresAtMs: message.expiresAtMs,
+          proposedByTgUserId: message.proposedByTgUserId,
+          proposedByDisplayName: message.proposedByDisplayName,
+        });
+        setDismissedEliminatedPrompt(false);
         continue;
       }
 
       if (message.type === 'room:restart_vote_state') {
-        setRestartVote((prev) => ({ active: true, yesCount: message.yesCount, total: message.total, expiresAt: prev?.expiresAt ?? null }));
+        setRestartVote({
+          active: true,
+          yesCount: message.yesCount,
+          total: message.total,
+          expiresAtMs: message.expiresAtMs,
+          proposedByTgUserId: message.proposedByTgUserId,
+          proposedByDisplayName: message.proposedByDisplayName,
+        });
         continue;
       }
 
       if (message.type === 'room:restart_cancelled') {
         setRestartVote(null);
+        setRestartCooldownUntilMs(Date.now() + 60_000);
         setRoomsError(message.reason === 'timeout' ? 'Restart vote timed out.' : 'Restart vote cancelled.');
+        continue;
+      }
+
+      if (message.type === 'room:restart_timeout') {
+        setRestartVote(null);
+        setRestartCooldownUntilMs(Date.now() + 60_000);
+        setRoomsError('Restart vote timed out.');
+        continue;
+      }
+
+      if (message.type === 'room:restart_rejected') {
+        if (message.reason === 'cooldown') {
+          setRestartCooldownUntilMs(message.retryAtMs);
+        }
         continue;
       }
 
       if (message.type === 'room:restart_accepted') {
         setRestartVote(null);
+        setRestartCooldownUntilMs(null);
+        setDismissedEliminatedPrompt(false);
         setMatchEndState(null);
         setRoomsError(null);
         setCurrentRoom((prev) => (prev ? { ...prev, phase: 'STARTED' } : prev));
@@ -1966,6 +2001,18 @@ export default function GameView(): JSX.Element {
       }
     }
   }, [ws.messages, localTgUserId, currentRoomMembers.length]);
+
+  useEffect(() => {
+    if (!restartVote?.active && (!restartCooldownUntilMs || restartCooldownUntilMs <= Date.now())) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setRestartNowMs(Date.now());
+    }, 200);
+
+    return () => window.clearInterval(intervalId);
+  }, [restartVote?.active, restartCooldownUntilMs]);
 
   useEffect(() => {
     sceneRef.current?.setNetRtt(ws.rttMs ?? null, ws.rttJitterMs ?? 0);
@@ -3219,6 +3266,12 @@ export default function GameView(): JSX.Element {
   }, [bootSplashProgress, showBootSplash]);
 
   useEffect(() => {
+    if (!isLocalEliminatedInMp) {
+      setDismissedEliminatedPrompt(false);
+    }
+  }, [isLocalEliminatedInMp]);
+
+  useEffect(() => {
     if (showBootSplash) return;
 
     updateTgMetrics();
@@ -3230,6 +3283,12 @@ export default function GameView(): JSX.Element {
 
   const bootProgressPercent = Math.round(bootSplashProgress * 100);
 
+  const localRoomMember = currentRoomMembers.find((member) => String(member.tgUserId) === String(localTgUserId));
+  const isLocalEliminatedInMp = isMultiplayerMode && Boolean(lifeState.eliminated);
+  const showEliminatedPrompt = isLocalEliminatedInMp && !restartVote?.active && !dismissedEliminatedPrompt;
+  const restartVoteRemainingMs = restartVote ? Math.max(0, restartVote.expiresAtMs - restartNowMs) : 0;
+  const restartVoteProgress = restartVote ? Math.max(0, Math.min(100, (restartVoteRemainingMs / 10_000) * 100)) : 0;
+  const restartCooldownRemainingMs = restartCooldownUntilMs ? Math.max(0, restartCooldownUntilMs - restartNowMs) : 0;
   const isMultiplayerHud = currentRoomMembers.length >= 2;
   const getHudLives = (member: RoomMember | null): string => {
     if (!member) return '';
@@ -3457,27 +3516,27 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {gameFlowPhase === 'playing' && isMultiplayerMode && currentRoom?.phase === 'FINISHED' && (
-        <div className="waiting-overlay" role="dialog" aria-modal="true" aria-label="Match finished">
-          <div className="waiting-overlay__card">
-            <strong>{matchEndState?.winnerTgUserId ? `Winner: ${matchEndState.winnerTgUserId}` : 'Draw'}</strong>
-            <p>{matchEndState?.reason === 'draw' ? 'All players eliminated.' : 'Elimination victory.'}</p>
-            {isRoomOwner ? (
-              <button type="button" onClick={proposeRestart}>Restart Match</button>
-            ) : (
-              <p>Waiting for host to propose restart.</p>
-            )}
-            {restartVote?.active ? (
-              <div className="rr-mp-inline-actions">
-                <span>{restartVote.yesCount}/{restartVote.total} votes</span>
-                {!isRoomOwner ? (
-                  <>
-                    <button type="button" onClick={() => sendRestartVote('yes')}>Yes</button>
-                    <button type="button" className="ghost" onClick={() => sendRestartVote('no')}>No</button>
-                  </>
-                ) : null}
-              </div>
-            ) : null}
+      {gameFlowPhase === 'playing' && isLocalEliminatedInMp && (
+        <div className="mp-spectator-overlay" aria-hidden="true" />
+      )}
+      {gameFlowPhase === 'playing' && isMultiplayerMode && restartVote?.active && (
+        <div className={`mp-restart-vote-panel ${isLocalEliminatedInMp ? 'mp-restart-vote-panel--bottom' : 'mp-restart-vote-panel--top'}`} role="dialog" aria-modal="false" aria-label="Restart vote">
+          <strong>{restartVote.proposedByDisplayName} proposes restart. Agree?</strong>
+          <div className="rr-mp-inline-actions">
+            <span>{restartVote.yesCount}/{restartVote.total}</span>
+            <button type="button" onClick={() => sendRestartVote('yes')}>Yes</button>
+            <button type="button" className="ghost" onClick={() => sendRestartVote('no')}>No</button>
+          </div>
+          <div className="mp-restart-progress"><span style={{ width: `${restartVoteProgress}%` }} /></div>
+        </div>
+      )}
+      {gameFlowPhase === 'playing' && showEliminatedPrompt && (
+        <div className="mp-restart-propose-panel" role="dialog" aria-modal="false" aria-label="Restart proposal">
+          <strong>You are eliminated. Restart match?</strong>
+          {restartCooldownRemainingMs > 0 ? <p>You can propose restart again in {Math.ceil(restartCooldownRemainingMs / 1000)}s.</p> : null}
+          <div className="rr-mp-inline-actions">
+            <button type="button" onClick={proposeRestart} disabled={restartCooldownRemainingMs > 0}>OK</button>
+            <button type="button" className="ghost" onClick={() => setDismissedEliminatedPrompt(true)}>Cancel</button>
           </div>
         </div>
       )}

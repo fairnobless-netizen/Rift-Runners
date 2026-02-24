@@ -16,6 +16,7 @@ type ClientCtx = {
   connectionId: string;
   socket: WebSocket;
   tgUserId: string;
+  displayName: string;
   roomId: string | null; // (roomCode)
   matchId: string | null;
   lastSeenMs: number; // ✅ for idle timeout
@@ -37,9 +38,17 @@ type PendingRejoinHandshake = {
 
 type RestartVoteState = {
   active: boolean;
+  proposedByTgUserId: string;
+  proposedByDisplayName: string;
   yes: Set<string>;
   no: Set<string>;
-  expiresAt: number;
+  expiresAtMs: number;
+  timeoutId: NodeJS.Timeout;
+};
+
+type RestartPenaltyState = {
+  cooldownUntilMs: number;
+  ignoredCount: number;
 };
 
 type RoomJoinMessage = {
@@ -62,6 +71,7 @@ type ServerMessage =
 const rooms = new Map<string, RoomState>();
 const clients = new Set<ClientCtx>();
 const restartVotes = new Map<string, RestartVoteState>();
+const restartPenaltyByUser = new Map<string, RestartPenaltyState>();
 const roomRegistry = new RoomRegistry();
 const pendingRejoinHandshakes = new Map<string, PendingRejoinHandshake>(); // key: connectionId
 
@@ -270,6 +280,87 @@ function sendInitialSnapshot(roomId: string, match: MatchState) {
   });
 }
 
+
+function resolveClientDisplayName(ctx: ClientCtx): string {
+  const roomId = ctx.roomId;
+  if (roomId) {
+    const activeMatch = getMatchByRoom(roomId);
+    const fromMatch = activeMatch?.players.get(ctx.tgUserId)?.displayName;
+    if (fromMatch && fromMatch.trim()) {
+      return fromMatch;
+    }
+  }
+  if (ctx.displayName.trim()) {
+    return ctx.displayName;
+  }
+  return `Player ${ctx.tgUserId.slice(0, 6)}`;
+}
+
+function startMatchInRoom(room: RoomState): MatchState {
+  const players = Array.from(room.players.keys());
+  const match = createMatch(room.roomId, players);
+  room.matchId = match.matchId;
+  clearRestartVote(room.roomId);
+
+  for (const client of clients) {
+    if (client.roomId === room.roomId && isSocketAttachedToRoom(client, room)) {
+      client.matchId = match.matchId;
+    }
+  }
+
+  broadcastToRoomMatch(room.roomId, match.matchId, {
+    type: 'match:started',
+    roomCode: room.roomId,
+    matchId: match.matchId,
+  });
+
+  broadcastToRoomMatch(room.roomId, match.matchId, {
+    type: 'match:world_init',
+    roomCode: room.roomId,
+    matchId: match.matchId,
+    world: {
+      gridW: match.world.gridW,
+      gridH: match.world.gridH,
+      tiles: [...match.world.tiles],
+      worldHash: match.world.worldHash,
+    },
+  });
+
+  sendInitialSnapshot(room.roomId, match);
+
+  startMatch(match, (snapshot, events) => {
+    const activeRoom = rooms.get(room.roomId);
+    if (!activeRoom) {
+      endMatch(match.matchId);
+      return;
+    }
+
+    if (activeRoom.matchId !== snapshot.matchId || snapshot.roomCode !== activeRoom.roomId) {
+      return;
+    }
+
+    for (const event of events) {
+      if (activeRoom.matchId !== event.matchId || event.roomCode !== activeRoom.roomId) {
+        continue;
+      }
+
+      broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
+
+      if (event.type === 'match:end') {
+        void setRoomPhase(activeRoom.roomId, 'FINISHED');
+        roomRegistry.markLobby(activeRoom.roomId);
+      }
+    }
+
+    broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, {
+      type: 'match:snapshot',
+      snapshot,
+    });
+  });
+
+  return match;
+}
+
 function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerMessage) {
   const room = rooms.get(roomId);
   if (!room) {
@@ -379,7 +470,24 @@ function broadcastToRoom(roomId: string, msg: MatchServerMessage) {
 }
 
 function clearRestartVote(roomId: string): void {
+  const vote = restartVotes.get(roomId);
+  if (vote?.timeoutId) {
+    clearTimeout(vote.timeoutId);
+  }
   restartVotes.delete(roomId);
+}
+
+function getRestartPenaltyKey(roomId: string, tgUserId: string): string {
+  return `${roomId}:${tgUserId}`;
+}
+
+function getRestartPenalty(roomId: string, tgUserId: string): RestartPenaltyState {
+  const key = getRestartPenaltyKey(roomId, tgUserId);
+  const existing = restartPenaltyByUser.get(key);
+  if (existing) return existing;
+  const created: RestartPenaltyState = { cooldownUntilMs: 0, ignoredCount: 0 };
+  restartPenaltyByUser.set(key, created);
+  return created;
 }
 
 function emitRestartVoteState(roomId: string): void {
@@ -389,8 +497,11 @@ function emitRestartVoteState(roomId: string): void {
   broadcastToRoom(roomId, {
     type: 'room:restart_vote_state',
     roomCode: roomId,
+    proposedByTgUserId: vote.proposedByTgUserId,
+    proposedByDisplayName: vote.proposedByDisplayName,
     yesCount: vote.yes.size,
     total: room.players.size,
+    expiresAtMs: vote.expiresAtMs,
   });
 }
 
@@ -742,6 +853,12 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
       }
 
+      const activeRoomMatch = getMatchByRoom(msg.roomId);
+      const joinedDisplayName = activeRoomMatch?.players.get(ctx.tgUserId)?.displayName;
+      if (joinedDisplayName && joinedDisplayName.trim()) {
+        ctx.displayName = joinedDisplayName;
+      }
+
       const roomPhase = String(dbRoom.phase ?? 'LOBBY');
       const activeMatch = getMatchByRoom(msg.roomId);
       const isStartedPhase = roomPhase === 'STARTED';
@@ -950,78 +1067,14 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return send(ctx.socket, { type: 'match:error', error: 'not_enough_ws_players' });
       }
 
-      const match = createMatch(room.roomId, players);
-      room.matchId = match.matchId;
-      clearRestartVote(room.roomId);
       await setRoomPhase(room.roomId, 'STARTED');
       roomRegistry.markStarted(room.roomId);
-
-      for (const client of clients) {
-        if (client.roomId === room.roomId && isSocketAttachedToRoom(client, room)) {
-          client.matchId = match.matchId;
-        }
-      }
+      const match = startMatchInRoom(room);
 
       logWsEvent('ws_match_started', {
         roomId: room.roomId,
         matchId: match.matchId,
         playersCount: players.length,
-      });
-
-      const startedMessage: MatchServerMessage = {
-        type: 'match:started',
-        roomCode: room.roomId,
-        matchId: match.matchId,
-      };
-      broadcastToRoomMatch(room.roomId, match.matchId, startedMessage);
-
-      broadcastToRoomMatch(room.roomId, match.matchId, {
-        type: 'match:world_init',
-        roomCode: room.roomId,
-        matchId: match.matchId,
-        world: {
-          gridW: match.world.gridW,
-          gridH: match.world.gridH,
-          tiles: [...match.world.tiles],
-          worldHash: match.world.worldHash,
-        },
-      });
-
-      sendInitialSnapshot(room.roomId, match);
-
-      startMatch(match, (snapshot, events) => {
-        const activeRoom = rooms.get(room.roomId);
-        if (!activeRoom) {
-          endMatch(match.matchId);
-          return;
-        }
-
-        if (activeRoom.matchId !== snapshot.matchId) {
-          return;
-        }
-
-        if (snapshot.roomCode !== activeRoom.roomId) {
-          return;
-        }
-
-
-        for (const event of events) {
-          if (activeRoom.matchId !== event.matchId || event.roomCode !== activeRoom.roomId) {
-            continue;
-          }
-
-          broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
-
-          if (event.type === 'match:end') {
-            void finalizeAndDeleteRoom(activeRoom.roomId);
-            return;
-          }
-        }
-
-        broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, {
-          type: 'match:snapshot',
-          snapshot,
-        });
       });
 
       return;
@@ -1144,40 +1197,86 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       }
 
       const dbRoom = await getRoomByCode(ctx.roomId);
-      if (!dbRoom || String(dbRoom.ownerTgUserId) !== String(ctx.tgUserId)) {
-        return send(ctx.socket, { type: 'match:error', error: 'not_room_owner' });
+      if (!dbRoom) {
+        return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
       }
 
-      if (String(dbRoom.phase ?? 'LOBBY') !== 'FINISHED') {
+      const activeMatch = room.matchId ? getMatch(room.matchId) : null;
+      const playerState = activeMatch?.players.get(ctx.tgUserId)?.state;
+      const isEliminated = playerState === 'eliminated';
+      const isFinished = String(dbRoom.phase ?? 'LOBBY') === 'FINISHED';
+
+      if (!isEliminated && !isFinished) {
         return send(ctx.socket, { type: 'match:error', error: 'restart_phase_invalid' });
       }
 
-      const expiresAt = Date.now() + 20_000;
+      const now = Date.now();
+      const penalty = getRestartPenalty(room.roomId, ctx.tgUserId);
+      if (now < penalty.cooldownUntilMs) {
+        send(ctx.socket, {
+          type: 'room:restart_rejected',
+          roomCode: room.roomId,
+          reason: 'cooldown',
+          retryAtMs: penalty.cooldownUntilMs,
+        });
+        return;
+      }
+
+      clearRestartVote(room.roomId);
+      const expiresAtMs = now + 10_000;
+      const timeoutId = setTimeout(() => {
+        const vote = restartVotes.get(room.roomId);
+        if (!vote || vote.expiresAtMs !== expiresAtMs || !vote.active) {
+          return;
+        }
+
+        clearRestartVote(room.roomId);
+        const proposerPenalty = getRestartPenalty(room.roomId, vote.proposedByTgUserId);
+        proposerPenalty.cooldownUntilMs = Date.now() + 60_000;
+        proposerPenalty.ignoredCount += 1;
+
+        broadcastToRoom(room.roomId, {
+          type: 'room:restart_timeout',
+          roomCode: room.roomId,
+          proposedByTgUserId: vote.proposedByTgUserId,
+        });
+
+        if (proposerPenalty.ignoredCount >= 3) {
+          const proposerSocket = room.players.get(vote.proposedByTgUserId);
+          room.players.delete(vote.proposedByTgUserId);
+          for (const client of clients) {
+            if (client.roomId === room.roomId && client.tgUserId === vote.proposedByTgUserId) {
+              client.roomId = null;
+              client.matchId = null;
+            }
+          }
+          if (proposerSocket) {
+            try {
+              proposerSocket.terminate();
+            } catch {}
+          }
+        }
+      }, 10_050);
+
+      const proposerDisplayName = resolveClientDisplayName(ctx);
       restartVotes.set(room.roomId, {
         active: true,
+        proposedByTgUserId: ctx.tgUserId,
+        proposedByDisplayName: proposerDisplayName,
         yes: new Set([ctx.tgUserId]),
         no: new Set(),
-        expiresAt,
+        expiresAtMs,
+        timeoutId,
       });
 
       broadcastToRoom(room.roomId, {
         type: 'room:restart_proposed',
         roomCode: room.roomId,
-        byTgUserId: ctx.tgUserId,
-        expiresAt,
+        proposedByTgUserId: ctx.tgUserId,
+        proposedByDisplayName: proposerDisplayName,
+        expiresAtMs,
       });
       emitRestartVoteState(room.roomId);
-
-      setTimeout(() => {
-        const vote = restartVotes.get(room.roomId);
-        if (!vote || vote.expiresAt !== expiresAt || !vote.active) return;
-        clearRestartVote(room.roomId);
-        broadcastToRoom(room.roomId, {
-          type: 'room:restart_cancelled',
-          roomCode: room.roomId,
-          reason: 'timeout',
-        });
-      }, 20_100);
       return;
     }
 
@@ -1196,20 +1295,15 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return;
       }
 
-      if (Date.now() > vote.expiresAt) {
-        clearRestartVote(room.roomId);
-        broadcastToRoom(room.roomId, {
-          type: 'room:restart_cancelled',
-          roomCode: room.roomId,
-          reason: 'timeout',
-        });
+      if (Date.now() > vote.expiresAtMs) {
         return;
       }
 
       if (msg.vote === 'no') {
-        vote.no.add(ctx.tgUserId);
-        vote.yes.delete(ctx.tgUserId);
         clearRestartVote(room.roomId);
+        const proposerPenalty = getRestartPenalty(room.roomId, vote.proposedByTgUserId);
+        proposerPenalty.cooldownUntilMs = Date.now() + 60_000;
+
         broadcastToRoom(room.roomId, {
           type: 'room:restart_cancelled',
           roomCode: room.roomId,
@@ -1227,6 +1321,9 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       }
 
       clearRestartVote(room.roomId);
+      const proposerPenalty = getRestartPenalty(room.roomId, vote.proposedByTgUserId);
+      proposerPenalty.ignoredCount = 0;
+
       broadcastToRoom(room.roomId, {
         type: 'room:restart_accepted',
         roomCode: room.roomId,
@@ -1234,61 +1331,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
       await setRoomPhase(room.roomId, 'STARTED');
       roomRegistry.markStarted(room.roomId);
-
-      const players = Array.from(room.players.keys());
-      const match = createMatch(room.roomId, players);
-      room.matchId = match.matchId;
-
-      for (const client of clients) {
-        if (client.roomId === room.roomId && isSocketAttachedToRoom(client, room)) {
-          client.matchId = match.matchId;
-        }
-      }
-
-      broadcastToRoomMatch(room.roomId, match.matchId, {
-        type: 'match:started',
-        roomCode: room.roomId,
-        matchId: match.matchId,
-      });
-
-      broadcastToRoomMatch(room.roomId, match.matchId, {
-        type: 'match:world_init',
-        roomCode: room.roomId,
-        matchId: match.matchId,
-        world: {
-          gridW: match.world.gridW,
-          gridH: match.world.gridH,
-          tiles: [...match.world.tiles],
-          worldHash: match.world.worldHash,
-        },
-      });
-
-      sendInitialSnapshot(room.roomId, match);
-
-      startMatch(match, (snapshot, events) => {
-        const activeRoom = rooms.get(room.roomId);
-        if (!activeRoom) {
-          endMatch(match.matchId);
-          return;
-        }
-
-        if (activeRoom.matchId !== snapshot.matchId) {
-          return;
-        }
-
-        for (const event of events) {
-          broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
-          if (event.type === 'match:end') {
-            void finalizeAndDeleteRoom(activeRoom.roomId);
-            return;
-          }
-        }
-
-        broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, {
-          type: 'match:snapshot',
-          snapshot,
-        });
-      });
+      startMatchInRoom(room);
 
       return;
     }
@@ -1310,6 +1353,7 @@ export function registerWsHandlers(wss: WebSocketServer) {
       connectionId: randomUUID(),
       socket,
       tgUserId,
+      displayName: `Player ${tgUserId.slice(0, 6)}`,
       roomId: null,
       matchId: null,
       lastSeenMs: Date.now(),

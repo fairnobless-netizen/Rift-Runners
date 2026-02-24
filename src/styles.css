@@ -1974,3 +1974,57 @@ html[data-orient="landscape"] .right-panel {
   font-weight: 800;
   letter-spacing: 0.06em;
 }
+
+.mp-spectator-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  background: rgba(60, 66, 78, 0.38);
+  pointer-events: none;
+}
+
+.mp-restart-propose-panel,
+.mp-restart-vote-panel {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(90vw, 420px);
+  border: 1px solid #4b5d93;
+  border-radius: 12px;
+  background: #0b1122eb;
+  z-index: 76;
+  padding: 0.65rem 0.8rem;
+}
+
+.mp-restart-propose-panel {
+  bottom: calc(var(--safe-bottom) + 0.75rem);
+}
+
+.mp-restart-vote-panel--top {
+  top: calc(var(--safe-top) + 0.75rem);
+}
+
+.mp-restart-vote-panel--bottom {
+  bottom: calc(var(--safe-bottom) + 0.75rem);
+}
+
+.mp-restart-propose-panel p,
+.mp-restart-vote-panel p {
+  margin: 0.35rem 0;
+  color: #c7d2f5;
+}
+
+.mp-restart-progress {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #2a3357;
+  overflow: hidden;
+  margin-top: 0.45rem;
+}
+
+.mp-restart-progress span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #70bbff, #8f95ff);
+}
