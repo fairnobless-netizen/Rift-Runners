@@ -1467,8 +1467,23 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    if (!expectedMatchIdRef.current || expectedMatchIdRef.current !== lastStarted.matchId) {
-      resetMpMatchRuntimeForNewMatch(lastStarted.matchId);
+    const nextMatchId = lastStarted.matchId;
+    const currentMatchId = expectedMatchIdRef.current;
+    if (nextMatchId !== currentMatchId) {
+      resetMpMatchRuntimeForNewMatch(nextMatchId);
+
+      // Force full gameplay reactivation
+      setLifeState({
+        awaitingContinue: false,
+        gameOver: false,
+        eliminated: false,
+        respawning: false,
+      });
+
+      setGameFlowPhase('playing');
+      setMatchEndState(null);
+      setRestartVote(null);
+      setSpectatorRestartPromptDismissed(false);
     }
     setCurrentRoom((prev) => {
       if (!prev || prev.roomCode !== expectedRoomCode) return prev;
@@ -1608,9 +1623,23 @@ export default function GameView(): JSX.Element {
 
       if (message.type === 'match:started') {
         if (gotMatchId) {
-          const previousMatchId = expectedMatchIdRef.current;
-          if (!previousMatchId || previousMatchId !== gotMatchId) {
-            resetMpMatchRuntimeForNewMatch(gotMatchId);
+          const nextMatchId = gotMatchId;
+          const currentMatchId = expectedMatchIdRef.current;
+          if (nextMatchId !== currentMatchId) {
+            resetMpMatchRuntimeForNewMatch(nextMatchId);
+
+            // Force full gameplay reactivation
+            setLifeState({
+              awaitingContinue: false,
+              gameOver: false,
+              eliminated: false,
+              respawning: false,
+            });
+
+            setGameFlowPhase('playing');
+            setMatchEndState(null);
+            setRestartVote(null);
+            setSpectatorRestartPromptDismissed(false);
           }
           expectedMatchId = gotMatchId;
         }
@@ -1792,6 +1821,12 @@ export default function GameView(): JSX.Element {
     maybeCompleteRejoinFromAppliedSnapshot(pendingSnapshot);
   }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress]);
 
+
+  useEffect(() => {
+    if (gameFlowPhase === 'playing') {
+      setSpectatorRestartPromptDismissed(false);
+    }
+  }, [gameFlowPhase]);
 
   useEffect(() => {
     const expectedRoomCode = expectedRoomCodeRef.current;
