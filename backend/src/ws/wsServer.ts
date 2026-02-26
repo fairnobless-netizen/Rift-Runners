@@ -783,6 +783,7 @@ async function handlePlayerLeftInActiveMatch(roomId: string, tgUserId: string): 
 async function startMatchInRoom(room: RoomState): Promise<void> {
   const players = getStableMatchPlayers(room);
   const match = createMatch(room.roomId, players);
+  const roomPlayerIds = Array.from(room.players.keys());
   room.matchId = match.matchId;
   clearRestartVote(room.roomId);
 
@@ -795,10 +796,41 @@ async function startMatchInRoom(room: RoomState): Promise<void> {
     }
   }
 
+  const clientDiagnostics = Array.from(clients).map((client) => {
+    const attachedToRoomBySocket = isSocketAttachedToRoom(client, room);
+    const roomMatch = room.players.get(client.tgUserId);
+    const inRoomByClientRoomId = client.roomId === room.roomId;
+    const includedByBroadcastFilter =
+      inRoomByClientRoomId &&
+      attachedToRoomBySocket &&
+      client.matchId === match.matchId;
+    return {
+      connectionId: client.connectionId,
+      tgUserId: client.tgUserId,
+      clientRoomId: client.roomId,
+      clientMatchId: client.matchId,
+      inRoomByClientRoomId,
+      attachedToRoomBySocket,
+      hasRoomPlayerEntry: Boolean(roomMatch),
+      updatedToNewMatchId: client.matchId === match.matchId,
+      includedByBroadcastFilter,
+    };
+  });
+
+  logWsEvent('ws_restart_start_match_diagnostics', {
+    roomId: room.roomId,
+    roomCode: room.roomId,
+    matchId: match.matchId,
+    roomPlayers: roomPlayerIds,
+    clients: clientDiagnostics,
+  });
+
   logWsEvent('ws_match_started', {
     roomId: room.roomId,
+    roomCode: room.roomId,
     matchId: match.matchId,
     playersCount: players.length,
+    roomPlayersCount: room.players.size,
   });
 
   broadcastToRoomMatch(room.roomId, match.matchId, {
