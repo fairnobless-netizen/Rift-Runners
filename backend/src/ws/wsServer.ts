@@ -800,7 +800,10 @@ async function startMatchInRoom(room: RoomState): Promise<void> {
     const attachedToRoomBySocket = isSocketAttachedToRoom(client, room);
     const roomMatch = room.players.get(client.tgUserId);
     const inRoomByClientRoomId = client.roomId === room.roomId;
-    const includedByBroadcastFilter = inRoomByClientRoomId && attachedToRoomBySocket;
+    const includedByBroadcastFilter =
+      inRoomByClientRoomId &&
+      attachedToRoomBySocket &&
+      client.matchId === match.matchId;
     return {
       connectionId: client.connectionId,
       tgUserId: client.tgUserId,

@@ -2148,7 +2148,15 @@ export default function GameView(): JSX.Element {
         continue;
       }
     }
-  }, [currentRoomMembers.length, localTgUserId, resetMpMatchRuntimeAwaitingMatchStart, ws.messages]);
+  }, [
+    ws.messages,
+    localTgUserId,
+    currentRoomMembers.length,
+    rejoinPhase,
+    resumeJoinInProgress,
+    switchToNextMatch,
+    resetMpMatchRuntimeAwaitingMatchStart,
+  ]);
 
   useEffect(() => {
     sceneRef.current?.setNetRtt(ws.rttMs ?? null, ws.rttJitterMs ?? 0);
