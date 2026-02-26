@@ -2547,6 +2547,43 @@ export class GameScene extends Phaser.Scene {
   }
 
 
+  public forceEnterMatchStarted(): void {
+    const prevState = {
+      awaitingSoloContinue: this.awaitingSoloContinue,
+      soloGameOver: this.soloGameOver,
+      multiplayerEliminated: this.multiplayerEliminated,
+      multiplayerRespawning: this.multiplayerRespawning,
+      needsNetResync: this.needsNetResync,
+      netResyncReason: this.netResyncReason,
+    };
+
+    this.awaitingSoloContinue = false;
+    this.soloGameOver = false;
+    this.multiplayerEliminated = false;
+    this.multiplayerRespawning = false;
+
+    this.playerSprite?.setVisible(true);
+
+    if (this.needsNetResync && this.netResyncReason === 'reset_state') {
+      this.needsNetResync = false;
+      this.netResyncReason = null;
+    }
+
+    if (typeof window !== 'undefined' && window.location.search.includes('debug=1')) {
+      console.info('[MP] force_enter_match_started', {
+        roomCode: this.currentRoomCode,
+        matchId: this.currentMatchId,
+        prevState,
+        after: {
+          needsNetResync: this.needsNetResync,
+          netResyncReason: this.netResyncReason,
+        },
+      });
+    }
+
+    this.emitLifeState();
+  }
+
   public setActiveMultiplayerSession(roomCode: string | null, matchId: string | null): void {
     const normalizedRoom = roomCode?.trim() ? roomCode : null;
     const normalizedMatch = matchId?.trim() ? matchId : null;

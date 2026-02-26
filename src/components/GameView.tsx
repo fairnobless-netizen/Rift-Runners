@@ -475,6 +475,7 @@ export default function GameView(): JSX.Element {
       eliminated: false,
       respawning: false,
     }));
+    sceneRef.current?.forceEnterMatchStarted();
   }, [resetMpMatchRuntimeForNewMatch]);
 
   const [settingReady, setSettingReady] = useState(false);
