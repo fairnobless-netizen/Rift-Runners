@@ -1485,6 +1485,11 @@ export default function GameView(): JSX.Element {
     const nextMatchId = lastStarted.matchId;
     const currentMatchId = expectedMatchIdRef.current;
     if (nextMatchId !== currentMatchId) {
+      diagnosticsStore.log('ROOM', 'INFO', 'match_switch:from_match_started', {
+        roomCode: expectedRoomCode,
+        oldMatchId: currentMatchId,
+        newMatchId: nextMatchId,
+      });
       switchToNextMatch(nextMatchId);
     }
     setCurrentRoom((prev) => {
@@ -1572,21 +1577,15 @@ export default function GameView(): JSX.Element {
           continue;
         }
 
-        if (gotMatchId !== expectedMatchId) {
-          setWrongMatchDrops((v) => v + 1);
-          worldReadyRef.current = false;
-          firstSnapshotReadyRef.current = false;
-          pendingWorldInitRef.current = null;
-          pendingSnapshotRef.current = null;
-          sceneRef.current?.triggerNetResync('wrong_match_snapshot');
-          diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_snapshot_match_mismatch', {
-            expectedRoomCode,
-            expectedMatchId,
-            gotRoomCode,
-            gotMatchId,
-            snapTick: snapshot.tick ?? null,
+        if (gotMatchId && gotMatchId !== expectedMatchId) {
+          diagnosticsStore.log('ROOM', 'INFO', 'match_switch:from_snapshot', {
+            roomCode: expectedRoomCode,
+            oldMatchId: expectedMatchId,
+            newMatchId: gotMatchId,
+            tick: snapshot.tick ?? null,
           });
-          continue;
+          switchToNextMatch(gotMatchId);
+          expectedMatchId = gotMatchId;
         }
 
         const lastAppliedTick = lastAppliedSnapshotTickRef.current;
@@ -1628,6 +1627,11 @@ export default function GameView(): JSX.Element {
           const nextMatchId = gotMatchId;
           const currentMatchId = expectedMatchIdRef.current;
           if (nextMatchId !== currentMatchId) {
+            diagnosticsStore.log('ROOM', 'INFO', 'match_switch:from_match_started', {
+              roomCode: expectedRoomCode,
+              oldMatchId: currentMatchId,
+              newMatchId: nextMatchId,
+            });
             switchToNextMatch(nextMatchId);
           }
           expectedMatchId = gotMatchId;
@@ -1679,6 +1683,11 @@ export default function GameView(): JSX.Element {
 
     const currentExpectedMatchId = expectedMatchIdRef.current;
     if (gotMatchId && gotMatchId !== currentExpectedMatchId) {
+      diagnosticsStore.log('ROOM', 'INFO', 'match_switch:from_world_init', {
+        roomCode: expectedRoomCode,
+        oldMatchId: currentExpectedMatchId,
+        newMatchId: gotMatchId,
+      });
       switchToNextMatch(gotMatchId);
     }
 
@@ -1823,8 +1832,7 @@ export default function GameView(): JSX.Element {
       const snapshot = m.snapshot;
       if (!expectedRoomCode) return true;
       if (snapshot.roomCode !== expectedRoomCode) return false;
-      if (!activeExpectedMatchId) return true;
-      return snapshot.matchId === activeExpectedMatchId;
+      return true;
     });
     if (!last) return;
 
@@ -1857,6 +1865,12 @@ export default function GameView(): JSX.Element {
 
     const currentExpectedMatchId = expectedMatchIdRef.current;
     if (gotMatchId && gotMatchId !== currentExpectedMatchId) {
+      diagnosticsStore.log('ROOM', 'INFO', 'match_switch:from_snapshot', {
+        roomCode: expectedRoomCode,
+        oldMatchId: currentExpectedMatchId,
+        newMatchId: gotMatchId,
+        tick: snapshot.tick ?? null,
+      });
       switchToNextMatch(gotMatchId);
     }
 
@@ -1989,7 +2003,6 @@ export default function GameView(): JSX.Element {
     if (!scene) return;
 
     const expectedRoomCode = expectedRoomCodeRef.current;
-    const expectedMatchId = expectedMatchIdRef.current;
     const matchMessages = ws.messages.filter((message): message is MatchServerMessage => {
       if (!isMatchServerMessage(message)) return false;
       if (!expectedRoomCode) return true;
@@ -2001,10 +2014,11 @@ export default function GameView(): JSX.Element {
         return false;
       }
 
-      if (!expectedMatchId) return true;
+      const currentExpectedMatchId = expectedMatchIdRef.current;
+      if (!currentExpectedMatchId) return true;
       if (message.type === 'match:started' || message.type === 'match:error') return true;
       if (!message.type.startsWith('match:')) return true;
-      return gotMatchId === expectedMatchId;
+      return gotMatchId === currentExpectedMatchId;
     });
 
     for (const message of matchMessages) {
