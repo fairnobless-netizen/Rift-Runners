@@ -1572,6 +1572,11 @@ html[data-orient="landscape"] .right-panel {
   transform-origin: left center;
 }
 
+.restart-cooldown {
+  color: #ffcf9e;
+  font-size: 0.78rem;
+}
+
 .rr-mp-section input,
 .rr-mp-section button,
 .rr-password-popup input,
