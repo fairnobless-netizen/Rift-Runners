@@ -436,6 +436,21 @@ export default function GameView(): JSX.Element {
     sceneRef.current?.resetMultiplayerNetState();
   }, []);
 
+  const switchToNextMatch = useCallback((nextMatchId: string): void => {
+    resetMpMatchRuntimeForNewMatch(nextMatchId);
+    setGameFlowPhase('playing');
+    setMatchEndState(null);
+    setRestartVote(null);
+    setSpectatorRestartPromptDismissed(false);
+    setLifeState((prev) => ({
+      ...prev,
+      awaitingContinue: false,
+      gameOver: false,
+      eliminated: false,
+      respawning: false,
+    }));
+  }, [resetMpMatchRuntimeForNewMatch]);
+
   const [settingReady, setSettingReady] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
@@ -1470,21 +1485,7 @@ export default function GameView(): JSX.Element {
     const nextMatchId = lastStarted.matchId;
     const currentMatchId = expectedMatchIdRef.current;
     if (nextMatchId !== currentMatchId) {
-      resetMpMatchRuntimeForNewMatch(nextMatchId);
-
-      // Force full gameplay reactivation
-      setLifeState((prev) => ({
-        ...prev,
-        awaitingContinue: false,
-        gameOver: false,
-        eliminated: false,
-        respawning: false,
-      }));
-
-      setGameFlowPhase('playing');
-      setMatchEndState(null);
-      setRestartVote(null);
-      setSpectatorRestartPromptDismissed(false);
+      switchToNextMatch(nextMatchId);
     }
     setCurrentRoom((prev) => {
       if (!prev || prev.roomCode !== expectedRoomCode) return prev;
@@ -1495,7 +1496,7 @@ export default function GameView(): JSX.Element {
       roomCode: expectedRoomCode,
       matchId: lastStarted.matchId,
     });
-  }, [resetMpMatchRuntimeForNewMatch, resumeJoinInProgress, ws.messages]);
+  }, [resumeJoinInProgress, switchToNextMatch, ws.messages]);
 
   useEffect(() => {
     const lastError = [...ws.messages].reverse().find((message) => message.type === 'match:error');
@@ -1627,21 +1628,7 @@ export default function GameView(): JSX.Element {
           const nextMatchId = gotMatchId;
           const currentMatchId = expectedMatchIdRef.current;
           if (nextMatchId !== currentMatchId) {
-            resetMpMatchRuntimeForNewMatch(nextMatchId);
-
-            // Force full gameplay reactivation
-            setLifeState((prev) => ({
-              ...prev,
-              awaitingContinue: false,
-              gameOver: false,
-              eliminated: false,
-              respawning: false,
-            }));
-
-            setGameFlowPhase('playing');
-            setMatchEndState(null);
-            setRestartVote(null);
-            setSpectatorRestartPromptDismissed(false);
+            switchToNextMatch(nextMatchId);
           }
           expectedMatchId = gotMatchId;
         }
@@ -1660,7 +1647,7 @@ export default function GameView(): JSX.Element {
         }
       }
     }
-  }, [resumeJoinInProgress, ws.messages]);
+  }, [resumeJoinInProgress, switchToNextMatch, ws.messages]);
 
   useEffect(() => {
     const lastWorldInit = [...ws.messages].reverse().find(isMatchWorldInit);
@@ -1690,15 +1677,12 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    if (!expectedMatchIdRef.current && gotMatchId) {
-      expectedMatchIdRef.current = gotMatchId;
-      setCurrentMatchId(gotMatchId);
-      sceneRef.current?.setActiveMultiplayerSession(expectedRoomCode, gotMatchId);
-      worldReadyRef.current = false;
-      firstSnapshotReadyRef.current = false;
-      pendingWorldInitRef.current = null;
-      pendingSnapshotRef.current = null;
-      lastAppliedSnapshotTickRef.current = null;
+    const currentExpectedMatchId = expectedMatchIdRef.current;
+    if (gotMatchId && gotMatchId !== currentExpectedMatchId) {
+      switchToNextMatch(gotMatchId);
+    }
+
+    if (!currentExpectedMatchId && gotMatchId) {
       diagnosticsStore.log('ROOM', 'INFO', 'firewall:bind_expected_match_from_world_init', {
         expectedRoomCode,
         gotMatchId,
@@ -1773,7 +1757,7 @@ export default function GameView(): JSX.Element {
         snapTick: pendingSnapshot.tick ?? null,
       });
     }
-  }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, ws.messages]);
+  }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, switchToNextMatch, ws.messages]);
 
   useEffect(() => {
     const pendingWorldInit = pendingWorldInitRef.current;
@@ -1870,6 +1854,12 @@ export default function GameView(): JSX.Element {
       });
       return;
     }
+
+    const currentExpectedMatchId = expectedMatchIdRef.current;
+    if (gotMatchId && gotMatchId !== currentExpectedMatchId) {
+      switchToNextMatch(gotMatchId);
+    }
+
     const snapshotExpectedMatchId = expectedMatchIdRef.current;
     if (!snapshotExpectedMatchId) {
       const pendingSnapshot = pendingSnapshotRef.current;
@@ -1991,7 +1981,7 @@ export default function GameView(): JSX.Element {
         });
       }
     }
-  }, [ws, ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress]);
+  }, [ws, ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, switchToNextMatch]);
 
 
   useEffect(() => {
