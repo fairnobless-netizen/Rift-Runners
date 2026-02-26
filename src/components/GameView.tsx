@@ -464,6 +464,7 @@ export default function GameView(): JSX.Element {
 
   const switchToNextMatch = useCallback((nextMatchId: string): void => {
     resetMpMatchRuntimeForNewMatch(nextMatchId);
+    sceneRef.current?.forceEnterMatchStarted();
     setGameFlowPhase('playing');
     setMatchEndState(null);
     setRestartVote(null);
