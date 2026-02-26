@@ -1508,6 +1508,70 @@ html[data-orient="landscape"] .right-panel {
   gap: 0.35rem;
 }
 
+.spectator-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(86, 94, 112, 0.45);
+  pointer-events: none;
+}
+
+.restart-vote-hud {
+  position: absolute;
+  top: calc(var(--safe-top) + 0.75rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 78;
+  min-width: min(440px, calc(100vw - 2rem));
+  border: 1px solid #4a61a0;
+  border-radius: 12px;
+  padding: 0.6rem 0.7rem;
+  background: rgba(10, 18, 36, 0.9);
+  display: grid;
+  gap: 0.45rem;
+  pointer-events: auto;
+}
+
+.restart-vote-hud__label {
+  color: #d0dcff;
+  font-size: 0.82rem;
+}
+
+.restart-spectator-dock {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-bottom) + 0.75rem);
+  transform: translateX(-50%);
+  z-index: 78;
+  width: min(460px, calc(100vw - 1.5rem));
+  border: 1px solid #4a61a0;
+  border-radius: 12px;
+  padding: 0.7rem;
+  background: rgba(10, 18, 36, 0.94);
+  display: grid;
+  gap: 0.45rem;
+  pointer-events: auto;
+}
+
+.restart-vote-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.restart-vote-progress {
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(120, 136, 179, 0.25);
+}
+
+.restart-vote-progress__fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #76b8ff, #6ff7d9);
+  transform-origin: left center;
+}
+
 .rr-mp-section input,
 .rr-mp-section button,
 .rr-password-popup input,

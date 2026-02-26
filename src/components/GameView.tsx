@@ -336,6 +336,8 @@ export default function GameView(): JSX.Element {
   const [multiplayerDisconnectedByUserId, setMultiplayerDisconnectedByUserId] = useState<Record<string, boolean>>({});
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [restartVote, setRestartVote] = useState<{ active: boolean; yesCount: number; total: number; expiresAt: number | null } | null>(null);
+  const [restartVoteNowMs, setRestartVoteNowMs] = useState<number>(() => Date.now());
+  const [spectatorRestartPromptDismissed, setSpectatorRestartPromptDismissed] = useState(false);
   const [matchEndState, setMatchEndState] = useState<{ winnerTgUserId: string | null; reason: 'elimination' | 'draw' } | null>(null);
   const expectedRoomCodeRef = useRef<string | null>(null);
   const expectedMatchIdRef = useRef<string | null>(null);
@@ -605,7 +607,28 @@ export default function GameView(): JSX.Element {
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
   const deathOverlayVisible = lifeState.awaitingContinue || lifeState.gameOver;
+  const isEliminatedSpectator = isMultiplayerMode && lifeState.eliminated && currentRoom?.phase === 'STARTED';
   const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay || deathOverlayVisible || lifeState.eliminated || lifeState.respawning;
+  const isRestartVoteActive = restartVote?.active === true;
+  const restartVoteRemainingMs = isRestartVoteActive && restartVote?.expiresAt
+    ? Math.max(0, restartVote.expiresAt - restartVoteNowMs)
+    : 0;
+  const restartVoteProgress = isRestartVoteActive && restartVote?.expiresAt
+    ? Math.max(0, Math.min(1, restartVoteRemainingMs / 10_000))
+    : 0;
+  const showAliveRestartVotePrompt = isMultiplayerMode
+    && gameFlowPhase === 'playing'
+    && !lifeState.eliminated
+    && isRestartVoteActive;
+  const showSpectatorRestartVotePrompt = isMultiplayerMode
+    && gameFlowPhase === 'playing'
+    && lifeState.eliminated
+    && isRestartVoteActive;
+  const showSpectatorRestartProposePrompt = isMultiplayerMode
+    && gameFlowPhase === 'playing'
+    && lifeState.eliminated
+    && !isRestartVoteActive
+    && !spectatorRestartPromptDismissed;
   const shellSizeRef = useRef<{ width: number; height: number }>({ width: window.innerWidth, height: window.innerHeight });
 
   useEffect(() => {
@@ -642,6 +665,30 @@ export default function GameView(): JSX.Element {
       }
     }
   }, [currentRoom?.phase, currentRoom?.roomCode, multiplayerUiOpen, isMultiplayerDebugEnabled]);
+
+  useEffect(() => {
+    if (!isRestartVoteActive) {
+      return;
+    }
+
+    setRestartVoteNowMs(Date.now());
+    const intervalId = window.setInterval(() => {
+      setRestartVoteNowMs(Date.now());
+    }, 100);
+
+    return () => window.clearInterval(intervalId);
+  }, [isRestartVoteActive, restartVote?.expiresAt]);
+
+  useEffect(() => {
+    if (isRestartVoteActive) {
+      setSpectatorRestartPromptDismissed(false);
+      return;
+    }
+
+    if (!lifeState.eliminated) {
+      setSpectatorRestartPromptDismissed(false);
+    }
+  }, [isRestartVoteActive, lifeState.eliminated]);
 
   const updateTgMetrics = useCallback((): void => {
     const tg = (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
@@ -3457,27 +3504,24 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {gameFlowPhase === 'playing' && isMultiplayerMode && currentRoom?.phase === 'FINISHED' && (
+      {gameFlowPhase === 'playing' && isMultiplayerMode && currentRoom?.phase === 'FINISHED' && !isRestartVoteActive && (
         <div className="waiting-overlay" role="dialog" aria-modal="true" aria-label="Match finished">
           <div className="waiting-overlay__card">
             <strong>{matchEndState?.winnerTgUserId ? `Winner: ${matchEndState.winnerTgUserId}` : 'Draw'}</strong>
             <p>{matchEndState?.reason === 'draw' ? 'All players eliminated.' : 'Elimination victory.'}</p>
-            {isRoomOwner ? (
-              <button type="button" onClick={proposeRestart}>Restart Match</button>
-            ) : (
-              <p>Waiting for host to propose restart.</p>
-            )}
-            {restartVote?.active ? (
-              <div className="rr-mp-inline-actions">
-                <span>{restartVote.yesCount}/{restartVote.total} votes</span>
-                {!isRoomOwner ? (
-                  <>
-                    <button type="button" onClick={() => sendRestartVote('yes')}>Yes</button>
-                    <button type="button" className="ghost" onClick={() => sendRestartVote('no')}>No</button>
-                  </>
-                ) : null}
-              </div>
-            ) : null}
+            <button type="button" onClick={proposeRestart}>Restart Match</button>
+          </div>
+        </div>
+      )}
+      {showAliveRestartVotePrompt && (
+        <div className="restart-vote-hud" role="status" aria-live="polite">
+          <span className="restart-vote-hud__label">Restart vote: {restartVote?.yesCount ?? 0}/{restartVote?.total ?? 0}</span>
+          <div className="restart-vote-actions">
+            <button type="button" onClick={() => sendRestartVote('yes')}>Yes</button>
+            <button type="button" className="ghost" onClick={() => sendRestartVote('no')}>No</button>
+          </div>
+          <div className="restart-vote-progress" aria-label="Restart vote countdown">
+            <div className="restart-vote-progress__fill" style={{ transform: `scaleX(${restartVoteProgress})` }} />
           </div>
         </div>
       )}
@@ -3620,6 +3664,7 @@ export default function GameView(): JSX.Element {
           style={{ ['--arena-ar' as string]: arenaAspectRatio }}
         >
           <div className="game-canvas" ref={mountRef} />
+          {isEliminatedSpectator ? <div className="spectator-overlay" aria-hidden="true" /> : null}
         </section>
 
         <aside className="control-column control-column--right" aria-label="Action controls">
@@ -3679,6 +3724,29 @@ export default function GameView(): JSX.Element {
           </div>
         </aside>
       </section>
+
+      {showSpectatorRestartVotePrompt && (
+        <div className="restart-spectator-dock" role="status" aria-live="polite">
+          <strong>Restart vote: {restartVote?.yesCount ?? 0}/{restartVote?.total ?? 0}</strong>
+          <div className="restart-vote-actions">
+            <button type="button" onClick={() => sendRestartVote('yes')}>Yes</button>
+            <button type="button" className="ghost" onClick={() => sendRestartVote('no')}>No</button>
+          </div>
+          <div className="restart-vote-progress" aria-label="Restart vote countdown">
+            <div className="restart-vote-progress__fill" style={{ transform: `scaleX(${restartVoteProgress})` }} />
+          </div>
+        </div>
+      )}
+
+      {showSpectatorRestartProposePrompt && (
+        <div className="restart-spectator-dock" role="dialog" aria-modal="false" aria-label="Restart prompt">
+          <strong>Restart match?</strong>
+          <div className="restart-vote-actions">
+            <button type="button" onClick={proposeRestart}>OK</button>
+            <button type="button" className="ghost" onClick={() => setSpectatorRestartPromptDismissed(true)}>Cancel</button>
+          </div>
+        </div>
+      )}
 
 
       {leaderboardOpen && (

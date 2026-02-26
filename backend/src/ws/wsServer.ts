@@ -405,6 +405,23 @@ function getRestartProposerState(room: RoomState, tgUserId: string): RestartProp
   return proposerState;
 }
 
+function pruneRestartProposers(room: RoomState): void {
+  const nowMs = Date.now();
+
+  for (const [tgUserId, state] of room.restartProposers.entries()) {
+    if (room.players.has(tgUserId)) {
+      continue;
+    }
+    if (state.cooldownUntilMs > nowMs) {
+      continue;
+    }
+    if (state.ignoredCount > 0) {
+      continue;
+    }
+    room.restartProposers.delete(tgUserId);
+  }
+}
+
 function applyRestartProposalPenalty(room: RoomState, proposerTgUserId: string, reason: 'no_vote' | 'timeout'): void {
   const proposerState = getRestartProposerState(room, proposerTgUserId);
   proposerState.cooldownUntilMs = Date.now() + 60_000;
@@ -832,6 +849,7 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
   if (room) {
     if (room.players.get(leavingTgUserId) === ctx.socket) {
       room.players.delete(leavingTgUserId);
+      pruneRestartProposers(room);
     }
 
     const vote = restartVotes.get(roomId);
