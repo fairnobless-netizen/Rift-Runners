@@ -1473,12 +1473,13 @@ export default function GameView(): JSX.Element {
       resetMpMatchRuntimeForNewMatch(nextMatchId);
 
       // Force full gameplay reactivation
-      setLifeState({
+      setLifeState((prev) => ({
+        ...prev,
         awaitingContinue: false,
         gameOver: false,
         eliminated: false,
         respawning: false,
-      });
+      }));
 
       setGameFlowPhase('playing');
       setMatchEndState(null);
@@ -1629,12 +1630,13 @@ export default function GameView(): JSX.Element {
             resetMpMatchRuntimeForNewMatch(nextMatchId);
 
             // Force full gameplay reactivation
-            setLifeState({
+            setLifeState((prev) => ({
+              ...prev,
               awaitingContinue: false,
               gameOver: false,
               eliminated: false,
               respawning: false,
-            });
+            }));
 
             setGameFlowPhase('playing');
             setMatchEndState(null);
