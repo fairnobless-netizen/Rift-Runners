@@ -141,6 +141,19 @@ export type RoomRestartCancelled = {
   reason: 'no_vote' | 'timeout';
 };
 
+export type RoomRestartRejected = {
+  type: 'room:restart_rejected';
+  roomCode: string;
+  reason: 'cooldown';
+  retryAtMs: number;
+};
+
+export type RoomRestartCooldown = {
+  type: 'room:restart_cooldown';
+  roomCode: string;
+  retryAtMs: number;
+};
+
 export type MatchBombPlacedEvent = MatchBombSpawned;
 export type MatchBombExplodedEvent = MatchBombExploded;
 
@@ -217,5 +230,7 @@ export type MatchServerMessage =
   | RoomRestartVoteState
   | RoomRestartAccepted
   | RoomRestartCancelled
+  | RoomRestartRejected
+  | RoomRestartCooldown
   | { type: 'match:snapshot'; snapshot: MatchSnapshot }
   | { type: 'match:error'; error: string };

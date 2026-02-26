@@ -26,6 +26,7 @@ type RoomState = {
   players: Map<string, WebSocket>;
   matchId: string | null;
   restartProposers: Map<string, RestartProposerState>;
+  slotByTgUserId: Map<string, number>;
 };
 
 type RestartProposerState = { cooldownUntilMs: number; ignoredCount: number };
@@ -102,6 +103,7 @@ async function finalizeAndDeleteRoom(roomId: string) {
     for (const socket of room.players.values()) {
       socketsToTerminate.add(socket);
     }
+    room.slotByTgUserId.clear();
   }
 
   for (const client of clients) {
@@ -190,6 +192,7 @@ function getOrCreateRoom(roomId: string): RoomState {
     players: new Map<string, WebSocket>(),
     matchId: null,
     restartProposers: new Map<string, RestartProposerState>(),
+    slotByTgUserId: new Map<string, number>(),
   };
   rooms.set(roomId, room);
   return room;
@@ -429,6 +432,15 @@ function applyRestartProposalPenalty(room: RoomState, proposerTgUserId: string, 
     proposerState.ignoredCount += 1;
   }
 
+  const proposerSocket = room.players.get(proposerTgUserId);
+  if (proposerSocket) {
+    send(proposerSocket, {
+      type: 'room:restart_cooldown',
+      roomCode: room.roomId,
+      retryAtMs: proposerState.cooldownUntilMs,
+    });
+  }
+
   logWsEvent('ws_restart_proposer_penalty_applied', {
     roomId: room.roomId,
     proposerTgUserId,
@@ -501,6 +513,41 @@ function emitRestartVoteState(roomId: string): void {
   });
 }
 
+
+function ensureStableRoomSlot(room: RoomState, tgUserId: string): number {
+  const existingSlot = room.slotByTgUserId.get(tgUserId);
+  if (typeof existingSlot === 'number') {
+    return existingSlot;
+  }
+
+  const usedSlots = new Set<number>(room.slotByTgUserId.values());
+  const maxSlots = 4;
+
+  for (let slotIndex = 0; slotIndex < maxSlots; slotIndex += 1) {
+    if (usedSlots.has(slotIndex)) {
+      continue;
+    }
+
+    room.slotByTgUserId.set(tgUserId, slotIndex);
+    return slotIndex;
+  }
+
+  const overflowSlot = room.slotByTgUserId.size;
+  room.slotByTgUserId.set(tgUserId, overflowSlot);
+  return overflowSlot;
+}
+
+function getStableMatchPlayers(room: RoomState): string[] {
+  return Array.from(room.players.keys()).sort((a, b) => {
+    const slotA = room.slotByTgUserId.get(a) ?? Number.MAX_SAFE_INTEGER;
+    const slotB = room.slotByTgUserId.get(b) ?? Number.MAX_SAFE_INTEGER;
+    if (slotA !== slotB) {
+      return slotA - slotB;
+    }
+    return a.localeCompare(b);
+  });
+}
+
 function attachClientToRoom(ctx: ClientCtx, roomId: string) {
   if (ctx.roomId) {
     const prevRoomCode = ctx.roomId;
@@ -523,6 +570,7 @@ function attachClientToRoom(ctx: ClientCtx, roomId: string) {
     }
   }
 
+  ensureStableRoomSlot(room, ctx.tgUserId);
   room.players.set(ctx.tgUserId, ctx.socket);
   roomRegistry.touchConnection(roomId, ctx.connectionId);
 
@@ -733,7 +781,7 @@ async function handlePlayerLeftInActiveMatch(roomId: string, tgUserId: string): 
 }
 
 async function startMatchInRoom(room: RoomState): Promise<void> {
-  const players = Array.from(room.players.keys());
+  const players = getStableMatchPlayers(room);
   const match = createMatch(room.roomId, players);
   room.matchId = match.matchId;
   clearRestartVote(room.roomId);
@@ -1147,7 +1195,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
       }
 
-      const players = Array.from(room.players.keys());
+      const players = getStableMatchPlayers(room);
       if (players.length < 2) {
         return send(ctx.socket, { type: 'match:error', error: 'not_enough_ws_players' });
       }
@@ -1279,6 +1327,12 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
       const proposerState = getRestartProposerState(room, ctx.tgUserId);
       if (Date.now() < proposerState.cooldownUntilMs) {
+        send(ctx.socket, {
+          type: 'room:restart_rejected',
+          roomCode: room.roomId,
+          reason: 'cooldown',
+          retryAtMs: proposerState.cooldownUntilMs,
+        });
         return send(ctx.socket, { type: 'match:error', error: 'restart_propose_cooldown' });
       }
 

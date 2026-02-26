@@ -337,6 +337,8 @@ export default function GameView(): JSX.Element {
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [restartVote, setRestartVote] = useState<{ active: boolean; yesCount: number; total: number; expiresAt: number | null } | null>(null);
   const [restartVoteNowMs, setRestartVoteNowMs] = useState<number>(() => Date.now());
+  const [restartCooldownRetryAtMs, setRestartCooldownRetryAtMs] = useState<number | null>(null);
+  const [restartCooldownNowMs, setRestartCooldownNowMs] = useState<number>(() => Date.now());
   const [spectatorRestartPromptDismissed, setSpectatorRestartPromptDismissed] = useState(false);
   const [matchEndState, setMatchEndState] = useState<{ winnerTgUserId: string | null; reason: 'elimination' | 'draw' } | null>(null);
   const expectedRoomCodeRef = useRef<string | null>(null);
@@ -415,6 +417,25 @@ export default function GameView(): JSX.Element {
       diagnosticsStore.log('ROOM', 'INFO', 'rejoin:cancelled_by_user', { phase: rejoinPhase });
     }
   }, [rejoinPhase, resetResumeAttemptState, resumeJoinInProgress]);
+  const resetMpMatchRuntimeForNewMatch = useCallback((nextMatchId: string): void => {
+    expectedMatchIdRef.current = nextMatchId;
+    setCurrentMatchId(nextMatchId);
+    worldReadyRef.current = false;
+    firstSnapshotReadyRef.current = false;
+    pendingWorldInitRef.current = null;
+    pendingSnapshotRef.current = null;
+    lastAppliedSnapshotTickRef.current = null;
+    handledMatchEventIdsRef.current.clear();
+    processedWsMessagesRef.current = 0;
+    setRestartVote(null);
+    setMatchEndState(null);
+    setSpectatorRestartPromptDismissed(false);
+    setRestartCooldownRetryAtMs(null);
+    setRoomsError(null);
+    sceneRef.current?.setActiveMultiplayerSession(expectedRoomCodeRef.current, nextMatchId);
+    sceneRef.current?.resetMultiplayerNetState();
+  }, []);
+
   const [settingReady, setSettingReady] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(false);
   const [startingRoom, setStartingRoom] = useState(false);
@@ -616,6 +637,10 @@ export default function GameView(): JSX.Element {
   const restartVoteProgress = isRestartVoteActive && restartVote?.expiresAt
     ? Math.max(0, Math.min(1, restartVoteRemainingMs / 10_000))
     : 0;
+  const restartCooldownRemainingMs = restartCooldownRetryAtMs
+    ? Math.max(0, restartCooldownRetryAtMs - restartCooldownNowMs)
+    : 0;
+  const restartCooldownRemainingSec = Math.ceil(restartCooldownRemainingMs / 1000);
   const showAliveRestartVotePrompt = isMultiplayerMode
     && gameFlowPhase === 'playing'
     && !lifeState.eliminated
@@ -678,6 +703,28 @@ export default function GameView(): JSX.Element {
 
     return () => window.clearInterval(intervalId);
   }, [isRestartVoteActive, restartVote?.expiresAt]);
+
+  useEffect(() => {
+    if (!restartCooldownRetryAtMs) {
+      return;
+    }
+
+    if (restartCooldownRetryAtMs <= Date.now()) {
+      setRestartCooldownRetryAtMs(null);
+      return;
+    }
+
+    setRestartCooldownNowMs(Date.now());
+    const intervalId = window.setInterval(() => {
+      const now = Date.now();
+      setRestartCooldownNowMs(now);
+      if (restartCooldownRetryAtMs <= now) {
+        setRestartCooldownRetryAtMs(null);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [restartCooldownRetryAtMs]);
 
   useEffect(() => {
     if (isRestartVoteActive) {
@@ -1267,8 +1314,11 @@ export default function GameView(): JSX.Element {
       pendingSnapshotRef.current = null;
       lastAppliedSnapshotTickRef.current = null;
       setCurrentMatchId(null);
+      setRestartCooldownRetryAtMs(null);
+    setRestartCooldownRetryAtMs(null);
       setRestartVote(null);
       setMatchEndState(null);
+      setRestartCooldownRetryAtMs(null);
       setRoomsError(null);
       setWrongRoomDrops(0);
       setWrongMatchDrops(0);
@@ -1389,7 +1439,7 @@ export default function GameView(): JSX.Element {
     });
 
     setRejoinPhase('rejoin_ready');
-  }, [handleResumeFailure, rejoinPhase, resumeJoinInProgress, ws, ws.messages]);
+  }, [handleResumeFailure, rejoinPhase, resetMpMatchRuntimeForNewMatch, resumeJoinInProgress, ws, ws.messages]);
 
 
   useEffect(() => {
@@ -1417,16 +1467,9 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    expectedMatchIdRef.current = lastStarted.matchId;
-    worldReadyRef.current = false;
-    firstSnapshotReadyRef.current = false;
-    pendingWorldInitRef.current = null;
-    pendingSnapshotRef.current = null;
-    lastAppliedSnapshotTickRef.current = null;
-    setCurrentMatchId(lastStarted.matchId);
-    sceneRef.current?.setActiveMultiplayerSession(expectedRoomCode, lastStarted.matchId);
-    setRestartVote(null);
-    setMatchEndState(null);
+    if (!expectedMatchIdRef.current || expectedMatchIdRef.current !== lastStarted.matchId) {
+      resetMpMatchRuntimeForNewMatch(lastStarted.matchId);
+    }
     setCurrentRoom((prev) => {
       if (!prev || prev.roomCode !== expectedRoomCode) return prev;
       if (prev.phase === 'STARTED') return prev;
@@ -1436,7 +1479,7 @@ export default function GameView(): JSX.Element {
       roomCode: expectedRoomCode,
       matchId: lastStarted.matchId,
     });
-  }, [resumeJoinInProgress, ws.messages]);
+  }, [resetMpMatchRuntimeForNewMatch, resumeJoinInProgress, ws.messages]);
 
   useEffect(() => {
     const lastError = [...ws.messages].reverse().find((message) => message.type === 'match:error');
@@ -1565,10 +1608,11 @@ export default function GameView(): JSX.Element {
 
       if (message.type === 'match:started') {
         if (gotMatchId) {
-          expectedMatchIdRef.current = gotMatchId;
+          const previousMatchId = expectedMatchIdRef.current;
+          if (!previousMatchId || previousMatchId !== gotMatchId) {
+            resetMpMatchRuntimeForNewMatch(gotMatchId);
+          }
           expectedMatchId = gotMatchId;
-          setCurrentMatchId(gotMatchId);
-          sceneRef.current?.setActiveMultiplayerSession(expectedRoomCode, gotMatchId);
         }
         continue;
       }
@@ -2001,18 +2045,22 @@ export default function GameView(): JSX.Element {
 
       if (message.type === 'room:restart_accepted') {
         setRestartVote(null);
-        setMatchEndState(null);
-        setRoomsError(null);
+        setRestartCooldownRetryAtMs(null);
         setCurrentRoom((prev) => (prev ? { ...prev, phase: 'STARTED' } : prev));
-        worldReadyRef.current = false;
-        firstSnapshotReadyRef.current = false;
-        handledMatchEventIdsRef.current.clear();
-        scene.resetMultiplayerNetState();
-        processedWsMessagesRef.current = 0;
+        continue;
+      }
+
+      if (message.type === 'room:restart_rejected' && message.reason === 'cooldown') {
+        setRestartCooldownRetryAtMs(message.retryAtMs);
+        continue;
+      }
+
+      if (message.type === 'room:restart_cooldown') {
+        setRestartCooldownRetryAtMs(message.retryAtMs);
         continue;
       }
     }
-  }, [ws.messages, localTgUserId, currentRoomMembers.length]);
+  }, [ws.messages, localTgUserId, currentRoomMembers.length, resetMpMatchRuntimeForNewMatch]);
 
   useEffect(() => {
     sceneRef.current?.setNetRtt(ws.rttMs ?? null, ws.rttJitterMs ?? 0);
@@ -3523,6 +3571,7 @@ export default function GameView(): JSX.Element {
           <div className="restart-vote-progress" aria-label="Restart vote countdown">
             <div className="restart-vote-progress__fill" style={{ transform: `scaleX(${restartVoteProgress})` }} />
           </div>
+          {restartCooldownRetryAtMs && restartCooldownRemainingSec > 0 ? <div className="restart-cooldown">Retry in: {restartCooldownRemainingSec}s</div> : null}
         </div>
       )}
       {shouldShowRotateOverlay && (
@@ -3735,6 +3784,7 @@ export default function GameView(): JSX.Element {
           <div className="restart-vote-progress" aria-label="Restart vote countdown">
             <div className="restart-vote-progress__fill" style={{ transform: `scaleX(${restartVoteProgress})` }} />
           </div>
+          {restartCooldownRetryAtMs && restartCooldownRemainingSec > 0 ? <div className="restart-cooldown">Retry in: {restartCooldownRemainingSec}s</div> : null}
         </div>
       )}
 
@@ -3745,6 +3795,7 @@ export default function GameView(): JSX.Element {
             <button type="button" onClick={proposeRestart}>OK</button>
             <button type="button" className="ghost" onClick={() => setSpectatorRestartPromptDismissed(true)}>Cancel</button>
           </div>
+          {restartCooldownRetryAtMs && restartCooldownRemainingSec > 0 ? <div className="restart-cooldown">Retry in: {restartCooldownRemainingSec}s</div> : null}
         </div>
       )}
 

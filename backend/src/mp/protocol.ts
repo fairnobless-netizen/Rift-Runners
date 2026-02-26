@@ -17,6 +17,8 @@ export type {
   MatchServerMessage,
   RoomRestartAccepted,
   RoomRestartCancelled,
+  RoomRestartRejected,
+  RoomRestartCooldown,
   RoomRestartProposed,
   RoomRestartVoteState,
   MatchSnapshot,
