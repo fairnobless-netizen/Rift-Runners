@@ -436,6 +436,32 @@ export default function GameView(): JSX.Element {
     sceneRef.current?.resetMultiplayerNetState();
   }, []);
 
+  const resetMpMatchRuntimeAwaitingMatchStart = useCallback((): void => {
+    expectedMatchIdRef.current = null;
+    setCurrentMatchId(null);
+    worldReadyRef.current = false;
+    firstSnapshotReadyRef.current = false;
+    pendingWorldInitRef.current = null;
+    pendingSnapshotRef.current = null;
+    lastAppliedSnapshotTickRef.current = null;
+    handledMatchEventIdsRef.current.clear();
+    processedWsMessagesRef.current = 0;
+    setRestartVote(null);
+    setMatchEndState(null);
+    setSpectatorRestartPromptDismissed(false);
+    setRestartCooldownRetryAtMs(null);
+    setRoomsError(null);
+    setLifeState((prev) => ({
+      ...prev,
+      awaitingContinue: false,
+      gameOver: false,
+      eliminated: false,
+      respawning: false,
+    }));
+    sceneRef.current?.setActiveMultiplayerSession(expectedRoomCodeRef.current, null);
+    sceneRef.current?.resetMultiplayerNetState();
+  }, []);
+
   const switchToNextMatch = useCallback((nextMatchId: string): void => {
     resetMpMatchRuntimeForNewMatch(nextMatchId);
     setGameFlowPhase('playing');
@@ -1568,13 +1594,24 @@ export default function GameView(): JSX.Element {
           continue;
         }
         if (!expectedMatchId) {
-          diagnosticsStore.log('ROOM', 'INFO', 'snapshot:drop_waiting_match_context', {
-            expectedRoomCode,
-            gotRoomCode,
-            gotMatchId,
-            snapTick: snapshot.tick ?? null,
+          if (!gotMatchId) {
+            diagnosticsStore.log('ROOM', 'INFO', 'snapshot:drop_waiting_match_context', {
+              expectedRoomCode,
+              gotRoomCode,
+              gotMatchId,
+              snapTick: snapshot.tick ?? null,
+            });
+            continue;
+          }
+
+          diagnosticsStore.log('ROOM', 'INFO', 'match_switch:adopt_from_snapshot_without_context', {
+            roomCode: expectedRoomCode,
+            oldMatchId: expectedMatchId,
+            newMatchId: gotMatchId,
+            tick: snapshot.tick ?? null,
           });
-          continue;
+          switchToNextMatch(gotMatchId);
+          expectedMatchId = gotMatchId;
         }
 
         if (gotMatchId && gotMatchId !== expectedMatchId) {
@@ -1876,17 +1913,27 @@ export default function GameView(): JSX.Element {
 
     const snapshotExpectedMatchId = expectedMatchIdRef.current;
     if (!snapshotExpectedMatchId) {
-      const pendingSnapshot = pendingSnapshotRef.current;
-      if (!pendingSnapshot || snapshot.tick > pendingSnapshot.tick) {
-        pendingSnapshotRef.current = snapshot;
+      if (!gotMatchId) {
+        const pendingSnapshot = pendingSnapshotRef.current;
+        if (!pendingSnapshot || snapshot.tick > pendingSnapshot.tick) {
+          pendingSnapshotRef.current = snapshot;
+        }
+        diagnosticsStore.log('ROOM', 'INFO', 'snapshot:buffered_waiting_match_context', {
+          expectedRoomCode,
+          gotRoomCode,
+          gotMatchId,
+          snapTick: snapshot.tick ?? null,
+        });
+        return;
       }
-      diagnosticsStore.log('ROOM', 'INFO', 'snapshot:buffered_waiting_match_context', {
-        expectedRoomCode,
-        gotRoomCode,
-        gotMatchId,
-        snapTick: snapshot.tick ?? null,
+
+      diagnosticsStore.log('ROOM', 'INFO', 'match_switch:adopt_from_snapshot_without_context', {
+        roomCode: expectedRoomCode,
+        oldMatchId: snapshotExpectedMatchId,
+        newMatchId: gotMatchId,
+        tick: snapshot.tick ?? null,
       });
-      return;
+      switchToNextMatch(gotMatchId);
     }
 
     if (resumeJoinInProgress && !(rejoinPhase === 'rejoin_ready' || rejoinPhase === 'rejoin_applying')) {
@@ -2085,9 +2132,9 @@ export default function GameView(): JSX.Element {
       }
 
       if (message.type === 'room:restart_accepted') {
-        setRestartVote(null);
-        setRestartCooldownRetryAtMs(null);
+        resetMpMatchRuntimeAwaitingMatchStart();
         setCurrentRoom((prev) => (prev ? { ...prev, phase: 'STARTED' } : prev));
+        setGameFlowPhase('playing');
         continue;
       }
 
@@ -2101,7 +2148,7 @@ export default function GameView(): JSX.Element {
         continue;
       }
     }
-  }, [ws.messages, localTgUserId, currentRoomMembers.length, resetMpMatchRuntimeForNewMatch]);
+  }, [currentRoomMembers.length, localTgUserId, resetMpMatchRuntimeAwaitingMatchStart, ws.messages]);
 
   useEffect(() => {
     sceneRef.current?.setNetRtt(ws.rttMs ?? null, ws.rttJitterMs ?? 0);
