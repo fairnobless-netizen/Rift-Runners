@@ -22,6 +22,15 @@ export const REJOIN_GRACE_MS = 60_000;
 
 type MatchEvent = MatchBombSpawned | MatchBombExploded | MatchTilesDestroyed | MatchPlayerDamaged | MatchPlayerRespawned | MatchPlayerEliminated | MatchEnd;
 
+export type BombPlacementRejectReason =
+  | 'player_missing'
+  | 'player_eliminated'
+  | 'player_not_alive'
+  | 'position_mismatch'
+  | 'cell_not_occupiable'
+  | 'max_bombs_reached'
+  | 'cell_already_has_bomb';
+
 export function startMatch(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: MatchEvent[]) => void) {
   match.interval = setInterval(() => tick(match, broadcast), TICK_RATE_MS);
 }
@@ -189,16 +198,8 @@ export function pruneExpiredDisconnectedPlayers(match: MatchState, nowMs = Date.
 
 
 export function tryPlaceBomb(match: MatchState, tgUserId: string, x: number, y: number): MatchBombSpawned | null {
-  const player = match.players.get(tgUserId);
-  if (!player || match.eliminatedPlayers.has(tgUserId) || player.state !== 'alive') return null;
-  if (player.x !== x || player.y !== y) return null;
-  if (!canOccupyWorldCell(match, x, y)) return null;
-
-  const ownedBombCount = Array.from(match.bombs.values()).filter((bomb) => bomb.ownerId === tgUserId).length;
-  if (ownedBombCount >= match.maxBombsPerPlayer) return null;
-
-  const collision = Array.from(match.bombs.values()).some((bomb) => bomb.x === x && bomb.y === y);
-  if (collision) return null;
+  const rejectReason = getBombPlacementRejectReason(match, tgUserId, x, y);
+  if (rejectReason) return null;
 
   const eventId = nextEventId(match);
   const bombId = `bomb_${eventId}`;
@@ -228,6 +229,23 @@ export function tryPlaceBomb(match: MatchState, tgUserId: string, x: number, y: 
       explodeAtTick: match.tick + match.bombFuseTicks,
     },
   };
+}
+
+export function getBombPlacementRejectReason(match: MatchState, tgUserId: string, x: number, y: number): BombPlacementRejectReason | null {
+  const player = match.players.get(tgUserId);
+  if (!player) return 'player_missing';
+  if (match.eliminatedPlayers.has(tgUserId)) return 'player_eliminated';
+  if (player.state !== 'alive') return 'player_not_alive';
+  if (player.x !== x || player.y !== y) return 'position_mismatch';
+  if (!canOccupyWorldCell(match, x, y)) return 'cell_not_occupiable';
+
+  const ownedBombCount = Array.from(match.bombs.values()).filter((bomb) => bomb.ownerId === tgUserId).length;
+  if (ownedBombCount >= match.maxBombsPerPlayer) return 'max_bombs_reached';
+
+  const collision = Array.from(match.bombs.values()).some((bomb) => bomb.x === x && bomb.y === y);
+  if (collision) return 'cell_already_has_bomb';
+
+  return null;
 }
 
 function processRespawns(match: MatchState, events: MatchEvent[]): void {
