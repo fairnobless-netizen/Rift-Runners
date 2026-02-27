@@ -49,7 +49,7 @@ function sortAndRank(records: LocalLeaderboardRecord[]): LocalLeaderboardRecord[
       if (b.score !== a.score) return b.score - a.score;
       return b.updatedAt - a.updatedAt;
     })
-    .slice(0, 10);
+    .slice(0, 100);
 }
 
 function makeEntryKey(mode: LeaderboardMode, ids: string[], names: string[]): string {
@@ -65,7 +65,7 @@ function toTop(records: LocalLeaderboardRecord[]): LeaderboardTopEntry[] {
   return records.map((record, index) => ({
     rank: index + 1,
     tgUserId: record.ids.join(','),
-    displayName: record.names.join(', '),
+    displayName: record.names.join(' + '),
     score: record.score,
   }));
 }

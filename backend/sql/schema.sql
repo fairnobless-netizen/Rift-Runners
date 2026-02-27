@@ -177,6 +177,19 @@ CREATE TABLE IF NOT EXISTS leaderboard_scores (
 CREATE INDEX IF NOT EXISTS idx_leaderboard_mode_score
   ON leaderboard_scores (mode, best_score DESC);
 
+CREATE TABLE IF NOT EXISTS leaderboard_team_scores (
+  mode TEXT NOT NULL,
+  team_key TEXT NOT NULL,
+  member_ids TEXT[] NOT NULL,
+  display_name TEXT NOT NULL,
+  best_score INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (mode, team_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_leaderboard_team_mode_score
+  ON leaderboard_team_scores (mode, best_score DESC);
+
 CREATE TABLE IF NOT EXISTS leaderboard_submit_limits (
   tg_user_id TEXT PRIMARY KEY REFERENCES users(tg_user_id) ON DELETE CASCADE,
   last_submit_at BIGINT NOT NULL DEFAULT 0
