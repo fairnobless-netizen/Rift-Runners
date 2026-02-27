@@ -149,9 +149,6 @@ function isMatchServerMessage(message: { type: string }): message is MatchServer
   return message.type.startsWith('match:') || message.type.startsWith('room:restart_') || message.type.startsWith('mp:');
 }
 
-function isMatchWorldInit(message: { type: string }): message is MatchWorldInitMessage {
-  return isMatchServerMessage(message) && message.type === 'match:world_init';
-}
 
 const DEBUG_NICK = false;
 
@@ -346,6 +343,7 @@ export default function GameView(): JSX.Element {
   const worldReadyRef = useRef(false);
   const firstSnapshotReadyRef = useRef(false);
   const pendingWorldInitRef = useRef<MatchWorldInitMessage | null>(null);
+  const consumedWorldInitRef = useRef<MatchWorldInitMessage | null>(null);
   const pendingSnapshotRef = useRef<MatchSnapshotMessage['snapshot'] | null>(null);
   const lastAppliedSnapshotTickRef = useRef<number | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -1692,8 +1690,15 @@ export default function GameView(): JSX.Element {
   }, [resumeJoinInProgress, switchToNextMatch, ws.messages]);
 
   useEffect(() => {
-    const lastWorldInit = [...ws.messages].reverse().find(isMatchWorldInit);
+    const lastWorldInit = ws.lastWorldInit;
     if (!lastWorldInit) return;
+    if (consumedWorldInitRef.current === lastWorldInit) return;
+    consumedWorldInitRef.current = lastWorldInit;
+
+    diagnosticsStore.log('ROOM', 'INFO', 'world_init:consumed_from_ws_lastWorldInit', {
+      roomCode: lastWorldInit.roomCode ?? null,
+      matchId: lastWorldInit.matchId ?? null,
+    });
 
     const expectedRoomCode = expectedRoomCodeRef.current;
     if (!expectedRoomCode) {
@@ -1819,7 +1824,7 @@ export default function GameView(): JSX.Element {
         snapTick: pendingSnapshot.tick ?? null,
       });
     }
-  }, [currentRoom?.phase, currentRoom?.roomCode, isMultiplayerMode, localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, switchToNextMatch, ws.messages]);
+  }, [currentRoom?.phase, currentRoom?.roomCode, isMultiplayerMode, localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, switchToNextMatch, ws.lastWorldInit]);
 
   useEffect(() => {
     const pendingWorldInit = pendingWorldInitRef.current;
