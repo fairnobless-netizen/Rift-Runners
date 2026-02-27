@@ -138,8 +138,6 @@ function shouldDrop(config: NetSimConfig): boolean {
 }
 
 export function useWsClient(token?: string) {
-  type MatchWorldInitMessage = Extract<WsServerMessage, { type: 'match:world_init' }>;
-
   const clientRef = useRef<WsClient | null>(null);
   const [netSimConfig, setNetSimConfig] = useState<NetSimConfig>(() => resolveNetSimConfig(window.location.search));
   const netSimConfigRef = useRef<NetSimConfig>(netSimConfig);
@@ -153,8 +151,6 @@ export function useWsClient(token?: string) {
   const [outboundTrace, setOutboundTrace] = useState<WsOutboundTraceEntry[]>([]);
   const [urlUsed, setUrlUsed] = useState<string>('');
   const [lastError, setLastError] = useState<string | null>(null);
-  const lastWorldInitRef = useRef<MatchWorldInitMessage | null>(null);
-  const [lastWorldInit, setLastWorldInit] = useState<MatchWorldInitMessage | null>(null);
 
   // M14.7 RTT (EMA + jitter EMA)
   const pingSeqRef = useRef(0);
@@ -247,17 +243,6 @@ export function useWsClient(token?: string) {
           preview: JSON.stringify(msg).slice(0, 1000),
         });
 
-        if (msg.type === 'match:world_init') {
-          lastWorldInitRef.current = msg;
-          setLastWorldInit(msg);
-          diagnosticsStore.log('WS', 'INFO', 'ws:capture_world_init', {
-            roomCode: msg.roomCode ?? null,
-            matchId: msg.matchId ?? null,
-            gridW: msg.world?.gridW ?? null,
-            gridH: msg.world?.gridH ?? null,
-          });
-        }
-
         if (msg.type === 'match:snapshot') {
           const snapshotTick = Number.isFinite(msg.snapshot?.tick) ? msg.snapshot.tick : -1;
           if (snapshotTick >= 0) {
@@ -342,8 +327,6 @@ export function useWsClient(token?: string) {
       clientRef.current = null;
       setConnected(false);
       setUrlUsed('');
-      lastWorldInitRef.current = null;
-      setLastWorldInit(null);
       diagnosticsStore.setWsState({ status: 'CLOSED' });
     };
   }, [token]);
@@ -355,7 +338,6 @@ export function useWsClient(token?: string) {
     outboundTrace,
     urlUsed,
     lastError,
-    lastWorldInit,
     netSimConfig,
     netSimPresets: NET_SIM_PRESETS,
     rttMs,
