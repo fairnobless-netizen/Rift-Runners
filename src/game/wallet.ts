@@ -47,6 +47,12 @@ export type LeaderboardResponse = {
 };
 
 
+export type TeamLeaderboardMember = {
+  tgUserId: string;
+  displayName: string;
+};
+
+
 export type RoomMember = {
   tgUserId: string;
   displayName: string;
@@ -338,6 +344,31 @@ export async function submitLeaderboard(mode: LeaderboardMode, score: number): P
 }
 
 
+
+
+export async function submitTeamLeaderboard(mode: Extract<LeaderboardMode, 'duo' | 'trio' | 'squad'>, score: number, members: TeamLeaderboardMember[]): Promise<LeaderboardMeEntry | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch(apiUrl('/api/leaderboard/submit-team'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ mode, score, members }),
+    });
+    const json = await res.json();
+    if (!json?.ok || !json.me) return null;
+    return {
+      rank: json.me.rank == null ? null : Number(json.me.rank),
+      score: Number(json.me.score ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function fetchFriends(): Promise<FriendsPayload | null> {
   const token = getToken();

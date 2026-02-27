@@ -286,7 +286,7 @@ export async function getUserAndWallet(tgUserId: string): Promise<{
 }
 
 export async function listLedger(tgUserId: string, limit = 50): Promise<any[]> {
-  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
   const { rows } = await pgQuery(
     `
     SELECT id, tg_user_id, type, currency, amount, meta, created_at
@@ -673,7 +673,7 @@ export type LeaderboardMeEntry = {
 };
 
 export async function listLeaderboardTop(mode: string, limit: number): Promise<LeaderboardTopEntry[]> {
-  const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
   const { rows } = await pgQuery<{
     rank: number;
     tg_user_id: string;
@@ -736,6 +736,107 @@ export async function getMyLeaderboardEntry(tgUserId: string, mode: string): Pro
   };
 }
 
+
+
+export async function submitTeamLeaderboardScore(params: {
+  mode: 'duo' | 'trio' | 'squad';
+  memberIds: string[];
+  displayName: string;
+  score: number;
+}): Promise<void> {
+  const normalizedMemberIds = params.memberIds
+    .map((memberId) => String(memberId ?? '').trim())
+    .filter((memberId) => memberId.length > 0)
+    .sort();
+  const teamKey = normalizedMemberIds.join(':');
+  const safeScore = Math.max(0, Math.floor(params.score));
+
+  await pgQuery(
+    `
+    INSERT INTO leaderboard_team_scores (mode, team_key, member_ids, display_name, best_score, updated_at)
+    VALUES ($1, $2, $3, $4, $5, now())
+    ON CONFLICT (mode, team_key)
+    DO UPDATE SET
+      member_ids = EXCLUDED.member_ids,
+      display_name = EXCLUDED.display_name,
+      best_score = GREATEST(leaderboard_team_scores.best_score, EXCLUDED.best_score),
+      updated_at = now()
+    `,
+    [params.mode, teamKey, normalizedMemberIds, params.displayName, safeScore],
+  );
+}
+
+export async function getTopTeamLeaderboard(mode: 'duo' | 'trio' | 'squad', limit: number): Promise<LeaderboardTopEntry[]> {
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const { rows } = await pgQuery<{
+    rank: number;
+    team_key: string;
+    display_name: string;
+    best_score: number;
+  }>(
+    `
+    SELECT
+      ROW_NUMBER() OVER (ORDER BY lts.best_score DESC, lts.updated_at ASC, lts.team_key ASC) AS rank,
+      lts.team_key,
+      lts.display_name,
+      lts.best_score
+    FROM leaderboard_team_scores lts
+    WHERE lts.mode = $1
+    ORDER BY lts.best_score DESC, lts.updated_at ASC, lts.team_key ASC
+    LIMIT $2
+    `,
+    [mode, safeLimit],
+  );
+
+  return rows.map((row) => ({
+    rank: Number(row.rank),
+    tgUserId: String(row.team_key),
+    displayName: String(row.display_name ?? 'Unknown'),
+    score: Number(row.best_score ?? 0),
+  }));
+}
+
+export async function getMyTeamEntry(mode: 'duo' | 'trio' | 'squad', memberIds: string[]): Promise<LeaderboardMeEntry | null> {
+  const normalizedMemberIds = memberIds
+    .map((memberId) => String(memberId ?? '').trim())
+    .filter((memberId) => memberId.length > 0)
+    .sort();
+  const teamKey = normalizedMemberIds.join(':');
+
+  if (!teamKey) return null;
+
+  const { rows } = await pgQuery<{
+    best_score: number;
+    rank: number;
+  }>(
+    `
+    SELECT
+      mine.best_score,
+      (
+        SELECT COUNT(*)::int
+        FROM leaderboard_team_scores all_scores
+        WHERE all_scores.mode = mine.mode
+          AND (
+            all_scores.best_score > mine.best_score
+            OR (all_scores.best_score = mine.best_score AND all_scores.updated_at < mine.updated_at)
+            OR (all_scores.best_score = mine.best_score AND all_scores.updated_at = mine.updated_at AND all_scores.team_key < mine.team_key)
+          )
+      ) + 1 AS rank
+    FROM leaderboard_team_scores mine
+    WHERE mine.mode = $1 AND mine.team_key = $2
+    LIMIT 1
+    `,
+    [mode, teamKey],
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+
+  return {
+    rank: Number(row.rank),
+    score: Number(row.best_score ?? 0),
+  };
+}
 export async function submitLeaderboardScore(tgUserId: string, mode: string, score: number): Promise<void> {
   const safeScore = Math.max(0, Math.floor(score));
   await pgQuery(

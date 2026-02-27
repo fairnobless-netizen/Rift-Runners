@@ -50,6 +50,7 @@ import {
   startRoom,
   respondFriend,
   submitLeaderboard,
+  submitTeamLeaderboard,
   type FriendEntry,
   type IncomingFriendRequest,
   type LeaderboardMeEntry,
@@ -61,6 +62,7 @@ import {
   type RoomMember,
   type RoomState,
   type ShopCatalogItem,
+  type TeamLeaderboardMember,
   type WalletLedgerEntry,
 } from '../game/wallet';
 import { WsDebugOverlay } from './WsDebugOverlay';
@@ -504,7 +506,7 @@ export default function GameView(): JSX.Element {
   const [nicknameSubmitting, setNicknameSubmitting] = useState(false);
   const [gameUserIdCopied, setGameUserIdCopied] = useState(false);
   const [registrationOpen, setRegistrationOpen] = useState<boolean>(() => !(localStorage.getItem(DISPLAY_NAME_KEY) ?? '').trim());
-  const lastSubmitKeyRef = useRef<string>('');
+  const lastSubmittedLeaderboardMatchIdRef = useRef<string>('');
   const [gameFlowPhase, setGameFlowPhase] = useState<GameFlowPhase>('intro');
   const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
   const [tutorialActive, setTutorialActive] = useState(false);
@@ -3120,24 +3122,36 @@ export default function GameView(): JSX.Element {
   }, [activeLeaderboardMode, leaderboardOpen]);
 
   useEffect(() => {
-    if (!lifeState.gameOver) {
-      lastSubmitKeyRef.current = '';
+    const isTrueMatchEnd = lifeState.gameOver || Boolean(matchEndState);
+    if (!isTrueMatchEnd) {
+      lastSubmittedLeaderboardMatchIdRef.current = '';
       return;
     }
 
-    const participantIds = isMultiplayerMode
-      ? currentRoomMembers.map((member) => member.tgUserId)
-      : [localTgUserId ?? 'local'];
-    const submitKey = `${activeLeaderboardMode}:${participantIds.slice().sort().join('|')}:${stats.score}`;
-    if (lastSubmitKeyRef.current === submitKey) return;
-    lastSubmitKeyRef.current = submitKey;
+    const matchIdentity = currentMatchId ?? `${activeLeaderboardMode}:${currentRoom?.roomCode ?? 'solo'}`;
+    if (lastSubmittedLeaderboardMatchIdRef.current === matchIdentity) return;
+    lastSubmittedLeaderboardMatchIdRef.current = matchIdentity;
 
     void (async () => {
-      const submitResult = await submitLeaderboard(activeLeaderboardMode, stats.score);
+      if (activeLeaderboardMode === 'solo') {
+        const submitResult = await submitLeaderboard('solo', stats.score);
+        if (!submitResult) return;
+        await loadLeaderboard('solo');
+        return;
+      }
+
+      const members: TeamLeaderboardMember[] = currentRoomMembers
+        .map((member) => ({
+          tgUserId: member.tgUserId,
+          displayName: member.displayName,
+        }))
+        .sort((a, b) => a.tgUserId.localeCompare(b.tgUserId));
+
+      const submitResult = await submitTeamLeaderboard(activeLeaderboardMode, stats.score, members);
       if (!submitResult) return;
       await loadLeaderboard(activeLeaderboardMode);
     })();
-  }, [activeLeaderboardMode, currentRoomMembers, isMultiplayerMode, lifeState.gameOver, localTgUserId, loadLeaderboard, stats.score]);
+  }, [activeLeaderboardMode, currentMatchId, currentRoom?.roomCode, currentRoomMembers, lifeState.gameOver, loadLeaderboard, matchEndState, stats.score]);
 
   useEffect(() => {
     if (!multiplayerUiOpen) return;
@@ -3981,9 +3995,18 @@ export default function GameView(): JSX.Element {
                 <div>No scores yet for this mode.</div>
               ) : (
                 leaderboardTop.map((entry) => (
-                  <div key={`${entry.rank}-${entry.tgUserId}`} className={`settings-kv leaderboard-row leaderboard-row--${Math.min(entry.rank, 4)}`}>
-                    <span>#{entry.rank} {entry.displayName}</span>
-                    <strong>{entry.score}</strong>
+                  <div
+                    key={`${entry.rank}-${entry.tgUserId}`}
+                    className={`leaderboard-row ${entry.rank === 1 ? 'lb-row--gold' : entry.rank === 2 ? 'lb-row--silver' : entry.rank === 3 ? 'lb-row--bronze' : 'lb-row--neutral'}`}
+                  >
+                    <div className="leaderboard-row__left">
+                      <span className="leaderboard-rank">
+                        <span className="leaderboard-rank__icon" aria-hidden="true">{entry.rank === 1 ? '🏆' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : ''}</span>
+                        {entry.rank}
+                      </span>
+                      <span className="leaderboard-name">{entry.displayName}</span>
+                    </div>
+                    <strong className="leaderboard-score">{entry.score}</strong>
                   </div>
                 ))
               )}
