@@ -1322,14 +1322,39 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return;
       }
 
-      const x = Number(msg.payload?.x);
-      const y = Number(msg.payload?.y);
-      if (!Number.isInteger(x) || !Number.isInteger(y)) {
+      const clientX = Number(msg.payload?.x);
+      const clientY = Number(msg.payload?.y);
+      const hasClientPosition = Number.isInteger(clientX) && Number.isInteger(clientY);
+
+      const player = match.players.get(ctx.tgUserId);
+      if (!player || match.eliminatedPlayers.has(ctx.tgUserId) || player.state !== 'alive') {
+        logWsEvent('bomb_place_rejected', {
+          roomId: room.roomId,
+          matchId: match.matchId,
+          tgUserId: ctx.tgUserId,
+          reason: 'player_not_alive',
+          playerState: player?.state ?? null,
+          serverX: player?.x ?? null,
+          serverY: player?.y ?? null,
+          clientX: hasClientPosition ? clientX : null,
+          clientY: hasClientPosition ? clientY : null,
+        });
         return;
       }
 
-      const spawned = tryPlaceBomb(match, ctx.tgUserId, x, y);
+      const spawned = tryPlaceBomb(match, ctx.tgUserId, player.x, player.y);
       if (!spawned) {
+        logWsEvent('bomb_place_rejected', {
+          roomId: room.roomId,
+          matchId: match.matchId,
+          tgUserId: ctx.tgUserId,
+          reason: 'placement_validation_failed',
+          playerState: player.state,
+          serverX: player.x,
+          serverY: player.y,
+          clientX: hasClientPosition ? clientX : null,
+          clientY: hasClientPosition ? clientY : null,
+        });
         return;
       }
 
