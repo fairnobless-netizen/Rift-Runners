@@ -285,40 +285,40 @@ export function MultiplayerModal({
               {friendsError ? <p className="rr-mp-error">{friendsError}</p> : null}
               {friendsLoading ? <p className="rr-mp-empty">Loading friends...</p> : null}
 
-              <section className="rr-mp-section">
-                <h4>Incoming requests</h4>
+              <section className="rr-mp-section rr-friends-panel">
+                <h4 className="rr-mp-section-title">Incoming requests</h4>
                 {incomingRequests.length === 0 ? <p className="rr-mp-empty">No incoming requests.</p> : null}
                 {incomingRequests.map((request) => (
                   <div key={request.fromTgUserId} className="rr-mp-card">
                     <span className="rr-mp-avatar">👤</span>
-                    <span>{request.displayName}</span>
-                    <button type="button" onClick={() => { void onRespondFriendRequest(request.fromTgUserId, 'accept'); }}>Accept</button>
-                    <button type="button" className="ghost" onClick={() => { void onRespondFriendRequest(request.fromTgUserId, 'decline'); }}>Decline</button>
+                    <span className="rr-mp-card-label">{request.displayName}</span>
+                    <button type="button" className="rr-mp-mini-button" onClick={() => { void onRespondFriendRequest(request.fromTgUserId, 'accept'); }}>Accept</button>
+                    <button type="button" className="ghost rr-mp-mini-button" onClick={() => { void onRespondFriendRequest(request.fromTgUserId, 'decline'); }}>Decline</button>
                   </div>
                 ))}
               </section>
 
-              <section className="rr-mp-section">
-                <h4>Outgoing requests</h4>
+              <section className="rr-mp-section rr-friends-panel">
+                <h4 className="rr-mp-section-title">Outgoing requests</h4>
                 {outgoingRequests.length === 0 ? <p className="rr-mp-empty">No outgoing requests.</p> : null}
                 {outgoingRequests.map((request) => (
                   <div key={request.toTgUserId} className="rr-mp-card">
                     <span className="rr-mp-avatar">⏳</span>
-                    <span>{request.displayName}</span>
+                    <span className="rr-mp-card-label">{request.displayName}</span>
                     <span className="rr-mp-chip pending">{request.status}</span>
                   </div>
                 ))}
               </section>
 
-              <section className="rr-mp-section">
-                <h4>Friends</h4>
+              <section className="rr-mp-section rr-friends-panel">
+                <h4 className="rr-mp-section-title">Friends</h4>
                 {friendsList.length === 0 ? <p className="rr-mp-empty">No friends yet.</p> : null}
                 {friendsList.map((friend) => (
                   <div key={friend.tgUserId} className="rr-mp-card">
                     <span className="rr-mp-avatar">👥</span>
-                    <span>{friend.displayName}</span>
+                    <span className="rr-mp-card-label">{friend.displayName}</span>
                     <span className="rr-mp-chip">friend</span>
-                    <button type="button" onClick={() => { void onInviteFriend(friend.tgUserId); }}>Invite</button>
+                    <button type="button" className="rr-mp-mini-button" onClick={() => { void onInviteFriend(friend.tgUserId); }}>Invite</button>
                   </div>
                 ))}
               </section>
@@ -394,49 +394,52 @@ export function MultiplayerModal({
               {roomScreen === 'join' ? (
                 <div className="rr-room-flow">
                   <div className="rr-room-flow-head">
-                    <h4>Join room</h4>
+                    <h4 className="rr-mp-section-title">Join room</h4>
                     <button type="button" className="ghost rr-room-back-button" onClick={() => setRoomScreen('home')}>Back</button>
                   </div>
 
-                  <input
-                    type="text"
-                    value={roomSearchDraft}
-                    onChange={(event) => setRoomSearchDraft(event.target.value)}
-                    placeholder="Search rooms…"
-                  />
+                  <div className="rr-room-join-card">
+                    <input
+                      type="text"
+                      className="rr-room-search-input"
+                      value={roomSearchDraft}
+                      onChange={(event) => setRoomSearchDraft(event.target.value)}
+                      placeholder="Search rooms…"
+                    />
+
+                    <div className="rr-room-list">
+                      {filteredRooms.length === 0 ? <p className="rr-mp-empty rr-room-empty-state">No rooms found.</p> : null}
+                      {filteredRooms.map((room) => (
+                        <button
+                          key={room.roomCode}
+                          type="button"
+                          className="rr-room-list-item"
+                          disabled={Boolean(joiningRoomCode)}
+                          onClick={() => {
+                            if (room.hasPassword) {
+                              setPasswordPromptRoomCode(room.roomCode);
+                              setPasswordPromptDraft('');
+                              setPasswordPromptError(null);
+                              return;
+                            }
+                            void handleJoinByCode(room.roomCode);
+                          }}
+                        >
+                          <span>{room.roomCode} — {room.name}</span>
+                          <span>Host: {room.hostDisplayName}</span>
+                          <span>{room.players}/{room.capacity} {room.hasPassword ? '🔒' : '🔓'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
                   {roomsError ? <p className="rr-mp-error">{roomsError}</p> : null}
                   {roomsLoading ? <p className="rr-mp-empty">Loading rooms...</p> : null}
                   {joiningRoomCode ? <p className="rr-mp-empty">Joining {joiningRoomCode}...</p> : null}
 
-                  <div className="rr-room-list">
-                    {filteredRooms.length === 0 ? <p className="rr-mp-empty">No rooms found.</p> : null}
-                    {filteredRooms.map((room) => (
-                      <button
-                        key={room.roomCode}
-                        type="button"
-                        className="rr-room-list-item"
-                        disabled={Boolean(joiningRoomCode)}
-                        onClick={() => {
-                          if (room.hasPassword) {
-                            setPasswordPromptRoomCode(room.roomCode);
-                            setPasswordPromptDraft('');
-                            setPasswordPromptError(null);
-                            return;
-                          }
-                          void handleJoinByCode(room.roomCode);
-                        }}
-                      >
-                        <span>{room.roomCode} — {room.name}</span>
-                        <span>Host: {room.hostDisplayName}</span>
-                        <span>{room.players}/{room.capacity} {room.hasPassword ? '🔒' : '🔓'}</span>
-                      </button>
-                    ))}
-                  </div>
-
                   <div className="rr-room-code-fallback">
-                    <h4>Join by code</h4>
-                    <div className="rr-mp-row">
+                    <h4 className="rr-mp-section-title">Join by code</h4>
+                    <div className="rr-mp-row rr-room-code-row">
                       <input
                         type="text"
                         value={joinCodeDraft}
@@ -445,6 +448,7 @@ export function MultiplayerModal({
                       />
                       <button
                         type="button"
+                        className="rr-room-join-cta"
                         disabled={Boolean(joiningRoomCode)}
                         onClick={() => {
                           void handleJoinByCode(joinCodeDraft);
