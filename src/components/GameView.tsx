@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useCallback, type CSSProperties, type FormEvent } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
@@ -181,6 +181,15 @@ const INTRO_PLACEHOLDER_MS = 5500;
 const ONBOARDING_DONE_KEY = 'rift_onboarding_v1_done';
 const MOBILE_ROTATE_OVERLAY_BREAKPOINT = 700;
 const DISPLAY_NAME_KEY = 'rr_display_name_v1';
+const PLAYER_ACCENT_PALETTE = ['#00ff00', '#ff0000', '#00aaff', '#ffffff'] as const;
+
+function colorFromPlayerColorId(colorId: number): string {
+  const paletteLength = PLAYER_ACCENT_PALETTE.length;
+  const normalized = Number.isFinite(colorId)
+    ? ((Math.trunc(colorId) % paletteLength) + paletteLength) % paletteLength
+    : 0;
+  return PLAYER_ACCENT_PALETTE[normalized];
+}
 
 type TelegramWebApp = {
   ready?: () => void;
@@ -334,6 +343,7 @@ export default function GameView(): JSX.Element {
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
   const [multiplayerLivesByUserId, setMultiplayerLivesByUserId] = useState<Record<string, number>>({});
   const [multiplayerDisconnectedByUserId, setMultiplayerDisconnectedByUserId] = useState<Record<string, boolean>>({});
+  const [multiplayerColorByUserId, setMultiplayerColorByUserId] = useState<Record<string, string>>({});
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [restartVote, setRestartVote] = useState<{ active: boolean; yesCount: number; total: number; expiresAt: number | null } | null>(null);
   const [restartVoteNowMs, setRestartVoteNowMs] = useState<number>(() => Date.now());
@@ -2001,6 +2011,14 @@ export default function GameView(): JSX.Element {
       }
       return next;
     });
+    setMultiplayerColorByUserId(() => {
+      const next: Record<string, string> = {};
+      for (const player of players) {
+        if (!player?.tgUserId) continue;
+        next[player.tgUserId] = colorFromPlayerColorId(Number(player.colorId ?? 0));
+      }
+      return next;
+    });
 
     if (localTgUserId) {
       const me = players.find((player) => String(player?.tgUserId) === String(localTgUserId));
@@ -3446,6 +3464,10 @@ export default function GameView(): JSX.Element {
     const lives = Math.max(0, multiplayerLivesByUserId[member.tgUserId] ?? 0);
     return '❤️'.repeat(lives) || '💀';
   };
+  const getHudAccent = (member: RoomMember, fallbackColorId: number): string => {
+    if (!isMultiplayerHud) return colorFromPlayerColorId(0);
+    return multiplayerColorByUserId[member.tgUserId] ?? colorFromPlayerColorId(fallbackColorId);
+  };
   const hudSlots = isMultiplayerHud
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
     : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
@@ -3699,10 +3721,19 @@ export default function GameView(): JSX.Element {
           <div className="hud-left">
             <div className={`hud-slots ${isMultiplayerHud ? 'hud-slots--multiplayer' : 'hud-slots--single'}`}>
               {hudSlots.map((member, index) => (
-                <div key={member?.tgUserId ?? `empty-${index}`} className={`hud-slot ${member ? '' : 'hud-slot--empty'} ${member && multiplayerDisconnectedByUserId[member.tgUserId] ? 'hud-slot--inactive' : ''}`}>
+                <div
+                  key={member?.tgUserId ?? `empty-${index}`}
+                  className={`hud-slot ${member ? '' : 'hud-slot--empty'} ${member && multiplayerDisconnectedByUserId[member.tgUserId] ? 'hud-slot--inactive' : ''}`}
+                  style={member ? ({ ['--player-accent' as string]: getHudAccent(member, index) } as CSSProperties) : undefined}
+                >
                   {member ? (
                     <>
-                      <span className="hud-slot-name" title={member.displayName}>{member.displayName}</span>
+                      <span className="hud-slot-avatar" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                          <circle cx="12" cy="7" r="3.2" />
+                          <path d="M4.2 19.4c.28-3.65 3.33-6.2 7.8-6.2 4.47 0 7.52 2.55 7.8 6.2" />
+                        </svg>
+                      </span>
                       <span ref={index === 0 ? hudLivesRef : undefined} className="hud-lives" aria-label="Lives" title="Lives">{getHudLives(member)}</span>
                     </>
                   ) : null}
@@ -3711,17 +3742,20 @@ export default function GameView(): JSX.Element {
             </div>
           </div>
           <div className="hud-right">
-            <span className="hud-metric">Stage: {campaign.stage}</span>
-            <span className="hud-metric">Zone: {campaign.zone}</span>
-            <span className="hud-metric">Bombs: {stats.placed}/{stats.capacity}</span>
-            <span className="hud-metric">Range: {stats.range}</span>
-            <span className="hud-metric">Score: {stats.score}</span>
-            <span className="hud-metric">Stars: {wallet.stars}</span>
-            <span className="hud-metric hud-metric--secondary">Crystals: {wallet.crystals}</span>
-            <span className="hud-metric hud-metric--secondary">Ledger: {ledger.length}</span>
-            <span className="hud-metric hud-metric--secondary" style={{ opacity: 0.7 }}>
-              {syncStatus === 'synced' ? 'Synced' : 'Offline'}
-            </span>
+            <div className="hud-cards">
+              <div className="hud-card">
+                <div className="hud-card__label">Stage</div>
+                <div className="hud-card__value">{campaign.stage}</div>
+              </div>
+              <div className="hud-card">
+                <div className="hud-card__label">Zone</div>
+                <div className="hud-card__value">{campaign.zone}</div>
+              </div>
+              <div className="hud-card hud-card--score">
+                <div className="hud-card__label">Score</div>
+                <div className="hud-card__value">{stats.score}</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -3751,8 +3785,6 @@ export default function GameView(): JSX.Element {
                     <span className="nav-btn__icon" aria-hidden="true">🛍️</span>
                   </span>
                 </button>
-              </div>
-              <div className="nav-secondary">
                 {isMultiplayerMode && currentRoom?.phase === 'STARTED' ? (
                   <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Leave Multiplayer" onClick={() => { void onLeaveMultiplayerMatch(); }}>
                     <span className="nav-btn__plate" aria-hidden="true">
@@ -3769,6 +3801,9 @@ export default function GameView(): JSX.Element {
                     </span>
                   </button>
                 )}
+                <button type="button" className="nav-btn nav-btn--reserved" disabled aria-label="Reserved slot">
+                  <span className="nav-btn__plate" aria-hidden="true" />
+                </button>
               </div>
             </div>
           </div>
