@@ -3923,6 +3923,7 @@ export default function GameView(): JSX.Element {
 
             <div className="right-stack-middle">
               <div className="right-panel right-panel--actions" aria-label="Action buttons">
+                <button type="button" className="action-btn action-btn--boost action-btn--boost-upper" disabled aria-hidden="true" tabIndex={-1}>Boost</button>
                 <button
                   ref={detonateBtnRef}
                   type="button"
@@ -3942,7 +3943,7 @@ export default function GameView(): JSX.Element {
                 >
                   Bomb
                 </button>
-                <button type="button" className="action-btn action-btn--boost" disabled aria-hidden="true" tabIndex={-1}>Boost</button>
+                <button type="button" className="action-btn action-btn--boost action-btn--boost-lower" disabled aria-hidden="true" tabIndex={-1}>Boost</button>
               </div>
             </div>
           </div>

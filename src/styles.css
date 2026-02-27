@@ -516,7 +516,9 @@ body {
 }
 
 .right-panel--actions {
-  gap: calc(0.48rem * var(--ui-scale));
+  --action-stack-gap: calc(0.95rem * var(--ui-scale));
+  --boost-separation-gap: calc(1.35rem * var(--ui-scale));
+  gap: var(--action-stack-gap);
   justify-content: center;
 }
 .game-shell {
@@ -724,6 +726,33 @@ button:disabled {
   box-shadow: inset 0 0 0 1px #ecf8ff1d, inset 0 8px 10px #83fff20c, 0 0 10px #5fb7ff30;
 }
 
+.bomb-btn,
+.detonate-btn {
+  aspect-ratio: auto;
+  border-radius: 10px;
+  max-width: 100%;
+  min-height: calc(42px * var(--ui-scale));
+  align-self: stretch;
+  font-size: calc(0.82rem * var(--ui-scale));
+}
+
+.action-btn--boost {
+  width: 100%;
+  aspect-ratio: 1.25 / 1;
+  min-height: calc(30px * var(--ui-scale));
+  font-size: calc(0.7rem * var(--ui-scale));
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.action-btn--boost-upper {
+  margin-bottom: var(--boost-separation-gap);
+}
+
+.action-btn--boost-lower {
+  margin-top: var(--boost-separation-gap);
+}
+
 .action-btn--bomb {
   border-color: #b9cae282;
   box-shadow: inset 0 0 0 1px #eef6ff26, 0 0 10px #bfd2ee3b;
@@ -839,6 +868,16 @@ html[data-orient="landscape"] .right-panel {
   .action-btn {
     min-height: 36px;
     font-size: 0.72rem;
+  }
+
+  .action-btn--boost {
+    min-height: 28px;
+    font-size: 0.66rem;
+  }
+
+  .bomb-btn,
+  .detonate-btn {
+    font-size: 0.86rem;
   }
 }
 
