@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, type CSSProperties, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useCallback, type CSSProperties, type FormEvent, type Ref } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
@@ -3456,13 +3456,29 @@ export default function GameView(): JSX.Element {
   const bootProgressPercent = Math.round(bootSplashProgress * 100);
 
   const isMultiplayerHud = currentRoomMembers.length >= 2;
-  const getHudLives = (member: RoomMember | null): string => {
-    if (!member) return '';
-    if (!isMultiplayerHud) {
-      return '❤️'.repeat(Math.max(0, lifeState.lives)) || '💀';
-    }
-    const lives = Math.max(0, multiplayerLivesByUserId[member.tgUserId] ?? 0);
-    return '❤️'.repeat(lives) || '💀';
+  const renderHudLives = (member: RoomMember | null, ref?: Ref<HTMLSpanElement>): JSX.Element | null => {
+    if (!member) return null;
+
+    const lives = isMultiplayerHud
+      ? Math.max(0, Math.min(3, multiplayerLivesByUserId[member.tgUserId] ?? 0))
+      : Math.max(0, Math.min(3, lifeState.lives));
+
+    return (
+      <span ref={ref} className="hud-lives" aria-label="Lives" title="Lives">
+        {Array.from({ length: 3 }, (_, index) => {
+          const isFullHeart = index < lives;
+          return (
+            <span
+              key={index}
+              className={`hud-heart ${isFullHeart ? 'hud-heart--full' : 'hud-heart--empty'}`}
+              aria-hidden="true"
+            >
+              {isFullHeart ? '❤️' : '♡'}
+            </span>
+          );
+        })}
+      </span>
+    );
   };
   const getHudAccent = (member: RoomMember, fallbackColorId: number): string => {
     if (!isMultiplayerHud) return colorFromPlayerColorId(0);
@@ -3734,7 +3750,7 @@ export default function GameView(): JSX.Element {
                           <path d="M4.2 19.4c.28-3.65 3.33-6.2 7.8-6.2 4.47 0 7.52 2.55 7.8 6.2" />
                         </svg>
                       </span>
-                      <span ref={index === 0 ? hudLivesRef : undefined} className="hud-lives" aria-label="Lives" title="Lives">{getHudLives(member)}</span>
+                      {renderHudLives(member, index === 0 ? hudLivesRef : undefined)}
                     </>
                   ) : null}
                 </div>
@@ -3801,9 +3817,6 @@ export default function GameView(): JSX.Element {
                     </span>
                   </button>
                 )}
-                <button type="button" className="nav-btn nav-btn--reserved" disabled aria-label="Reserved slot">
-                  <span className="nav-btn__plate" aria-hidden="true" />
-                </button>
               </div>
             </div>
           </div>
