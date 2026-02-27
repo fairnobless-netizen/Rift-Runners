@@ -13,14 +13,21 @@ import {
 
 export const leaderboardRouter = Router();
 
+type TeamMode = 'duo' | 'trio' | 'squad';
+
+interface TeamMember {
+  tgUserId: string;
+  displayName: string;
+}
+
 const ALLOWED_MODES = new Set(['solo', 'duo', 'trio', 'squad']);
-const TEAM_MODE_MEMBER_COUNTS: Record<'duo' | 'trio' | 'squad', number> = { duo: 2, trio: 3, squad: 4 };
+const TEAM_MODE_MEMBER_COUNTS: Record<TeamMode, number> = { duo: 2, trio: 3, squad: 4 };
 
 function isValidMode(mode: string): boolean {
   return ALLOWED_MODES.has(mode);
 }
 
-function isTeamMode(mode: string): mode is 'duo' | 'trio' | 'squad' {
+function isTeamMode(mode: string): mode is TeamMode {
   return mode === 'duo' || mode === 'trio' || mode === 'squad';
 }
 
@@ -30,19 +37,24 @@ function normalizeDisplayName(value: unknown): string {
 }
 
 leaderboardRouter.get('/:mode', async (req, res) => {
-  const mode = String(req.params.mode ?? '').trim().toLowerCase();
-  if (!isValidMode(mode)) {
+  const rawMode = String(req.params.mode ?? '').trim().toLowerCase();
+  if (!isValidMode(rawMode)) {
     return res.status(400).json({ ok: false, error: 'invalid_mode' });
   }
 
   const session = await resolveSessionFromRequest(req as any);
 
-  if (mode === 'solo') {
-    const top = await listLeaderboardTop(mode, 100);
-    const me = session ? await getMyLeaderboardEntry(session.tgUserId, mode) : null;
-    return res.status(200).json({ ok: true, mode, top, me });
+  if (rawMode === 'solo') {
+    const top = await listLeaderboardTop(rawMode, 100);
+    const me = session ? await getMyLeaderboardEntry(session.tgUserId, rawMode) : null;
+    return res.status(200).json({ ok: true, mode: rawMode, top, me });
   }
 
+  if (!isTeamMode(rawMode)) {
+    return res.status(400).json({ ok: false, error: 'invalid_mode' });
+  }
+
+  const mode: TeamMode = rawMode;
   const top = await getTopTeamLeaderboard(mode, 100);
   const me = null;
   return res.status(200).json({ ok: true, mode, top, me });
@@ -70,10 +82,13 @@ leaderboardRouter.post('/submit-team', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'invalid_members_count' });
   }
 
-  const members = membersRaw.map((member: any) => ({
-    tgUserId: String(member?.tgUserId ?? '').trim(),
-    displayName: normalizeDisplayName(member?.displayName),
-  }));
+  const members: TeamMember[] = membersRaw.map((member: unknown) => {
+    const payload = typeof member === 'object' && member !== null ? (member as Record<string, unknown>) : {};
+    return {
+      tgUserId: String(payload.tgUserId ?? '').trim(),
+      displayName: normalizeDisplayName(payload.displayName),
+    };
+  });
 
   if (members.some((member) => !member.tgUserId)) {
     return res.status(400).json({ ok: false, error: 'invalid_member' });
