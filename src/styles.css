@@ -1591,33 +1591,16 @@ html[data-orient="landscape"] .right-panel {
   width: min(460px, calc(100vw - 1.5rem));
   border: 1px solid #4a61a0;
   border-radius: 12px;
-  padding: 0.55rem 0.65rem;
+  padding: 0.7rem;
   background: rgba(10, 18, 36, 0.94);
   display: grid;
-  gap: 0.4rem;
+  gap: 0.45rem;
   pointer-events: auto;
 }
 
 .restart-vote-actions {
   display: flex;
   gap: 0.4rem;
-}
-
-.restart-propose-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.restart-propose-row__btn {
-  min-width: 5.5rem;
-  flex: 0 0 5.5rem;
-}
-
-.restart-propose-row__title {
-  flex: 1;
-  text-align: center;
-  font-size: 0.95rem;
 }
 
 .restart-vote-progress {
