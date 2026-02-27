@@ -1719,8 +1719,23 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    const currentExpectedMatchId = expectedMatchIdRef.current;
-    if (gotMatchId && gotMatchId !== currentExpectedMatchId) {
+    let currentExpectedMatchId = expectedMatchIdRef.current;
+    if (!currentExpectedMatchId) {
+      const roomIsActiveMultiplayer = isMultiplayerMode
+        && currentRoom?.phase === 'STARTED'
+        && currentRoom.roomCode === expectedRoomCode;
+      if (roomIsActiveMultiplayer && gotMatchId) {
+        diagnosticsStore.log('ROOM', 'INFO', 'world_init_adopted_match_id', {
+          roomCode: expectedRoomCode,
+          matchId: gotMatchId,
+          expectedMatchIdWasNull: true,
+        });
+        switchToNextMatch(gotMatchId);
+        currentExpectedMatchId = gotMatchId;
+      }
+    }
+
+    if (gotMatchId && currentExpectedMatchId && gotMatchId !== currentExpectedMatchId) {
       diagnosticsStore.log('ROOM', 'INFO', 'match_switch:from_world_init', {
         roomCode: expectedRoomCode,
         oldMatchId: currentExpectedMatchId,
@@ -1804,7 +1819,7 @@ export default function GameView(): JSX.Element {
         snapTick: pendingSnapshot.tick ?? null,
       });
     }
-  }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, switchToNextMatch, ws.messages]);
+  }, [currentRoom?.phase, currentRoom?.roomCode, isMultiplayerMode, localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, switchToNextMatch, ws.messages]);
 
   useEffect(() => {
     const pendingWorldInit = pendingWorldInitRef.current;
