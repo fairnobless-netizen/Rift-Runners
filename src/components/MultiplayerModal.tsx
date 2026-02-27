@@ -13,16 +13,6 @@ type MainTab = 'friends' | 'find' | 'room' | 'browse' | 'referral';
 type RoomScreen = 'home' | 'create' | 'join' | 'lobby';
 type SlotPosition = 'nw' | 'ne' | 'sw' | 'se';
 
-type WsDiagnostics = {
-  enabled: boolean;
-  status: 'OPEN' | 'ERROR' | 'CONNECTING';
-  apiBase: string;
-  wsUrl: string;
-  roomCode: string | null;
-  members: number;
-  lastError: string | null;
-};
-
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -60,7 +50,6 @@ type Props = {
   onCopyReferralLink: () => Promise<void>;
   localTgUserId?: string;
   onConsumeInitialJoinCode?: () => void;
-  wsDiagnostics?: WsDiagnostics;
 };
 
 const SLOT_POSITIONS: readonly SlotPosition[] = ['nw', 'ne', 'sw', 'se'];
@@ -102,7 +91,6 @@ export function MultiplayerModal({
   onCopyReferralLink,
   localTgUserId,
   onConsumeInitialJoinCode,
-  wsDiagnostics,
 }: Props): JSX.Element | null {
   const [activeMainTab, setActiveMainTab] = useState<MainTab>(initialTab ?? 'room');
   const [roomScreen, setRoomScreen] = useState<RoomScreen>(initialRoomTab ?? 'home');
@@ -116,7 +104,6 @@ export function MultiplayerModal({
   const [passwordPromptDraft, setPasswordPromptDraft] = useState('');
   const [passwordPromptError, setPasswordPromptError] = useState<string | null>(null);
   const autoJoinRef = useRef<string | null>(null);
-  const [debugCopied, setDebugCopied] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -269,59 +256,28 @@ export function MultiplayerModal({
     setFriendTargetDraft('');
   };
 
-  const debugPayload = wsDiagnostics ? {
-    ts: new Date().toISOString(),
-    wsStatus: wsDiagnostics.status,
-    apiBase: wsDiagnostics.apiBase,
-    wsUrl: wsDiagnostics.wsUrl,
-    roomCode: wsDiagnostics.roomCode,
-    members: wsDiagnostics.members,
-    lastError: wsDiagnostics.lastError,
-  } : null;
-
-  const onCopyDebug = (): void => {
-    if (!debugPayload || !navigator.clipboard?.writeText) return;
-    void navigator.clipboard.writeText(JSON.stringify(debugPayload, null, 2)).then(() => {
-      setDebugCopied(true);
-      window.setTimeout(() => setDebugCopied(false), 1400);
-    });
-  };
-
   if (!open) return null;
 
   return (
     <div className="settings-overlay rr-mp-overlay rr-overlay" role="dialog" aria-modal="true" aria-label="Multiplayer">
       <div className="settings-modal rr-mp-modal rr-overlay-modal">
-        <div className="settings-header">
-          <strong>MULTIPLAYER</strong>
-          <button type="button" onClick={onClose}>Close</button>
+        <div className="settings-header rr-mp-header">
+          <strong className="rr-mp-title">MULTIPLAYER</strong>
+          <button type="button" className="rr-mp-close" onClick={onClose}>Close</button>
         </div>
 
         <div className="rr-mp-tabs">
           {(['friends', 'find', 'room', 'browse', 'referral'] as const).map((item) => (
-            <button key={item} type="button" className={activeMainTab === item ? 'active' : ''} onClick={() => setActiveMainTab(item)}>
+            <button
+              key={item}
+              type="button"
+              className={`rr-mp-tab rr-mp-tab--${item} ${activeMainTab === item ? 'active' : ''}`}
+              onClick={() => setActiveMainTab(item)}
+            >
               {item[0].toUpperCase() + item.slice(1)}
             </button>
           ))}
         </div>
-
-        {wsDiagnostics?.enabled ? (
-          <div className={`rr-mp-wsdiag rr-mp-wsdiag--${wsDiagnostics.status.toLowerCase()}`}>
-            <div className="rr-mp-wsdiag-top">
-              <strong>WS: {wsDiagnostics.status}</strong>
-              <button type="button" className="ghost" onClick={onCopyDebug}>
-                {debugCopied ? 'Copied' : 'Copy debug'}
-              </button>
-            </div>
-            <div className="rr-mp-wsdiag-grid">
-              <span>API_BASE</span><code>{wsDiagnostics.apiBase}</code>
-              <span>WS_URL</span><code>{wsDiagnostics.wsUrl}</code>
-              <span>roomCode</span><code>{wsDiagnostics.roomCode ?? '—'}</code>
-              <span>members</span><code>{wsDiagnostics.members}</code>
-              <span>lastError</span><code>{wsDiagnostics.lastError ?? '—'}</code>
-            </div>
-          </div>
-        ) : null}
 
         <div className="settings-panel rr-mp-panel">
           {activeMainTab === 'friends' ? (
