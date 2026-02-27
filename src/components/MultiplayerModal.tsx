@@ -337,17 +337,18 @@ export function MultiplayerModal({
               {roomScreen === 'create' ? (
                 <div className="rr-room-flow">
                   <div className="rr-room-flow-head">
-                    <h4>Create room</h4>
-                    <button type="button" className="ghost" onClick={() => setRoomScreen('home')}>Back</button>
+                    <button type="button" className="ghost rr-room-back-button" onClick={() => setRoomScreen('home')}>Back</button>
                   </div>
-                  <label className="rr-room-field">
-                    <span>Room name</span>
-                    <input type="text" value={roomNameDraft} placeholder="Room-host" onChange={(event) => setRoomNameDraft(event.target.value)} />
-                  </label>
-                  <label className="rr-room-field">
-                    <span>Password (optional)</span>
-                    <input type="password" value={roomPasswordDraft} placeholder="Optional" onChange={(event) => setRoomPasswordDraft(event.target.value)} />
-                  </label>
+                  <div className="rr-room-fields-row">
+                    <label className="rr-room-field">
+                      <span>Room name</span>
+                      <input type="text" value={roomNameDraft} placeholder="Room-host" onChange={(event) => setRoomNameDraft(event.target.value)} />
+                    </label>
+                    <label className="rr-room-field">
+                      <span>Password (optional)</span>
+                      <input type="password" value={roomPasswordDraft} placeholder="Optional" onChange={(event) => setRoomPasswordDraft(event.target.value)} />
+                    </label>
+                  </div>
                   {roomNameError ? <p className="rr-mp-error">{roomNameError}</p> : null}
 
                   <div className="rr-room-corner-board">
@@ -357,12 +358,16 @@ export function MultiplayerModal({
                     </div>
                     {createSlots.map((enabled, index) => {
                       const position = SLOT_POSITIONS[index + 1];
+                      const canRemove = selectedCreateSlots > 1;
+                      const isDisabled = enabled && !canRemove;
                       return (
                         <button
                           key={position}
                           type="button"
                           className={`rr-room-slot-preview ${position} ${enabled ? 'enabled' : 'waiting'}`}
+                          disabled={isDisabled}
                           onClick={() => {
+                            if (isDisabled) return;
                             setCreateSlots((prev) => {
                               const next: [boolean, boolean, boolean] = [...prev] as [boolean, boolean, boolean];
                               next[index] = !next[index];
@@ -370,17 +375,17 @@ export function MultiplayerModal({
                             });
                           }}
                         >
-                          <strong>{enabled ? 'Player slot on' : 'Add player'}</strong>
-                          <span>{enabled ? 'Included in room' : 'Tap to include'}</span>
+                          <strong>{enabled ? 'Remove player' : 'Add player'}</strong>
+                          <span>{enabled ? (canRemove ? 'Tap to remove' : 'Minimum 2 players required') : 'Tap to include'}</span>
                         </button>
                       );
                     })}
 
                     <div className="rr-room-board-center">
-                      <button type="button" disabled={Boolean(roomNameError) || creatingRoom} onClick={() => { void handleCreate(); }}>
+                      <button type="button" className="rr-room-create-cta" disabled={Boolean(roomNameError) || creatingRoom} onClick={() => { void handleCreate(); }}>
                         {creatingRoom ? 'Creating...' : 'Create'}
                       </button>
-                      <span className="rr-mp-empty">Players: {desiredCapacity} requested ({apiCapacity} API)</span>
+                      <span className="rr-mp-empty rr-room-players-line">Players: {desiredCapacity} requested</span>
                     </div>
                   </div>
                 </div>
@@ -390,7 +395,7 @@ export function MultiplayerModal({
                 <div className="rr-room-flow">
                   <div className="rr-room-flow-head">
                     <h4>Join room</h4>
-                    <button type="button" className="ghost" onClick={() => setRoomScreen('home')}>Back</button>
+                    <button type="button" className="ghost rr-room-back-button" onClick={() => setRoomScreen('home')}>Back</button>
                   </div>
 
                   <input
