@@ -383,13 +383,14 @@ body {
   --left-nav-gap: clamp(1px, 0.45vw, 3px);
   --left-nav-inline-pad: clamp(1px, 0.5vw, 4px);
   --left-nav-tile-size: clamp(
-    1.75rem,
+    24px,
     calc((100% - (var(--left-nav-inline-pad) * 2) - (var(--left-nav-gap) * 2)) / 3),
-    2.35rem
+    34px
   );
   flex: 0 0 auto;
   width: 100%;
   max-width: 100%;
+  overflow: hidden;
   overflow: clip;
   padding-inline: var(--left-nav-inline-pad);
   box-sizing: border-box;
