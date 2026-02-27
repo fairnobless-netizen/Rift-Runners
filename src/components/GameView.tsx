@@ -3699,7 +3699,11 @@ export default function GameView(): JSX.Element {
           <div className="hud-left">
             <div className={`hud-slots ${isMultiplayerHud ? 'hud-slots--multiplayer' : 'hud-slots--single'}`}>
               {hudSlots.map((member, index) => (
-                <div key={member?.tgUserId ?? `empty-${index}`} className={`hud-slot ${member ? '' : 'hud-slot--empty'} ${member && multiplayerDisconnectedByUserId[member.tgUserId] ? 'hud-slot--inactive' : ''}`}>
+                <div
+                  key={member?.tgUserId ?? `empty-${index}`}
+                  className={`hud-slot ${member ? '' : 'hud-slot--empty'} ${member && multiplayerDisconnectedByUserId[member.tgUserId] ? 'hud-slot--inactive' : ''}`}
+                  data-slot-index={index + 1}
+                >
                   {member ? (
                     <>
                       <span className="hud-slot-name" title={member.displayName}>{member.displayName}</span>
@@ -3711,16 +3715,41 @@ export default function GameView(): JSX.Element {
             </div>
           </div>
           <div className="hud-right">
-            <span className="hud-metric">Stage: {campaign.stage}</span>
-            <span className="hud-metric">Zone: {campaign.zone}</span>
-            <span className="hud-metric">Bombs: {stats.placed}/{stats.capacity}</span>
-            <span className="hud-metric">Range: {stats.range}</span>
-            <span className="hud-metric">Score: {stats.score}</span>
-            <span className="hud-metric">Stars: {wallet.stars}</span>
-            <span className="hud-metric hud-metric--secondary">Crystals: {wallet.crystals}</span>
-            <span className="hud-metric hud-metric--secondary">Ledger: {ledger.length}</span>
-            <span className="hud-metric hud-metric--secondary" style={{ opacity: 0.7 }}>
-              {syncStatus === 'synced' ? 'Synced' : 'Offline'}
+            <span className="hud-metric hud-metric--compact">
+              <span className="hud-metric__label">Stage</span>
+              <span className="hud-metric__value">{campaign.stage}</span>
+            </span>
+            <span className="hud-metric hud-metric--compact">
+              <span className="hud-metric__label">Zone</span>
+              <span className="hud-metric__value">{campaign.zone}</span>
+            </span>
+            <span className="hud-metric hud-metric--compact hud-metric--bombs">
+              <span className="hud-metric__label">Bombs</span>
+              <span className="hud-metric__value">{stats.placed}/{stats.capacity}</span>
+            </span>
+            <span className="hud-metric hud-metric--compact">
+              <span className="hud-metric__label">Range</span>
+              <span className="hud-metric__value">{stats.range}</span>
+            </span>
+            <span className="hud-metric hud-metric--compact hud-metric--score">
+              <span className="hud-metric__label">Score</span>
+              <span className="hud-metric__value">{stats.score}</span>
+            </span>
+            <span className="hud-metric hud-metric--compact">
+              <span className="hud-metric__label">Stars</span>
+              <span className="hud-metric__value">{wallet.stars}</span>
+            </span>
+            <span className="hud-metric hud-metric--compact hud-metric--secondary">
+              <span className="hud-metric__label">Crystals</span>
+              <span className="hud-metric__value">{wallet.crystals}</span>
+            </span>
+            <span className="hud-metric hud-metric--compact hud-metric--secondary">
+              <span className="hud-metric__label">Ledger</span>
+              <span className="hud-metric__value">{ledger.length}</span>
+            </span>
+            <span className="hud-metric hud-metric--compact hud-metric--secondary" style={{ opacity: 0.7 }}>
+              <span className="hud-metric__label">Net</span>
+              <span className="hud-metric__value">{syncStatus === 'synced' ? 'Synced' : 'Offline'}</span>
             </span>
           </div>
         </div>
@@ -3730,7 +3759,7 @@ export default function GameView(): JSX.Element {
         <aside className="control-column control-column--left" aria-label="Movement controls">
           <div className="left-panel left-panel--icons">
             <div className="left-nav" aria-label="Navigation quick controls">
-              <div className="nav-grid">
+              <div className="nav-grid nav-grid--five">
                 <button type="button" className="nav-btn" aria-label="Map placeholder">
                   <span className="nav-btn__plate" aria-hidden="true">
                     <span className="nav-btn__icon" aria-hidden="true">🗺️</span>
@@ -3751,8 +3780,6 @@ export default function GameView(): JSX.Element {
                     <span className="nav-btn__icon" aria-hidden="true">🛍️</span>
                   </span>
                 </button>
-              </div>
-              <div className="nav-secondary">
                 {isMultiplayerMode && currentRoom?.phase === 'STARTED' ? (
                   <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Leave Multiplayer" onClick={() => { void onLeaveMultiplayerMatch(); }}>
                     <span className="nav-btn__plate" aria-hidden="true">
