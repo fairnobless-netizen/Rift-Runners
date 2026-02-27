@@ -3775,7 +3775,7 @@ export default function GameView(): JSX.Element {
       <section ref={pageShellRef} className="playfield-shell page-shell">
         <aside className="control-column control-column--left" aria-label="Movement controls">
           <div className="left-panel left-panel--icons">
-            <div className="left-nav left-nav--joystick-panel" aria-label="Navigation quick controls">
+            <div className="left-nav" aria-label="Navigation quick controls">
               <div className="nav-grid nav-grid--five">
                 <button type="button" className="nav-btn" aria-label="Map placeholder">
                   <span className="nav-btn__plate" aria-hidden="true">
