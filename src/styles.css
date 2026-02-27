@@ -438,7 +438,7 @@ body {
 }
 
 .joystick-touch-zone--active {
-  background: radial-gradient(circle at center, #5568aa22, transparent 70%);
+  background: radial-gradient(circle at center, #72ffd21f, transparent 72%);
 }
 
 
@@ -466,33 +466,48 @@ body {
 .right-panel {
   width: 100%;
   max-width: 100%;
-  background: #0f1630cc;
-  border: 1px solid #27335c;
-  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(150deg, #b5f2ff1c 0%, transparent 44%),
+    linear-gradient(210deg, #8ca6ff1e 0%, #101a36d9 48%, #0a1124e3 100%);
+  border: 1px solid #8ec2ff5e;
+  border-radius: 14px;
   padding: calc(0.5rem * var(--ui-scale));
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: calc(0.5rem * var(--ui-scale));
+  box-shadow: inset 0 0 0 1px #cbf0ff1f, inset 0 12px 20px #a3ffdc12, 0 0 14px #3d8fd340;
+}
+
+.right-panel::before {
+  content: '';
+  position: absolute;
+  inset: -22%;
+  pointer-events: none;
+  opacity: 0.36;
+  background:
+    radial-gradient(circle at 20% 30%, #7cffbc1e 0%, transparent 42%),
+    radial-gradient(circle at 78% 18%, #76ffe217 0%, transparent 38%),
+    radial-gradient(circle at 58% 75%, #b4ffd616 0%, transparent 44%);
+  animation: right-panel-moss-shimmer 11s ease-in-out infinite alternate;
 }
 
 .right-panel--zoom {
   padding: calc(0.45rem * var(--ui-scale));
-  gap: calc(0.2rem * var(--ui-scale));
+  gap: calc(0.28rem * var(--ui-scale));
+  align-items: stretch;
 }
 
-.boost-slot {
-  width: 100%;
-  aspect-ratio: 1.25 / 1;
-  min-height: calc(30px * var(--ui-scale));
-  border-radius: 10px;
-  border: 1px dashed #425180;
-  color: #a6b2d8;
-  display: grid;
-  place-items: center;
-  font-size: calc(0.7rem * var(--ui-scale));
-  letter-spacing: 0.04em;
+.right-zoom-label {
+  position: relative;
+  z-index: 1;
+  font-size: calc(0.64rem * var(--ui-scale));
+  letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: #d8f7ff;
+  text-align: left;
 }
 
 
@@ -501,17 +516,8 @@ body {
 }
 
 .right-panel--actions {
-  --action-stack-gap: calc(0.95rem * var(--ui-scale));
-  --boost-separation-gap: calc(1.35rem * var(--ui-scale));
-  gap: var(--action-stack-gap);
-}
-
-.boost-slot--upper {
-  margin-bottom: var(--boost-separation-gap);
-}
-
-.boost-slot--lower {
-  margin-top: var(--boost-separation-gap);
+  gap: calc(0.48rem * var(--ui-scale));
+  justify-content: center;
 }
 .game-shell {
   position: relative;
@@ -542,8 +548,56 @@ body {
 
 .zoom-slider {
   width: 100%;
-  height: calc(22px * var(--ui-scale));
-  padding: calc(0.06rem * var(--ui-scale)) 0;
+  height: calc(26px * var(--ui-scale));
+  padding: calc(0.12rem * var(--ui-scale)) 0;
+}
+
+.telescope-range {
+  --tube-track: linear-gradient(180deg, #d7f2ff40 0%, #6078a8b5 52%, #32496eb8 100%);
+  --tube-highlight: linear-gradient(180deg, #fbfffe6b 0%, transparent 65%);
+  --tube-thumb: linear-gradient(180deg, #ffe8a0 0%, #deaa56 58%, #987239 100%);
+  position: relative;
+  z-index: 1;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+}
+
+.telescope-range::-webkit-slider-runnable-track {
+  height: calc(9px * var(--ui-scale));
+  border-radius: 999px;
+  border: 1px solid #bde4ff70;
+  background: var(--tube-highlight), var(--tube-track);
+  box-shadow: inset 0 1px 3px #ffffff2b, inset 0 -2px 4px #0b12297a, 0 0 8px #5fb7ff3a;
+}
+
+.telescope-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: calc(14px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+  margin-top: calc(-8px * var(--ui-scale));
+  border-radius: 999px;
+  border: 1px solid #ffefb0;
+  background: var(--tube-thumb);
+  box-shadow: 0 0 8px #ffcf6a6a, inset 0 1px 2px #fff5d0;
+}
+
+.telescope-range::-moz-range-track {
+  height: calc(9px * var(--ui-scale));
+  border-radius: 999px;
+  border: 1px solid #bde4ff70;
+  background: var(--tube-highlight), var(--tube-track);
+  box-shadow: inset 0 1px 3px #ffffff2b, inset 0 -2px 4px #0b12297a, 0 0 8px #5fb7ff3a;
+}
+
+.telescope-range::-moz-range-thumb {
+  width: calc(14px * var(--ui-scale));
+  height: calc(24px * var(--ui-scale));
+  border-radius: 999px;
+  border: 1px solid #ffefb0;
+  background: var(--tube-thumb);
+  box-shadow: 0 0 8px #ffcf6a6a, inset 0 1px 2px #fff5d0;
 }
 
 button {
@@ -556,8 +610,25 @@ button {
 }
 
 .control-column--right button {
-  font-size: calc(0.82rem * var(--ui-scale));
-  padding: calc(0.45rem * var(--ui-scale)) calc(0.6rem * var(--ui-scale));
+  font-size: calc(0.8rem * var(--ui-scale));
+  padding: calc(0.38rem * var(--ui-scale)) calc(0.58rem * var(--ui-scale));
+}
+
+.right-reset-btn {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-height: calc(30px * var(--ui-scale));
+  border: 1px solid #9dcfff80;
+  border-radius: 9px;
+  background: linear-gradient(155deg, #9ce8ff24 0%, #3d5f9559 52%, #1d2e5085 100%);
+  box-shadow: inset 0 0 0 1px #effbff21, 0 0 9px #59a6ea45;
+  color: #ecf8ff;
+  font-size: calc(0.72rem * var(--ui-scale));
+  line-height: 1.1;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: center;
 }
 
 button:disabled {
@@ -573,9 +644,22 @@ button:disabled {
   width: min(100%, calc(150px * var(--ui-scale)));
   aspect-ratio: 1 / 1;
   border-radius: 50%;
-  border: 2px solid #425180;
-  background: radial-gradient(circle at 30% 30%, #25345f, #162240 70%);
+  border: 2px solid #7fcfff83;
+  background:
+    radial-gradient(circle at 30% 24%, #f4fffb29 0%, transparent 35%),
+    radial-gradient(circle at 72% 68%, #8ce2c625 0%, transparent 34%),
+    radial-gradient(circle at 50% 56%, #2d3f658f 0%, #17233f 62%, #0f1a33 100%);
+  box-shadow: inset 0 0 0 1px #d5ebff1f, inset 0 0 18px #8ff7c51a, 0 0 12px #47aff34d;
   touch-action: none;
+}
+
+.joystick-pad::before {
+  content: '';
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  border: 1px solid #89dbcd4d;
+  box-shadow: 0 0 10px #82ffd034;
 }
 
 .joystick-pad::after {
@@ -587,7 +671,8 @@ button:disabled {
 }
 
 .joystick-pad--active {
-  border-color: #89a4eb;
+  border-color: #b6fff2;
+  box-shadow: inset 0 0 0 1px #ecfffd54, inset 0 0 20px #98ffdc30, 0 0 16px #64c8ff8f;
 }
 
 .joystick-knob {
@@ -621,24 +706,42 @@ button:disabled {
   padding: calc(0.35rem * var(--ui-scale));
 }
 
-.bomb-btn,
-.detonate-btn {
+.action-btn {
   width: 100%;
-  aspect-ratio: 1 / 1;
-  border-radius: 9999px;
-  max-width: calc(78px * var(--ui-scale));
-  min-height: 0;
-  align-self: center;
-  font-size: calc(0.9rem * var(--ui-scale));
+  min-height: calc(42px * var(--ui-scale));
+  border-radius: 11px;
+  max-width: 100%;
+  align-self: stretch;
+  font-size: calc(0.78rem * var(--ui-scale));
   touch-action: manipulation;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #93c7ff6e;
+  color: #ebf8ff;
+  background: linear-gradient(160deg, #bde4ff1f 0%, #334b7a91 48%, #1a28488f 100%);
+  box-shadow: inset 0 0 0 1px #ecf8ff1d, inset 0 8px 10px #83fff20c, 0 0 10px #5fb7ff30;
 }
 
-.bomb-btn {
-  background: #9c3e3e;
+.action-btn--bomb {
+  border-color: #b9cae282;
+  box-shadow: inset 0 0 0 1px #eef6ff26, 0 0 10px #bfd2ee3b;
 }
 
-.detonate-btn {
-  background: #44548f;
+.action-btn--detonate {
+  border-color: #ff939382;
+  box-shadow: inset 0 0 0 1px #ffe4e421, 0 0 12px #ff646449;
+}
+
+.action-btn--boost {
+  border-color: #7deec882;
+  color: #e3fff6;
+  box-shadow: inset 0 0 0 1px #e8fff31f, 0 0 10px #65ffc640;
+}
+
+.action-btn:disabled {
+  opacity: 0.62;
 }
 
 html[data-device="phone"] {
@@ -671,9 +774,6 @@ html[data-orient="landscape"] .right-panel {
     padding: 0.35rem;
   }
 
-  .boost-slot {
-    min-height: calc(30px * var(--ui-scale));
-  }
 }
 
 @media (orientation: landscape) and (pointer: coarse) {
@@ -736,18 +836,24 @@ html[data-orient="landscape"] .right-panel {
     width: min(150px, 40vw);
   }
 
-  .boost-slot {
-    min-height: 28px;
-    font-size: 0.66rem;
-  }
-
-  .bomb-btn,
-  .detonate-btn {
-    max-width: 58px;
-    font-size: 0.86rem;
+  .action-btn {
+    min-height: 36px;
+    font-size: 0.72rem;
   }
 }
 
+
+
+@keyframes right-panel-moss-shimmer {
+  0% {
+    transform: translate3d(-2%, 0, 0) scale(1);
+    opacity: 0.28;
+  }
+  100% {
+    transform: translate3d(2%, -3%, 0) scale(1.03);
+    opacity: 0.44;
+  }
+}
 
 .boot-splash {
   position: absolute;
