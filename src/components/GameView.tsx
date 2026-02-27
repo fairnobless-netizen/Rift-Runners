@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useCallback, type CSSProperties, type FormEvent } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
 import { GAME_CONFIG } from '../game/config';
@@ -181,6 +181,14 @@ const INTRO_PLACEHOLDER_MS = 5500;
 const ONBOARDING_DONE_KEY = 'rift_onboarding_v1_done';
 const MOBILE_ROTATE_OVERLAY_BREAKPOINT = 700;
 const DISPLAY_NAME_KEY = 'rr_display_name_v1';
+const PLAYER_HUD_COLOR_PALETTE = ['#00ff00', '#ff0000', '#00aaff', '#ffffff'] as const;
+
+function resolveHudPlayerColor(colorId: unknown): string {
+  const parsedColorId = Number(colorId);
+  if (!Number.isFinite(parsedColorId)) return PLAYER_HUD_COLOR_PALETTE[0];
+  const normalizedColorId = Math.abs(Math.trunc(parsedColorId));
+  return PLAYER_HUD_COLOR_PALETTE[normalizedColorId % PLAYER_HUD_COLOR_PALETTE.length];
+}
 
 type TelegramWebApp = {
   ready?: () => void;
@@ -301,10 +309,10 @@ export default function GameView(): JSX.Element {
 
   const [devIdentity] = useState(() => resolveDevIdentity(window.location.search));
   const [localTgUserId, setLocalTgUserId] = useState<string | undefined>(devIdentity.localFallbackTgUserId);
-  const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
+  const [, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
+  const [, setSyncStatus] = useState<'synced' | 'offline'>('offline');
   const [storeItems, setStoreItems] = useState<ShopCatalogItem[]>([]);
-  const [ledger, setLedger] = useState<WalletLedgerEntry[]>([]);
+  const [, setLedger] = useState<WalletLedgerEntry[]>([]);
   const [purchaseBusySku, setPurchaseBusySku] = useState<string | null>(null);
   const [isStoreOpen, setIsStoreOpen] = useState(false);
   const [storeTab, setStoreTab] = useState<'boosts' | 'cosmetics' | 'packs'>('boosts');
@@ -334,6 +342,7 @@ export default function GameView(): JSX.Element {
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
   const [multiplayerLivesByUserId, setMultiplayerLivesByUserId] = useState<Record<string, number>>({});
   const [multiplayerDisconnectedByUserId, setMultiplayerDisconnectedByUserId] = useState<Record<string, boolean>>({});
+  const [multiplayerColorByUserId, setMultiplayerColorByUserId] = useState<Record<string, string>>({});
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [restartVote, setRestartVote] = useState<{ active: boolean; yesCount: number; total: number; expiresAt: number | null } | null>(null);
   const [restartVoteNowMs, setRestartVoteNowMs] = useState<number>(() => Date.now());
@@ -2001,6 +2010,14 @@ export default function GameView(): JSX.Element {
       }
       return next;
     });
+    setMultiplayerColorByUserId(() => {
+      const next: Record<string, string> = {};
+      for (const player of players) {
+        if (!player?.tgUserId) continue;
+        next[player.tgUserId] = resolveHudPlayerColor(player.colorId);
+      }
+      return next;
+    });
 
     if (localTgUserId) {
       const me = players.find((player) => String(player?.tgUserId) === String(localTgUserId));
@@ -3448,6 +3465,11 @@ export default function GameView(): JSX.Element {
   const hudSlots = isMultiplayerHud
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
     : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
+  const getHudSlotAccent = (member: RoomMember | null, index: number): string => {
+    if (!member) return '#7da0ee';
+    if (!isMultiplayerHud) return '#00ff00';
+    return multiplayerColorByUserId[member.tgUserId] ?? resolveHudPlayerColor(index);
+  };
 
   const requestTelegramFullscreenBestEffort = async (): Promise<void> => {
     const w = window as Window & { Telegram?: { WebApp?: TelegramWebApp } };
@@ -3702,13 +3724,16 @@ export default function GameView(): JSX.Element {
                   key={member?.tgUserId ?? `empty-${index}`}
                   className={`hud-slot ${member ? '' : 'hud-slot--empty'} ${member && multiplayerDisconnectedByUserId[member.tgUserId] ? 'hud-slot--inactive' : ''}`}
                   data-slot-index={index + 1}
+                  style={{ '--player-accent': getHudSlotAccent(member, index) } as CSSProperties}
                 >
                   {member ? (
                     <>
                       <span className="hud-player-badge" aria-label={member.displayName} title={member.displayName}>
-                        <span className="hud-player-icon" aria-hidden="true">
-                          <span className="hud-player-icon__head" />
-                          <span className="hud-player-icon__body" />
+                        <span className="hud-slot-avatar" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                            <circle cx="12" cy="8" r="3.3" />
+                            <path d="M5.2 19.1c0-3.5 2.9-6.3 6.5-6.3s6.5 2.8 6.5 6.3v.7H5.2z" />
+                          </svg>
                         </span>
                       </span>
                       <span ref={index === 0 ? hudLivesRef : undefined} className="hud-lives" aria-label="Lives" title="Lives">
@@ -3732,42 +3757,20 @@ export default function GameView(): JSX.Element {
             </div>
           </div>
           <div className="hud-right">
-            <span className="hud-metric hud-metric--compact">
-              <span className="hud-metric__label">Stage</span>
-              <span className="hud-metric__value">{campaign.stage}</span>
-            </span>
-            <span className="hud-metric hud-metric--compact">
-              <span className="hud-metric__label">Zone</span>
-              <span className="hud-metric__value">{campaign.zone}</span>
-            </span>
-            <span className="hud-metric hud-metric--compact hud-metric--bombs">
-              <span className="hud-metric__label">Bombs</span>
-              <span className="hud-metric__value">{stats.placed}/{stats.capacity}</span>
-            </span>
-            <span className="hud-metric hud-metric--compact">
-              <span className="hud-metric__label">Range</span>
-              <span className="hud-metric__value">{stats.range}</span>
-            </span>
-            <span className="hud-metric hud-metric--compact hud-metric--score">
-              <span className="hud-metric__label">Score</span>
-              <span className="hud-metric__value">{stats.score}</span>
-            </span>
-            <span className="hud-metric hud-metric--compact">
-              <span className="hud-metric__label">Stars</span>
-              <span className="hud-metric__value">{wallet.stars}</span>
-            </span>
-            <span className="hud-metric hud-metric--compact hud-metric--secondary">
-              <span className="hud-metric__label">Crystals</span>
-              <span className="hud-metric__value">{wallet.crystals}</span>
-            </span>
-            <span className="hud-metric hud-metric--compact hud-metric--secondary">
-              <span className="hud-metric__label">Ledger</span>
-              <span className="hud-metric__value">{ledger.length}</span>
-            </span>
-            <span className="hud-metric hud-metric--compact hud-metric--secondary" style={{ opacity: 0.7 }}>
-              <span className="hud-metric__label">Net</span>
-              <span className="hud-metric__value">{syncStatus === 'synced' ? 'Synced' : 'Offline'}</span>
-            </span>
+            <div className="hud-cards">
+              <div className="hud-card">
+                <div className="hud-card__label">Stage</div>
+                <div className="hud-card__value">{campaign.stage}</div>
+              </div>
+              <div className="hud-card">
+                <div className="hud-card__label">Zone</div>
+                <div className="hud-card__value">{campaign.zone}</div>
+              </div>
+              <div className="hud-card hud-card--score">
+                <div className="hud-card__label">Score</div>
+                <div className="hud-card__value">{stats.score}</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -3776,7 +3779,7 @@ export default function GameView(): JSX.Element {
         <aside className="control-column control-column--left" aria-label="Movement controls">
           <div className="left-panel left-panel--icons">
             <div className="left-nav left-nav--joystick-panel" aria-label="Navigation quick controls">
-              <div className="nav-grid nav-grid--five">
+              <div className="nav-grid">
                 <button type="button" className="nav-btn" aria-label="Map placeholder">
                   <span className="nav-btn__plate" aria-hidden="true">
                     <span className="nav-btn__icon" aria-hidden="true">🗺️</span>
@@ -3813,6 +3816,11 @@ export default function GameView(): JSX.Element {
                     </span>
                   </button>
                 )}
+                <button type="button" className="nav-btn nav-btn--reserved" disabled aria-label="Reserved slot">
+                  <span className="nav-btn__plate" aria-hidden="true">
+                    <span className="nav-btn__icon" aria-hidden="true" />
+                  </span>
+                </button>
               </div>
             </div>
           </div>
