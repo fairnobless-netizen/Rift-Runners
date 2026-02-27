@@ -310,10 +310,10 @@ export default function GameView(): JSX.Element {
 
   const [devIdentity] = useState(() => resolveDevIdentity(window.location.search));
   const [localTgUserId, setLocalTgUserId] = useState<string | undefined>(devIdentity.localFallbackTgUserId);
-  const [wallet, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'offline'>('offline');
+  const [, setWallet] = useState<{ stars: number; crystals: number }>({ stars: 0, crystals: 0 });
+  const [, setSyncStatus] = useState<'synced' | 'offline'>('offline');
   const [storeItems, setStoreItems] = useState<ShopCatalogItem[]>([]);
-  const [ledger, setLedger] = useState<WalletLedgerEntry[]>([]);
+  const [, setLedger] = useState<WalletLedgerEntry[]>([]);
   const [purchaseBusySku, setPurchaseBusySku] = useState<string | null>(null);
   const [isStoreOpen, setIsStoreOpen] = useState(false);
   const [storeTab, setStoreTab] = useState<'boosts' | 'cosmetics' | 'packs'>('boosts');
