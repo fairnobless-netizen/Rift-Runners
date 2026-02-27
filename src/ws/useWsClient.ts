@@ -162,6 +162,7 @@ export function useWsClient(token?: string) {
   const [rttJitterMs, setRttJitterMs] = useState<number>(0);
   const bombEventSeenRef = useRef<Map<string, number>>(new Map());
   const lastEventTickRef = useRef<number>(-1);
+  const currentMatchIdRef = useRef<string | null>(null);
   const [bombEventNetStats, setBombEventNetStats] = useState<BombEventNetStats>({
     serverTick: -1,
     lastEventTick: -1,
@@ -243,6 +244,32 @@ export function useWsClient(token?: string) {
           preview: JSON.stringify(msg).slice(0, 1000),
         });
 
+        let messageMatchId: string | null = null;
+        if (msg.type === 'match:world_init' && typeof msg.matchId === 'string') {
+          messageMatchId = msg.matchId;
+        } else if (msg.type === 'match:started' && typeof msg.matchId === 'string') {
+          messageMatchId = msg.matchId;
+        } else if (msg.type === 'match:snapshot' && typeof msg.snapshot?.matchId === 'string') {
+          messageMatchId = msg.snapshot.matchId;
+        }
+
+        if (messageMatchId && currentMatchIdRef.current !== messageMatchId) {
+          const oldMatchId = currentMatchIdRef.current;
+          currentMatchIdRef.current = messageMatchId;
+          bombEventSeenRef.current.clear();
+          lastEventTickRef.current = -1;
+          setBombEventNetStats((prev) => ({
+            ...prev,
+            lastEventTick: -1,
+            serverTick: -1,
+          }));
+          diagnosticsStore.log('WS', 'INFO', 'ws:bomb_event_state_reset_on_new_match', {
+            oldMatchId,
+            newMatchId: messageMatchId,
+            reason: msg.type,
+          });
+        }
+
         if (msg.type === 'match:snapshot') {
           const snapshotTick = Number.isFinite(msg.snapshot?.tick) ? msg.snapshot.tick : -1;
           if (snapshotTick >= 0) {
@@ -321,6 +348,7 @@ export function useWsClient(token?: string) {
       pingSentAtRef.current.clear();
       bombEventSeenRef.current.clear();
       lastEventTickRef.current = -1;
+      currentMatchIdRef.current = null;
       setBombEventNetStats({ serverTick: -1, lastEventTick: -1, eventsBuffered: 0, eventsDroppedDup: 0, eventsDroppedOutOfOrder: 0 });
 
       client.disconnect();
