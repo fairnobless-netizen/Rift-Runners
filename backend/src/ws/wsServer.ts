@@ -4,7 +4,14 @@ import type { RawData, Server as WebSocketServer } from 'ws';
 
 import type { MatchClientMessage, MatchServerMessage } from '../mp/protocol';
 import type { MatchState } from '../mp/types';
-import { isPlayerRejoinable, markPlayerDisconnected, markPlayerReconnected, startMatch, tryPlaceBomb } from '../mp/match';
+import {
+  getBombPlacementRejectReason,
+  isPlayerRejoinable,
+  markPlayerDisconnected,
+  markPlayerReconnected,
+  startMatch,
+  tryPlaceBomb,
+} from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 import { touchLastMpSession } from '../mp/lastSessionStore';
 
@@ -1322,38 +1329,34 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return;
       }
 
-      const clientX = Number(msg.payload?.x);
-      const clientY = Number(msg.payload?.y);
-      const hasClientPosition = Number.isInteger(clientX) && Number.isInteger(clientY);
+      const rawClientX = msg.payload?.x;
+      const rawClientY = msg.payload?.y;
+      const clientX = Number.isFinite(Number(rawClientX)) ? Number(rawClientX) : null;
+      const clientY = Number.isFinite(Number(rawClientY)) ? Number(rawClientY) : null;
 
       const player = match.players.get(ctx.tgUserId);
-      if (!player || match.eliminatedPlayers.has(ctx.tgUserId) || player.state !== 'alive') {
-        logWsEvent('bomb_place_rejected', {
-          roomId: room.roomId,
-          matchId: match.matchId,
-          tgUserId: ctx.tgUserId,
-          reason: 'player_not_alive',
-          playerState: player?.state ?? null,
-          serverX: player?.x ?? null,
-          serverY: player?.y ?? null,
-          clientX: hasClientPosition ? clientX : null,
-          clientY: hasClientPosition ? clientY : null,
-        });
-        return;
-      }
+      const serverX = player?.x ?? null;
+      const serverY = player?.y ?? null;
 
-      const spawned = tryPlaceBomb(match, ctx.tgUserId, player.x, player.y);
+      const spawned =
+        player == null || serverX == null || serverY == null ? null : tryPlaceBomb(match, ctx.tgUserId, serverX, serverY);
       if (!spawned) {
+        const rejectReason =
+          serverX == null || serverY == null
+            ? getBombPlacementRejectReason(match, ctx.tgUserId, Number.NaN, Number.NaN)
+            : getBombPlacementRejectReason(match, ctx.tgUserId, serverX, serverY);
+
         logWsEvent('bomb_place_rejected', {
           roomId: room.roomId,
           matchId: match.matchId,
           tgUserId: ctx.tgUserId,
-          reason: 'placement_validation_failed',
-          playerState: player.state,
-          serverX: player.x,
-          serverY: player.y,
-          clientX: hasClientPosition ? clientX : null,
-          clientY: hasClientPosition ? clientY : null,
+          reason: rejectReason ?? 'unknown',
+          clientX,
+          clientY,
+          serverX,
+          serverY,
+          playerState: player?.state ?? null,
+          eliminated: match.eliminatedPlayers.has(ctx.tgUserId),
         });
         return;
       }
