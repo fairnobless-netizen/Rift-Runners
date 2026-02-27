@@ -3438,12 +3438,13 @@ export default function GameView(): JSX.Element {
   const bootProgressPercent = Math.round(bootSplashProgress * 100);
 
   const isMultiplayerHud = currentRoomMembers.length >= 2;
-  const getHudLivesCount = (member: RoomMember | null): number => {
-    if (!member) return 0;
+  const getHudLives = (member: RoomMember | null): string => {
+    if (!member) return '';
     if (!isMultiplayerHud) {
-      return Math.max(0, lifeState.lives);
+      return '❤️'.repeat(Math.max(0, lifeState.lives)) || '💀';
     }
-    return Math.max(0, multiplayerLivesByUserId[member.tgUserId] ?? 0);
+    const lives = Math.max(0, multiplayerLivesByUserId[member.tgUserId] ?? 0);
+    return '❤️'.repeat(lives) || '💀';
   };
   const hudSlots = isMultiplayerHud
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
@@ -3705,26 +3706,8 @@ export default function GameView(): JSX.Element {
                 >
                   {member ? (
                     <>
-                      <span className="hud-player-badge" aria-label={member.displayName} title={member.displayName}>
-                        <span className="hud-player-icon" aria-hidden="true">
-                          <span className="hud-player-icon__head" />
-                          <span className="hud-player-icon__body" />
-                        </span>
-                      </span>
-                      <span ref={index === 0 ? hudLivesRef : undefined} className="hud-lives" aria-label="Lives" title="Lives">
-                        {Array.from({ length: 3 }, (_, heartIndex) => {
-                          const isFilled = heartIndex < getHudLivesCount(member);
-                          return (
-                            <span
-                              key={`${member.tgUserId}-heart-${heartIndex}`}
-                              className={`hud-heart ${isFilled ? 'hud-heart--filled' : 'hud-heart--empty'}`}
-                              aria-hidden="true"
-                            >
-                              ♥
-                            </span>
-                          );
-                        })}
-                      </span>
+                      <span className="hud-slot-name" title={member.displayName}>{member.displayName}</span>
+                      <span ref={index === 0 ? hudLivesRef : undefined} className="hud-lives" aria-label="Lives" title="Lives">{getHudLives(member)}</span>
                     </>
                   ) : null}
                 </div>
