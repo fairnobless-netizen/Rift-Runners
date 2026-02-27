@@ -139,9 +139,27 @@ body {
 
 .hud-lives {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.12rem;
   white-space: nowrap;
   font-size: 0.78rem;
   letter-spacing: 0.04em;
+}
+
+.hud-heart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.hud-heart--full {
+  opacity: 1;
+}
+
+.hud-heart--empty {
+  opacity: 0.85;
 }
 
 .hud-cards {
@@ -185,6 +203,7 @@ body {
 }
 
 .hud-slots {
+  --hud-slot-w: clamp(92px, 14vw, 140px);
   display: grid;
   align-items: center;
   gap: 0.35rem;
@@ -193,17 +212,19 @@ body {
 }
 
 .hud-slots--multiplayer {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, var(--hud-slot-w));
+  justify-content: flex-start;
 }
 
 .hud-slots--single {
-  grid-template-columns: minmax(0, 1fr);
-  max-width: min(42vw, 300px);
+  grid-template-columns: var(--hud-slot-w);
 }
 
 .hud-slot {
   --player-accent: #8bb5ff;
-  min-width: 0;
+  width: var(--hud-slot-w);
+  min-width: var(--hud-slot-w);
+  min-height: 1.55rem;
   display: flex;
   align-items: center;
   gap: 0.36rem;
@@ -368,17 +389,10 @@ body {
   justify-content: center;
   width: 92%;
   height: 92%;
-  font-size: calc(1.46rem * var(--ui-scale));
+  font-size: calc(1.76rem * var(--ui-scale));
   line-height: 1;
 }
 
-.nav-btn--reserved {
-  cursor: default;
-}
-
-.nav-btn--reserved .nav-btn__plate {
-  opacity: 0.58;
-}
 
 .left-joystick {
   width: 100%;
