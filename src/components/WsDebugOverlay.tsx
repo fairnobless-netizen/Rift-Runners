@@ -35,6 +35,17 @@ function formatPredictionLine(localInputSeq: number, ps: PredictionStats): strin
 }
 
 
+
+type WsDiagnostics = {
+  enabled: boolean;
+  status: 'OPEN' | 'ERROR' | 'CONNECTING';
+  apiBase: string;
+  wsUrl: string;
+  roomCode: string | null;
+  members: number;
+  lastError: string | null;
+};
+
 type TelemetrySnapshotSummary = {
   avgDrift: number;
   maxDrift: number;
@@ -86,6 +97,7 @@ export function WsDebugOverlay({
   connected,
   messages,
   identity,
+  wsDiagnostics,
   netSim,
   onLobby,
   netSimPresets,
@@ -111,6 +123,7 @@ export function WsDebugOverlay({
     clientId?: number;
     displayName?: string;
   };
+  wsDiagnostics?: WsDiagnostics;
   netSim: NetSimConfig;
   netSimPresets: { id: NetSimPresetId; label: string }[];
   onToggleNetSim: (enabled: boolean) => void;
@@ -191,6 +204,26 @@ export function WsDebugOverlay({
       // ignore
     }
   }, [trayCollapsed]);
+
+
+  const [debugCopied, setDebugCopied] = useState(false);
+  const debugPayload = wsDiagnostics ? {
+    ts: new Date().toISOString(),
+    wsStatus: wsDiagnostics.status,
+    apiBase: wsDiagnostics.apiBase,
+    wsUrl: wsDiagnostics.wsUrl,
+    roomCode: wsDiagnostics.roomCode,
+    members: wsDiagnostics.members,
+    lastError: wsDiagnostics.lastError,
+  } : null;
+
+  const onCopyDebug = () => {
+    if (!debugPayload || !navigator.clipboard?.writeText) return;
+    void navigator.clipboard.writeText(JSON.stringify(debugPayload, null, 2)).then(() => {
+      setDebugCopied(true);
+      window.setTimeout(() => setDebugCopied(false), 1400);
+    });
+  };
 
   const [moveCollapsed, setMoveCollapsed] = useState(true);
   const [snapshotCollapsed, setSnapshotCollapsed] = useState(true);
@@ -602,6 +635,23 @@ export function WsDebugOverlay({
             NetSim: {netSim.enabled ? 'ON' : 'OFF'} | latency={netSim.latencyMs}ms, jitter={netSim.jitterMs}ms,
             drop={netSim.dropRate}
           </div>
+
+
+          {wsDiagnostics?.enabled ? (
+            <div style={{ marginTop: 8, borderTop: '1px solid rgba(120,170,255,0.25)', paddingTop: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                <strong style={{ color: wsDiagnostics.status === 'ERROR' ? '#ff8f8f' : '#9ee6b6' }}>WS diag: {wsDiagnostics.status}</strong>
+                <button type="button" onClick={onCopyDebug}>{debugCopied ? 'Copied' : 'Copy debug'}</button>
+              </div>
+              <div style={{ marginTop: 4, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 8px' }}>
+                <span style={{ color: '#9eb6ff' }}>API_BASE</span><code style={{ overflowWrap: 'anywhere' }}>{wsDiagnostics.apiBase}</code>
+                <span style={{ color: '#9eb6ff' }}>WS_URL</span><code style={{ overflowWrap: 'anywhere' }}>{wsDiagnostics.wsUrl}</code>
+                <span style={{ color: '#9eb6ff' }}>roomCode</span><code>{wsDiagnostics.roomCode ?? '—'}</code>
+                <span style={{ color: '#9eb6ff' }}>members</span><code>{wsDiagnostics.members}</code>
+                <span style={{ color: '#9eb6ff' }}>lastError</span><code style={{ overflowWrap: 'anywhere' }}>{wsDiagnostics.lastError ?? '—'}</code>
+              </div>
+            </div>
+          ) : null}
 
           {import.meta.env.DEV && (
             <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>

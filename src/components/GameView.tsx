@@ -4112,7 +4112,6 @@ export default function GameView(): JSX.Element {
         onCopyReferralLink={onCopyReferral}
         localTgUserId={localTgUserId}
         onConsumeInitialJoinCode={() => setDeepLinkJoinCode(null)}
-        wsDiagnostics={wsDiagnostics}
       />
 
       {settingsOpen && (
@@ -4215,6 +4214,7 @@ export default function GameView(): JSX.Element {
           clientId: devIdentity.clientId,
           displayName: profileName,
         }}
+        wsDiagnostics={wsDiagnostics}
         netSim={ws.netSimConfig}
         netSimPresets={ws.netSimPresets}
         onToggleNetSim={ws.setNetSimEnabled}

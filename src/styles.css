@@ -1624,25 +1624,69 @@ html[data-orient="landscape"] .right-panel {
   box-shadow: 0 0 28px rgba(64, 111, 220, 0.24), inset 0 0 0 1px rgba(130, 170, 255, 0.12);
 }
 
+.rr-mp-header {
+  border-bottom: 1px solid rgba(106, 138, 214, 0.35);
+  padding-bottom: 0.2rem;
+}
+
+.rr-mp-title {
+  letter-spacing: 0.09em;
+  color: #e8f0ff;
+  text-shadow: 0 0 8px rgba(142, 182, 255, 0.55), 0 0 22px rgba(78, 132, 250, 0.28);
+  animation: rr-mp-shimmer 4.2s ease-in-out infinite;
+}
+
+.rr-mp-close {
+  border: 1px solid #5f7fc1;
+  background: linear-gradient(180deg, rgba(65, 100, 176, 0.95), rgba(36, 61, 123, 0.95));
+  box-shadow: 0 0 14px rgba(108, 153, 250, 0.32), inset 0 0 0 1px rgba(176, 205, 255, 0.16);
+  color: #f2f7ff;
+}
+
+.rr-mp-close:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 18px rgba(112, 168, 255, 0.45), inset 0 0 0 1px rgba(194, 220, 255, 0.22);
+}
+
+.rr-mp-close:active {
+  transform: translateY(1px);
+  filter: brightness(0.94);
+}
+
 .rr-mp-tabs {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.35rem;
+  gap: 0.28rem;
 }
 
 .rr-mp-tabs button,
 .rr-room-subtabs button {
   border: 1px solid #334b86;
-  background: rgba(11, 22, 49, 0.8);
+  background: rgba(11, 22, 49, 0.72);
   color: #dbe7ff;
-  border-radius: 10px;
-  padding: 0.45rem 0.25rem;
+  border-radius: 9px;
+  padding: 0.38rem 0.22rem;
   text-transform: uppercase;
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
 }
 
-.rr-mp-tabs button.active,
+.rr-mp-tabs .rr-mp-tab {
+  border-color: rgba(95, 121, 183, 0.7);
+}
+
+.rr-mp-tabs .rr-mp-tab--friends { --rr-mp-accent: #67d4ff; }
+.rr-mp-tabs .rr-mp-tab--find { --rr-mp-accent: #6ff7d9; }
+.rr-mp-tabs .rr-mp-tab--room { --rr-mp-accent: #80a8ff; }
+.rr-mp-tabs .rr-mp-tab--browse { --rr-mp-accent: #c18fff; }
+.rr-mp-tabs .rr-mp-tab--referral { --rr-mp-accent: #ffc87f; }
+
+.rr-mp-tabs .rr-mp-tab.active {
+  border-color: var(--rr-mp-accent, #77a7ff);
+  color: #ffffff;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--rr-mp-accent, #77a7ff) 50%, transparent), 0 0 14px color-mix(in srgb, var(--rr-mp-accent, #77a7ff) 48%, transparent), inset 0 0 14px color-mix(in srgb, var(--rr-mp-accent, #77a7ff) 28%, transparent);
+}
+
 .rr-room-subtabs button.active {
   border-color: #77a7ff;
   box-shadow: 0 0 16px rgba(75, 134, 255, 0.45), inset 0 0 16px rgba(75, 134, 255, 0.2);
@@ -1653,47 +1697,42 @@ html[data-orient="landscape"] .right-panel {
   gap: 0.6rem;
 }
 
-
-.rr-mp-wsdiag {
-  border: 1px solid #2c3f71;
-  border-radius: 10px;
-  padding: 0.45rem;
-  background: rgba(8, 16, 38, 0.82);
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+@keyframes rr-mp-shimmer {
+  0%, 100% {
+    text-shadow: 0 0 7px rgba(137, 181, 255, 0.46), 0 0 18px rgba(86, 142, 255, 0.22);
+    opacity: 0.94;
+  }
+  50% {
+    text-shadow: 0 0 11px rgba(175, 211, 255, 0.72), 0 0 26px rgba(103, 171, 255, 0.35);
+    opacity: 1;
+  }
 }
 
-.rr-mp-wsdiag--open {
-  border-color: #2f8f67;
-}
 
-.rr-mp-wsdiag--error {
-  border-color: #8f3f3f;
-}
 
-.rr-mp-wsdiag-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.45rem;
-}
+@media (orientation: landscape) and (max-height: 520px) {
+  .rr-mp-overlay {
+    padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top) + 8px);
+    padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom) + 8px);
+  }
 
-.rr-mp-wsdiag-grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.2rem 0.45rem;
-  font-size: 0.72rem;
-}
+  .rr-mp-modal {
+    width: min(96vw, 700px);
+    max-height: calc(
+      var(--tg-viewport-stable-h)
+      - var(--safe-top)
+      - var(--safe-bottom)
+      - var(--tg-content-top, 0px)
+      - var(--tg-content-bottom, 0px)
+      - 12px
+    );
+    border-radius: 10px;
+  }
 
-.rr-mp-wsdiag-grid span {
-  color: #a9bbdf;
+  .rr-mp-tabs {
+    gap: 0.2rem;
+  }
 }
-
-.rr-mp-wsdiag-grid code {
-  overflow-wrap: anywhere;
-}
-
 .rr-mp-section {
   border: 1px solid rgba(70, 98, 162, 0.8);
   border-radius: 12px;
