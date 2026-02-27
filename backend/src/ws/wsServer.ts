@@ -1342,15 +1342,19 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         player == null || serverX == null || serverY == null ? null : tryPlaceBomb(match, ctx.tgUserId, serverX, serverY);
       if (!spawned) {
         const rejectReason =
-          serverX == null || serverY == null
-            ? getBombPlacementRejectReason(match, ctx.tgUserId, Number.NaN, Number.NaN)
-            : getBombPlacementRejectReason(match, ctx.tgUserId, serverX, serverY);
+          player == null
+            ? 'player_missing'
+            : match.eliminatedPlayers.has(ctx.tgUserId)
+              ? 'player_eliminated'
+              : player.state !== 'alive'
+                ? 'player_not_alive'
+                : getBombPlacementRejectReason(match, ctx.tgUserId, player.x, player.y) ?? 'unknown';
 
         logWsEvent('bomb_place_rejected', {
           roomId: room.roomId,
           matchId: match.matchId,
           tgUserId: ctx.tgUserId,
-          reason: rejectReason ?? 'unknown',
+          reason: rejectReason,
           clientX,
           clientY,
           serverX,
