@@ -3902,10 +3902,16 @@ export default function GameView(): JSX.Element {
 
       {showSpectatorRestartProposePrompt && (
         <div className="restart-spectator-dock" role="dialog" aria-modal="false" aria-label="Restart prompt">
-          <strong>Restart match?</strong>
-          <div className="restart-vote-actions">
-            <button type="button" onClick={proposeRestart}>OK</button>
-            <button type="button" className="ghost" onClick={() => setSpectatorRestartPromptDismissed(true)}>Cancel</button>
+          <div className="restart-propose-row">
+            <button type="button" className="restart-propose-row__btn" onClick={proposeRestart}>OK</button>
+            <strong className="restart-propose-row__title">Restart match?</strong>
+            <button
+              type="button"
+              className="ghost restart-propose-row__btn"
+              onClick={() => setSpectatorRestartPromptDismissed(true)}
+            >
+              Cancel
+            </button>
           </div>
           {restartCooldownRetryAtMs && restartCooldownRemainingSec > 0 ? <div className="restart-cooldown">Retry in: {restartCooldownRemainingSec}s</div> : null}
         </div>
