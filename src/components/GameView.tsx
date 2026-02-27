@@ -22,7 +22,6 @@ import {
   fetchCampaignFromBackend,
   getCampaignSyncStatus,
   loadCampaignState,
-  resetCampaignState,
   saveCampaignState,
   type CampaignState,
 } from '../game/campaign';
@@ -3894,7 +3893,6 @@ export default function GameView(): JSX.Element {
           <div className="right-stack">
             <div className="right-stack-top">
               <div className="right-panel right-panel--zoom" aria-label="Zoom panel">
-                <label className="right-zoom-label" htmlFor="zoom">Zoom</label>
                 <input
                   id="zoom"
                   type="range"
@@ -3909,11 +3907,9 @@ export default function GameView(): JSX.Element {
                   type="button"
                   className="right-reset-btn"
                   onClick={() => {
-                    if (confirm('Reset campaign progress?')) {
-                      const state = resetCampaignState();
-                      // TODO: notify GameScene about new campaign state if needed
-                      setCampaign(state);
-                    }
+                    const minZoom = zoomBounds.min;
+                    setZoom(minZoom);
+                    zoomApiRef.current?.setZoom(minZoom);
                   }}
                 >
                   Reset

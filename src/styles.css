@@ -293,7 +293,7 @@ body {
   justify-content: center;
   background: #0f1630cc;
   border: 1px solid #27335c;
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 0.5rem;
   min-height: 0;
   min-width: 0;
@@ -446,7 +446,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  gap: calc(0.55rem * var(--ui-scale));
+  gap: calc(0.75rem * var(--ui-scale));
   flex: 1;
   width: 100%;
 }
@@ -472,7 +472,7 @@ body {
     linear-gradient(150deg, #b5f2ff1c 0%, transparent 44%),
     linear-gradient(210deg, #8ca6ff1e 0%, #101a36d9 48%, #0a1124e3 100%);
   border: 1px solid #8ec2ff5e;
-  border-radius: 14px;
+  border-radius: 10px;
   padding: calc(0.5rem * var(--ui-scale));
   display: flex;
   flex-direction: column;
@@ -501,13 +501,7 @@ body {
 }
 
 .right-zoom-label {
-  position: relative;
-  z-index: 1;
-  font-size: calc(0.64rem * var(--ui-scale));
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #d8f7ff;
-  text-align: left;
+  display: none;
 }
 
 
@@ -516,8 +510,8 @@ body {
 }
 
 .right-panel--actions {
-  --action-stack-gap: calc(0.95rem * var(--ui-scale));
-  --boost-separation-gap: calc(1.35rem * var(--ui-scale));
+  --action-stack-gap: calc(1.35rem * var(--ui-scale));
+  --boost-separation-gap: calc(1.8rem * var(--ui-scale));
   gap: var(--action-stack-gap);
   justify-content: center;
 }
@@ -728,11 +722,13 @@ button:disabled {
 
 .bomb-btn,
 .detonate-btn {
-  aspect-ratio: auto;
-  border-radius: 10px;
-  max-width: 100%;
-  min-height: calc(42px * var(--ui-scale));
-  align-self: stretch;
+  width: calc(64px * var(--ui-scale));
+  height: calc(64px * var(--ui-scale));
+  min-height: calc(64px * var(--ui-scale));
+  border-radius: 999px;
+  max-width: none;
+  align-self: center;
+  padding: 0;
   font-size: calc(0.82rem * var(--ui-scale));
 }
 
@@ -877,7 +873,10 @@ html[data-orient="landscape"] .right-panel {
 
   .bomb-btn,
   .detonate-btn {
-    font-size: 0.86rem;
+    width: 60px;
+    height: 60px;
+    min-height: 60px;
+    font-size: 0.82rem;
   }
 }
 
