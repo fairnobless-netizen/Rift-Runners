@@ -3894,10 +3894,11 @@ export default function GameView(): JSX.Element {
           <div className="right-stack">
             <div className="right-stack-top">
               <div className="right-panel right-panel--zoom" aria-label="Zoom panel">
+                <label className="right-zoom-label" htmlFor="zoom">Zoom</label>
                 <input
                   id="zoom"
                   type="range"
-                  className="zoom-slider"
+                  className="zoom-slider telescope-range"
                   min={zoomBounds.min}
                   max={zoomBounds.max}
                   step={0.05}
@@ -3906,6 +3907,7 @@ export default function GameView(): JSX.Element {
                 />
                 <button
                   type="button"
+                  className="right-reset-btn"
                   onClick={() => {
                     if (confirm('Reset campaign progress?')) {
                       const state = resetCampaignState();
@@ -3921,11 +3923,10 @@ export default function GameView(): JSX.Element {
 
             <div className="right-stack-middle">
               <div className="right-panel right-panel--actions" aria-label="Action buttons">
-                <div className="boost-slot boost-slot--upper" aria-hidden="true">Boost</div>
                 <button
                   ref={detonateBtnRef}
                   type="button"
-                  className="detonate-btn"
+                  className="action-btn detonate-btn action-btn--detonate"
                   onTouchStart={requestDetonate}
                   onMouseDown={requestDetonate}
                   disabled={!isRemoteDetonateUnlocked}
@@ -3935,13 +3936,13 @@ export default function GameView(): JSX.Element {
                 <button
                   ref={bombBtnRef}
                   type="button"
-                  className="bomb-btn"
+                  className="action-btn bomb-btn action-btn--bomb"
                   onTouchStart={requestBomb}
                   onMouseDown={requestBomb}
                 >
                   Bomb
                 </button>
-                <div className="boost-slot boost-slot--lower" aria-hidden="true">Boost</div>
+                <button type="button" className="action-btn action-btn--boost" disabled aria-hidden="true" tabIndex={-1}>Boost</button>
               </div>
             </div>
           </div>
