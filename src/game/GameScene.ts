@@ -366,6 +366,7 @@ export class GameScene extends Phaser.Scene {
         glowColor: number;
         markerColor: number;
         eyeColor: number;
+        silhouetteKind?: EnemyKind;
         hasOuterHalo?: boolean;
         shapeVariant?: 'round' | 'diamond' | 'hex';
         extraMark?: 'none' | 'fins' | 'plate' | 'crest';
@@ -383,6 +384,168 @@ export class GameScene extends Phaser.Scene {
       const bodyScaleX = options.bodyScaleX ?? 1;
       const bodyScaleY = options.bodyScaleY ?? 1;
       const strokeWidth = options.strokeWidth ?? 4;
+
+      if (options.silhouetteKind) {
+        const drawClosedPath = (
+          points: ReadonlyArray<readonly [number, number]>,
+          fillColor: number,
+          fillAlpha: number,
+          lineColor?: number,
+          lineAlpha = 0.9,
+          lineWidth = 2,
+        ): void => {
+          if (points.length < 3) return;
+          const pathPoints = points.map(([x, y]) => new Phaser.Geom.Point(center + x, center + y));
+          g.fillStyle(fillColor, fillAlpha);
+          g.fillPoints(pathPoints, true);
+          if (lineColor !== undefined) {
+            g.lineStyle(lineWidth, lineColor, lineAlpha);
+            g.strokePoints(pathPoints, true, true);
+          }
+        };
+
+        if (options.silhouetteKind === 'normal') {
+          for (const layer of [
+            { radius: 30, alpha: 0.12 },
+            { radius: 26, alpha: 0.2 },
+          ]) {
+            g.fillStyle(options.glowColor, layer.alpha);
+            g.fillEllipse(center + 2, center, layer.radius * 2.1, layer.radius * 1.9);
+          }
+
+          drawClosedPath(
+            [
+              [-14, -22],
+              [0, -26],
+              [16, -18],
+              [24, -3],
+              [20, 15],
+              [6, 24],
+              [-13, 22],
+              [-24, 7],
+              [-22, -10],
+            ],
+            options.fillColor,
+            1,
+            options.strokeColor,
+          );
+          g.fillStyle(options.markerColor, 0.4);
+          g.fillEllipse(center - 5, center - 11, 17, 10);
+          g.fillStyle(options.markerColor, 0.95);
+          g.fillCircle(center + 1, center + 1, 9);
+          g.fillStyle(options.eyeColor, 0.88);
+          g.fillCircle(center + 1, center + 1, 4);
+        } else if (options.silhouetteKind === 'fast') {
+          g.fillStyle(options.glowColor, 0.2);
+          g.fillTriangle(center - 32, center + 7, center + 27, center - 3, center - 28, center - 9);
+
+          drawClosedPath(
+            [
+              [-28, 2],
+              [-7, -10],
+              [26, -2],
+              [10, 5],
+              [-6, 13],
+            ],
+            options.fillColor,
+            1,
+            options.strokeColor,
+          );
+          drawClosedPath(
+            [
+              [-27, 4],
+              [-39, 11],
+              [-26, 12],
+              [-17, 16],
+            ],
+            options.markerColor,
+            0.82,
+          );
+          drawClosedPath(
+            [
+              [-30, -3],
+              [-42, -10],
+              [-25, -12],
+              [-15, -16],
+            ],
+            options.markerColor,
+            0.72,
+          );
+          g.fillStyle(options.eyeColor, 0.8);
+          g.fillTriangle(center + 2, center - 2, center + 11, center - 1, center + 1, center + 3);
+        } else if (options.silhouetteKind === 'tank') {
+          for (const layer of [
+            { radius: 31, alpha: 0.12 },
+            { radius: 27, alpha: 0.17 },
+          ]) {
+            g.fillStyle(options.glowColor, layer.alpha);
+            g.fillEllipse(center, center + 1, layer.radius * 2.2, layer.radius * 1.9);
+          }
+          drawClosedPath(
+            [
+              [-25, -17],
+              [-11, -24],
+              [10, -24],
+              [25, -12],
+              [25, 13],
+              [8, 25],
+              [-15, 24],
+              [-27, 10],
+            ],
+            options.fillColor,
+            1,
+            options.strokeColor,
+            0.95,
+            3,
+          );
+          g.fillStyle(options.markerColor, 0.55);
+          g.fillRoundedRect(center - 16, center - 15, 32, 10, 3);
+          g.fillRoundedRect(center - 13, center - 2, 26, 9, 3);
+          g.fillRoundedRect(center - 10, center + 9, 20, 8, 3);
+          g.lineStyle(2, options.strokeColor, 0.45);
+          g.strokeRoundedRect(center - 17, center - 16, 34, 34, 4);
+        } else if (options.silhouetteKind === 'elite') {
+          g.lineStyle(3, options.glowColor, 0.72);
+          g.strokeCircle(center, center, 30);
+          g.lineStyle(2, options.markerColor, 0.56);
+          g.strokeCircle(center, center, 34);
+
+          g.fillStyle(options.glowColor, 0.17);
+          g.fillEllipse(center, center, 56, 54);
+
+          for (const radius of [23, 17, 11]) {
+            g.fillStyle(options.fillColor, 0.38 + radius / 70);
+            g.fillEllipse(center + (radius === 17 ? 2 : 0), center - (radius === 11 ? 1 : 0), radius * 2, radius * 1.82);
+          }
+
+          g.fillStyle(options.eyeColor, 0.9);
+          g.fillCircle(center, center, 5);
+
+          const orbitingFragments: ReadonlyArray<readonly [number, number, number]> = [
+            [-30, -6, 5],
+            [-14, -29, 4],
+            [18, -27, 5],
+            [31, -2, 4],
+            [22, 24, 5],
+            [-19, 26, 4],
+          ];
+          for (const [x, y, size] of orbitingFragments) {
+            g.fillStyle(options.markerColor, 0.84);
+            g.fillTriangle(
+              center + x,
+              center + y - size,
+              center + x + size,
+              center + y + size,
+              center + x - size,
+              center + y + size,
+            );
+          }
+        }
+
+        g.generateTexture(key, textureSize, textureSize);
+        g.destroy();
+        return;
+      }
 
       const drawBody = (radius: number, fillAlpha: number, strokeAlpha?: number): void => {
         const scaledHalfW = radius * bodyScaleX;
@@ -613,8 +776,7 @@ export class GameScene extends Phaser.Scene {
       glowColor: 0x5b6488,
       markerColor: 0xdde3ff,
       eyeColor: 0x20253f,
-      shapeVariant: 'round',
-      extraMark: 'none',
+      silhouetteKind: 'normal',
     });
 
     createUnitTexture('rr_enemy_basic', {
@@ -633,10 +795,7 @@ export class GameScene extends Phaser.Scene {
       glowColor: 0x2f8fcb,
       markerColor: 0xcaf2ff,
       eyeColor: 0x0e2c44,
-      shapeVariant: 'diamond',
-      extraMark: 'fins',
-      bodyScaleX: 0.88,
-      bodyScaleY: 1.06,
+      silhouetteKind: 'fast',
     });
 
     createUnitTexture('rr_enemy_tank', {
@@ -645,11 +804,7 @@ export class GameScene extends Phaser.Scene {
       glowColor: 0x323946,
       markerColor: 0xaab8ca,
       eyeColor: 0x0f1622,
-      shapeVariant: 'hex',
-      extraMark: 'plate',
-      bodyScaleX: 1.09,
-      bodyScaleY: 1.06,
-      strokeWidth: 5,
+      silhouetteKind: 'tank',
     });
 
     createUnitTexture('rr_enemy_elite', {
@@ -658,11 +813,7 @@ export class GameScene extends Phaser.Scene {
       glowColor: 0x7c30d6,
       markerColor: 0xffde7a,
       eyeColor: 0x280f48,
-      hasOuterHalo: true,
-      shapeVariant: 'round',
-      extraMark: 'crest',
-      bodyScaleX: 1.03,
-      bodyScaleY: 1.03,
+      silhouetteKind: 'elite',
     });
 
     createExplosionTexture('fx_explosion_core', 'core');
