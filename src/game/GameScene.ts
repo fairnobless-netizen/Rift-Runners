@@ -211,6 +211,7 @@ export class GameScene extends Phaser.Scene {
     trophies: [],
   };
 
+  private hiddenDoorCell?: { x: number; y: number };
   private doorRevealed = false;
   private doorEntered = false;
   private isLevelCleared = false;
@@ -808,6 +809,7 @@ export class GameScene extends Phaser.Scene {
     this.rng = createDeterministicRng(this.mixLevelSeed(this.levelIndex));
     this.isLevelCleared = false;
     this.doorRevealed = false;
+    this.hiddenDoorCell = undefined;
     this.doorEntered = false;
     this.doorEnterStartedAt = null;
     this.waveSequence = 0;
@@ -822,6 +824,7 @@ export class GameScene extends Phaser.Scene {
       const bossNode = generateBossNodeStones(this.arena, this.rng, BOSS_CONFIG.anomalousStoneCount);
       this.bossAnchorKey = bossNode.anchorKey || null;
     }
+    this.assignHiddenDoorCellForPvE();
     this.activeFlames.clear();
     this.enemies.clear();
     this.enemyNextMoveAt.clear();
@@ -853,8 +856,42 @@ export class GameScene extends Phaser.Scene {
 
     this.emitSimulation(LEVEL_STARTED, this.time.now, {
       ...this.getLevelProgressModel(),
-      hiddenDoorKey: this.arena.hiddenDoorKey,
+      hiddenDoorKey: this.getHiddenDoorKey(),
     });
+  }
+
+  private assignHiddenDoorCellForPvE(): void {
+    if (this.gameMode === 'multiplayer') return;
+
+    const spawnX = 1;
+    const spawnY = 1;
+    const destroyableCells: Array<{ x: number; y: number }> = [];
+    const eligibleCells: Array<{ x: number; y: number }> = [];
+
+    for (let y = 0; y < this.arena.tiles.length; y += 1) {
+      for (let x = 0; x < this.arena.tiles[y].length; x += 1) {
+        const tile = this.arena.tiles[y][x];
+        const isDestroyable = tile === 'BreakableBlock' || tile === 'ANOMALOUS_STONE';
+        if (!isDestroyable) continue;
+        const cell = { x, y };
+        destroyableCells.push(cell);
+        const distanceFromSpawn = Math.abs(x - spawnX) + Math.abs(y - spawnY);
+        if (distanceFromSpawn > 2) {
+          eligibleCells.push(cell);
+        }
+      }
+    }
+
+    const pool = eligibleCells.length > 0 ? eligibleCells : destroyableCells;
+    if (pool.length === 0) return;
+    this.hiddenDoorCell = pool[this.randomInt(pool.length)];
+  }
+
+  private getHiddenDoorKey(): string {
+    if (this.gameMode !== 'multiplayer' && this.hiddenDoorCell) {
+      return toKey(this.hiddenDoorCell.x, this.hiddenDoorCell.y);
+    }
+    return this.arena.hiddenDoorKey;
   }
 
   private handlePlayerDeath(reason: 'bomb' | 'enemy' = 'enemy'): void {
@@ -1072,7 +1109,7 @@ export class GameScene extends Phaser.Scene {
     this.bossController.clear();
     this.doorSprite?.destroy();
     this.doorIconSprite?.destroy();
-    const doorPos = fromKey(this.arena.hiddenDoorKey);
+    const doorPos = fromKey(this.getHiddenDoorKey());
     this.doorSprite = this.add
       .rectangle(doorPos.x * tileSize + tileSize / 2, doorPos.y * tileSize + tileSize / 2, tileSize - 8, tileSize - 8, 0x4a66cc)
       .setDepth(DEPTH_ITEM)
@@ -1111,7 +1148,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     const playerKey = toKey(this.player.gridX, this.player.gridY);
-    if (playerKey !== this.arena.hiddenDoorKey) {
+    if (playerKey !== this.getHiddenDoorKey()) {
       this.doorEnterStartedAt = null;
       return;
     }
@@ -1530,7 +1567,7 @@ export class GameScene extends Phaser.Scene {
         if (this.isBossLevel && wasAnomalous && this.bossAnchorKey === blockKey) {
           this.bossController.revealBoss();
         }
-        if (toKey(block.x, block.y) === this.arena.hiddenDoorKey) {
+        if (toKey(block.x, block.y) === this.getHiddenDoorKey()) {
           this.revealDoor(time);
           doorRevealedThisWave = true;
         }
@@ -1573,7 +1610,7 @@ export class GameScene extends Phaser.Scene {
   private tryRegisterDoorWaveHit(x: number, y: number, waveId: string, time: number, doorRevealedThisWave: boolean): void {
     if (this.isBossLevel) return;
     if (!this.doorRevealed) return;
-    if (toKey(x, y) !== this.arena.hiddenDoorKey) return;
+    if (toKey(x, y) !== this.getHiddenDoorKey()) return;
     if (doorRevealedThisWave) return;
     const accepted = this.doorController.handleExplosionWaveHit(waveId, time);
     if (!accepted) return;
@@ -1689,7 +1726,7 @@ export class GameScene extends Phaser.Scene {
 
 
   private getDoorSpawnCells(limit: number): Array<{ x: number; y: number }> {
-    const origin = fromKey(this.arena.hiddenDoorKey);
+    const origin = fromKey(this.getHiddenDoorKey());
     const visited = new Set<string>([toKey(origin.x, origin.y)]);
     const queue: Array<{ x: number; y: number }> = [{ x: origin.x, y: origin.y }];
     const result: Array<{ x: number; y: number }> = [];
