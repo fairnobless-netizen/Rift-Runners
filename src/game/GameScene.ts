@@ -367,12 +367,73 @@ export class GameScene extends Phaser.Scene {
         markerColor: number;
         eyeColor: number;
         hasOuterHalo?: boolean;
+        shapeVariant?: 'round' | 'diamond' | 'hex';
+        extraMark?: 'none' | 'fins' | 'plate' | 'crest';
+        bodyScaleX?: number;
+        bodyScaleY?: number;
+        strokeWidth?: number;
       },
     ): void => {
       if (this.textures.exists(key)) return;
 
       const center = textureSize / 2;
       const g = this.add.graphics().setVisible(false);
+      const shape = options.shapeVariant ?? 'round';
+      const extraMark = options.extraMark ?? 'none';
+      const bodyScaleX = options.bodyScaleX ?? 1;
+      const bodyScaleY = options.bodyScaleY ?? 1;
+      const strokeWidth = options.strokeWidth ?? 4;
+
+      const drawBody = (radius: number, fillAlpha: number, strokeAlpha?: number): void => {
+        const scaledHalfW = radius * bodyScaleX;
+        const scaledHalfH = radius * bodyScaleY;
+
+        if (shape === 'diamond') {
+          const diamondPoints = [
+            new Phaser.Geom.Point(center, center - scaledHalfH),
+            new Phaser.Geom.Point(center + scaledHalfW, center),
+            new Phaser.Geom.Point(center, center + scaledHalfH),
+            new Phaser.Geom.Point(center - scaledHalfW, center),
+          ];
+          g.fillStyle(options.fillColor, fillAlpha);
+          g.fillPoints(diamondPoints, true);
+          if (strokeAlpha !== undefined) {
+            g.lineStyle(strokeWidth, options.strokeColor, strokeAlpha);
+            g.strokePoints(diamondPoints, true, true);
+          }
+          return;
+        }
+
+        if (shape === 'hex') {
+          const left = center - scaledHalfW;
+          const right = center + scaledHalfW;
+          const top = center - scaledHalfH;
+          const bottom = center + scaledHalfH;
+          const neck = scaledHalfW * 0.62;
+          const hexPoints = [
+            new Phaser.Geom.Point(center - neck, top),
+            new Phaser.Geom.Point(center + neck, top),
+            new Phaser.Geom.Point(right, center),
+            new Phaser.Geom.Point(center + neck, bottom),
+            new Phaser.Geom.Point(center - neck, bottom),
+            new Phaser.Geom.Point(left, center),
+          ];
+          g.fillStyle(options.fillColor, fillAlpha);
+          g.fillPoints(hexPoints, true);
+          if (strokeAlpha !== undefined) {
+            g.lineStyle(strokeWidth, options.strokeColor, strokeAlpha);
+            g.strokePoints(hexPoints, true, true);
+          }
+          return;
+        }
+
+        g.fillStyle(options.fillColor, fillAlpha);
+        g.fillEllipse(center, center, scaledHalfW * 2, scaledHalfH * 2);
+        if (strokeAlpha !== undefined) {
+          g.lineStyle(strokeWidth, options.strokeColor, strokeAlpha);
+          g.strokeEllipse(center, center, scaledHalfW * 2, scaledHalfH * 2);
+        }
+      };
 
       if (options.hasOuterHalo) {
         g.lineStyle(4, options.glowColor, 0.65);
@@ -385,21 +446,36 @@ export class GameScene extends Phaser.Scene {
         { radius: 27, alpha: 0.24 },
       ];
       for (const layer of glowLayers) {
-        g.fillStyle(options.glowColor, layer.alpha);
-        g.fillCircle(center, center, layer.radius);
+        g.fillStyle(options.glowColor, layer.alpha * (shape === 'round' ? 1 : 0.92));
+        g.fillEllipse(center, center, layer.radius * 2 * bodyScaleX, layer.radius * 2 * bodyScaleY);
       }
 
-      g.fillStyle(options.fillColor, 1);
-      g.fillCircle(center, center, 24);
-      g.lineStyle(4, options.strokeColor, 1);
-      g.strokeCircle(center, center, 24);
+      drawBody(24, 1, 1);
 
-      g.fillStyle(options.markerColor, 0.95);
-      g.fillTriangle(center - 7, center - 16, center + 7, center - 16, center, center - 28);
+      g.fillStyle(options.markerColor, 0.92);
+      if (extraMark === 'plate') {
+        g.fillRoundedRect(center - 15, center - 20, 30, 10, 4);
+        g.fillRoundedRect(center - 13, center - 6, 26, 8, 3);
+      } else if (extraMark === 'fins') {
+        g.fillTriangle(center - 20, center + 3, center - 30, center - 1, center - 20, center - 6);
+        g.fillTriangle(center + 20, center + 3, center + 30, center - 1, center + 20, center - 6);
+        g.fillTriangle(center - 6, center - 16, center + 6, center - 16, center, center - 30);
+      } else if (extraMark === 'crest') {
+        g.fillTriangle(center - 10, center - 16, center + 10, center - 16, center, center - 31);
+        g.fillTriangle(center - 20, center - 10, center - 10, center - 10, center - 15, center - 23);
+        g.fillTriangle(center + 10, center - 10, center + 20, center - 10, center + 15, center - 23);
+      } else {
+        g.fillTriangle(center - 7, center - 16, center + 7, center - 16, center, center - 28);
+      }
 
       g.fillStyle(options.eyeColor, 0.95);
-      g.fillCircle(center - 8, center - 4, 4);
-      g.fillCircle(center + 8, center - 4, 4);
+      if (shape === 'diamond') {
+        g.fillEllipse(center - 8, center - 5, 7, 5);
+        g.fillEllipse(center + 8, center - 5, 7, 5);
+      } else {
+        g.fillCircle(center - 8, center - 4, 4);
+        g.fillCircle(center + 8, center - 4, 4);
+      }
 
       g.generateTexture(key, textureSize, textureSize);
       g.destroy();
@@ -531,37 +607,62 @@ export class GameScene extends Phaser.Scene {
     createPlayerSilhouetteTexture('rr_player_c', 'c');
     createPlayerSilhouetteTexture('rr_player_d', 'd');
 
+    createUnitTexture('rr_enemy_normal', {
+      fillColor: 0xa4a9bf,
+      strokeColor: 0xf4f6ff,
+      glowColor: 0x5b6488,
+      markerColor: 0xdde3ff,
+      eyeColor: 0x20253f,
+      shapeVariant: 'round',
+      extraMark: 'none',
+    });
+
     createUnitTexture('rr_enemy_basic', {
-      fillColor: 0xff6b6b,
-      strokeColor: 0xfff1f1,
-      glowColor: 0xbf3f57,
-      markerColor: 0xffe3a6,
-      eyeColor: 0x351423,
+      fillColor: 0xa4a9bf,
+      strokeColor: 0xf4f6ff,
+      glowColor: 0x5b6488,
+      markerColor: 0xdde3ff,
+      eyeColor: 0x20253f,
+      shapeVariant: 'round',
+      extraMark: 'none',
     });
 
     createUnitTexture('rr_enemy_fast', {
-      fillColor: 0xff8f5a,
-      strokeColor: 0xfff2de,
-      glowColor: 0xcc5e33,
-      markerColor: 0xfff2a8,
-      eyeColor: 0x3c1b15,
+      fillColor: 0x4ecbff,
+      strokeColor: 0xe7f8ff,
+      glowColor: 0x2f8fcb,
+      markerColor: 0xcaf2ff,
+      eyeColor: 0x0e2c44,
+      shapeVariant: 'diamond',
+      extraMark: 'fins',
+      bodyScaleX: 0.88,
+      bodyScaleY: 1.06,
     });
 
     createUnitTexture('rr_enemy_tank', {
-      fillColor: 0x6cc78f,
-      strokeColor: 0xe8fff1,
-      glowColor: 0x3a8a62,
-      markerColor: 0xc4ffd8,
-      eyeColor: 0x153426,
+      fillColor: 0x59606d,
+      strokeColor: 0xdde4f2,
+      glowColor: 0x323946,
+      markerColor: 0xaab8ca,
+      eyeColor: 0x0f1622,
+      shapeVariant: 'hex',
+      extraMark: 'plate',
+      bodyScaleX: 1.09,
+      bodyScaleY: 1.06,
+      strokeWidth: 5,
     });
 
     createUnitTexture('rr_enemy_elite', {
-      fillColor: 0xb37cff,
-      strokeColor: 0xf4e9ff,
-      glowColor: 0x8a4ce3,
-      markerColor: 0xfff6bc,
-      eyeColor: 0x2c114b,
+      fillColor: 0xba67ff,
+      strokeColor: 0xffefff,
+      glowColor: 0x7c30d6,
+      markerColor: 0xffde7a,
+      eyeColor: 0x280f48,
       hasOuterHalo: true,
+      shapeVariant: 'round',
+      extraMark: 'crest',
+      bodyScaleX: 1.03,
+      bodyScaleY: 1.03,
     });
 
     createExplosionTexture('fx_explosion_core', 'core');
@@ -1264,7 +1365,7 @@ export class GameScene extends Phaser.Scene {
         return 'rr_enemy_elite';
       case 'normal':
       default:
-        return 'rr_enemy_basic';
+        return 'rr_enemy_normal';
     }
   }
 
