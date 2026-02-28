@@ -105,6 +105,28 @@ const EXTRA_LIFE_STEP_SCORE = 1000;
 const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / (1000 / 20)));
 // Enemy MP smoothing: local constant to avoid touching player movement pipeline.
 const MP_MOVE_TICK_MS_ENEMY = 1000 / 20;
+const PLAYER_SILHOUETTE_TEXTURE_KEYS = ['rr_player_a', 'rr_player_b', 'rr_player_c', 'rr_player_d'] as const;
+
+function hashStringFNV1a(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function getSilhouetteIndexFromId(id: string): 0 | 1 | 2 | 3 {
+  return (hashStringFNV1a(id) % PLAYER_SILHOUETTE_TEXTURE_KEYS.length) as 0 | 1 | 2 | 3;
+}
+
+function getPlayerSilhouetteTextureKeyFromId(id: string): string {
+  return PLAYER_SILHOUETTE_TEXTURE_KEYS[getSilhouetteIndexFromId(id)] ?? PLAYER_SILHOUETTE_TEXTURE_KEYS[0];
+}
+
+function getBobPhaseFromId(id: string): number {
+  return (hashStringFNV1a(id) % 6283) / 1000;
+}
 
 interface TileTweenSegment {
   fromX: number;
@@ -254,6 +276,8 @@ export class GameScene extends Phaser.Scene {
   private enemyNextMoveAt = new Map<string, number>();
 
   private playerSprite?: Phaser.GameObjects.Image;
+  private localPlayerSilhouetteTextureKey = PLAYER_SILHOUETTE_TEXTURE_KEYS[0];
+  private localPlayerBobPhase = 0;
   private bombSprites = new Map<string, Phaser.GameObjects.Image>();
   private itemSprites = new Map<string, Phaser.GameObjects.Image>();
   private flameSprites = new Map<string, Phaser.GameObjects.Image>();
@@ -380,6 +404,67 @@ export class GameScene extends Phaser.Scene {
     };
 
 
+
+    const createPlayerSilhouetteTexture = (
+      key: string,
+      variant: 'a' | 'b' | 'c' | 'd',
+    ): void => {
+      if (this.textures.exists(key)) return;
+
+      const center = textureSize / 2;
+      const g = this.add.graphics().setVisible(false);
+      const profile = {
+        a: { headRadius: 10, shoulderWidth: 36, hipWidth: 26, torsoTopY: 36, torsoBottomY: 63, legWidth: 8, hair: 'none' },
+        b: { headRadius: 9, shoulderWidth: 30, hipWidth: 22, torsoTopY: 38, torsoBottomY: 62, legWidth: 7, hair: 'none' },
+        c: { headRadius: 10, shoulderWidth: 31, hipWidth: 28, torsoTopY: 36, torsoBottomY: 64, legWidth: 7, hair: 'bob' },
+        d: { headRadius: 9, shoulderWidth: 28, hipWidth: 24, torsoTopY: 37, torsoBottomY: 61, legWidth: 6, hair: 'crest' },
+      }[variant];
+
+      g.fillStyle(0xffffff, 0.13);
+      g.fillCircle(center, center + 1, 29);
+      g.fillStyle(0xffffff, 0.18);
+      g.fillCircle(center, center + 1, 24);
+
+      const legTop = profile.torsoBottomY - 3;
+      g.fillStyle(0xffffff, 1);
+      g.fillRoundedRect(center - profile.legWidth - 2, legTop, profile.legWidth, 18, 3);
+      g.fillRoundedRect(center + 2, legTop, profile.legWidth, 18, 3);
+
+      g.fillPoints([
+        new Phaser.Geom.Point(center - profile.shoulderWidth / 2, profile.torsoTopY),
+        new Phaser.Geom.Point(center + profile.shoulderWidth / 2, profile.torsoTopY),
+        new Phaser.Geom.Point(center + profile.hipWidth / 2, profile.torsoBottomY),
+        new Phaser.Geom.Point(center - profile.hipWidth / 2, profile.torsoBottomY),
+      ], true);
+
+      g.lineStyle(3, 0x202020, 0.75);
+      g.strokeCircle(center, 26, profile.headRadius);
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(center, 26, profile.headRadius);
+
+      g.lineStyle(2, 0x202020, 0.75);
+      g.strokePoints([
+        new Phaser.Geom.Point(center - profile.shoulderWidth / 2, profile.torsoTopY),
+        new Phaser.Geom.Point(center + profile.shoulderWidth / 2, profile.torsoTopY),
+        new Phaser.Geom.Point(center + profile.hipWidth / 2, profile.torsoBottomY),
+        new Phaser.Geom.Point(center - profile.hipWidth / 2, profile.torsoBottomY),
+      ], true, true);
+
+      g.fillStyle(0x222222, 0.8);
+      if (profile.hair === 'bob') {
+        g.fillRoundedRect(center - 11, 16, 22, 8, 4);
+      } else if (profile.hair === 'crest') {
+        g.fillTriangle(center, 11, center - 8, 21, center + 8, 21);
+      }
+
+      g.fillStyle(0x202020, 0.58);
+      g.fillCircle(center - 4, 25, 1.5);
+      g.fillCircle(center + 4, 25, 1.5);
+
+      g.generateTexture(key, textureSize, textureSize);
+      g.destroy();
+    };
+
     const createExplosionTexture = (key: string, axis: 'core' | 'horizontal' | 'vertical'): void => {
       if (this.textures.exists(key)) return;
       const g = this.add.graphics().setVisible(false);
@@ -439,13 +524,10 @@ export class GameScene extends Phaser.Scene {
       g.destroy();
     };
 
-    createUnitTexture('rr_player', {
-      fillColor: 0x4ab3ff,
-      strokeColor: 0xd8f1ff,
-      glowColor: 0x2b6fbf,
-      markerColor: 0xe9fbff,
-      eyeColor: 0x0f2442,
-    });
+    createPlayerSilhouetteTexture('rr_player_a', 'a');
+    createPlayerSilhouetteTexture('rr_player_b', 'b');
+    createPlayerSilhouetteTexture('rr_player_c', 'c');
+    createPlayerSilhouetteTexture('rr_player_d', 'd');
 
     createUnitTexture('rr_enemy_basic', {
       fillColor: 0xff6b6b,
@@ -1063,12 +1145,13 @@ export class GameScene extends Phaser.Scene {
     this.player.facing = 'down';
     this.player.state = 'idle';
     this.player.graceBombKey = null;
+    this.refreshLocalPlayerVisualIdentity();
 
     const style = this.getAssetStyle('player', this.player.state, this.player.facing);
     const { tileSize } = GAME_CONFIG;
     this.playerSprite?.destroy();
     this.playerSprite = this.add
-      .image(0, 0, this.getTextureKey(style))
+      .image(0, 0, this.localPlayerSilhouetteTextureKey)
       .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
       .setDepth(style.depth ?? DEPTH_PLAYER)
       .setDisplaySize(tileSize * (style.scale ?? 0.74), tileSize * (style.scale ?? 0.74));
@@ -1770,12 +1853,21 @@ export class GameScene extends Phaser.Scene {
     if (this.gameMode !== 'multiplayer' && (this.player.targetX === null || this.player.targetY === null)) {
       this.placeLocalPlayerSpriteAt(this.player.gridX, this.player.gridY);
     }
+    const localIsMoving = this.player.isMoving || this.player.targetX !== null || this.player.targetY !== null;
+    const bobTime = time * (localIsMoving ? 0.016 : 0.006) + this.localPlayerBobPhase;
+    const bobOffset = Math.sin(bobTime) * (localIsMoving ? 1.9 : 0.55);
+    const swayAngle = Math.sin(time * 0.02 + this.localPlayerBobPhase) * (localIsMoving ? 2.2 : 0.5);
+    const scalePulse = 1 + Math.sin(bobTime) * (localIsMoving ? 0.018 : 0.008);
+    const baseRenderX = (this.localRenderPos?.x ?? this.player.gridX) * tileSize + tileSize / 2;
+    const baseRenderY = (this.localRenderPos?.y ?? this.player.gridY) * tileSize + tileSize / 2;
+
     this.playerSprite
-      .setTexture('rr_player')
-      .setAngle(this.getFacingAngle(this.player.facing))
+      .setTexture(this.localPlayerSilhouetteTextureKey)
+      .setPosition(baseRenderX, baseRenderY + bobOffset)
+      .setAngle(this.getFacingAngle(this.player.facing) + swayAngle)
       .setDisplaySize(
-        tileSize * (playerStyle.scale ?? 0.74) * this.getPlayerBreathScale(time),
-        tileSize * (playerStyle.scale ?? 0.74) * this.getPlayerBreathScale(time),
+        tileSize * (playerStyle.scale ?? 0.74) * scalePulse,
+        tileSize * (playerStyle.scale ?? 0.74) * scalePulse,
       )
       .setOrigin(playerStyle.origin?.x ?? 0.5, playerStyle.origin?.y ?? 0.5)
       .setDepth(playerStyle.depth ?? DEPTH_PLAYER);
@@ -1945,10 +2037,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private getPlayerBreathScale(time: number): number {
-    const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
-    return Phaser.Math.Linear(1, 1.05, pulse);
-  }
 
   private getEnemyAnimationState(enemy: EnemyModel, time: number): { scale: number; hoverOffset: number; extraRotation: number } {
     const waveSeed = enemy.key.length * 0.3;
@@ -2236,6 +2324,16 @@ export class GameScene extends Phaser.Scene {
 
   public setLocalTgUserId(id?: string) {
     this.localTgUserId = id;
+    this.refreshLocalPlayerVisualIdentity();
+    if (this.playerSprite) {
+      this.playerSprite.setTexture(this.localPlayerSilhouetteTextureKey);
+    }
+  }
+
+  private refreshLocalPlayerVisualIdentity(): void {
+    const playerId = this.localTgUserId ?? 'local-player';
+    this.localPlayerSilhouetteTextureKey = getPlayerSilhouetteTextureKeyFromId(playerId);
+    this.localPlayerBobPhase = getBobPhaseFromId(playerId);
   }
 
   private enqueueLocalInput(input: { seq: number; dx: number; dy: number }) {
