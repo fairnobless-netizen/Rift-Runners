@@ -539,6 +539,22 @@ export class GameScene extends Phaser.Scene {
       eyeColor: 0x351423,
     });
 
+    createUnitTexture('rr_enemy_fast', {
+      fillColor: 0xff8f5a,
+      strokeColor: 0xfff2de,
+      glowColor: 0xcc5e33,
+      markerColor: 0xfff2a8,
+      eyeColor: 0x3c1b15,
+    });
+
+    createUnitTexture('rr_enemy_tank', {
+      fillColor: 0x6cc78f,
+      strokeColor: 0xe8fff1,
+      glowColor: 0x3a8a62,
+      markerColor: 0xc4ffd8,
+      eyeColor: 0x153426,
+    });
+
     createUnitTexture('rr_enemy_elite', {
       fillColor: 0xb37cff,
       strokeColor: 0xf4e9ff,
@@ -1165,10 +1181,18 @@ export class GameScene extends Phaser.Scene {
 
 
   private getScaledEnemyMoveInterval(kind: EnemyKind): number {
-    const baseInterval = kind === 'elite'
-      ? Math.max(GAME_CONFIG.enemyMoveIntervalMinMs, Math.floor(GAME_CONFIG.enemyMoveIntervalMs * 0.7))
-      : GAME_CONFIG.enemyMoveIntervalMs;
-    return scaleMovementDurationMs(baseInterval);
+    const baseInterval = GAME_CONFIG.enemyMoveIntervalMs;
+    switch (kind) {
+      case 'fast':
+        return scaleMovementDurationMs(Math.max(GAME_CONFIG.enemyMoveIntervalMinMs, Math.floor(baseInterval * 0.75)));
+      case 'tank':
+        return scaleMovementDurationMs(Math.floor(baseInterval * 1.4));
+      case 'elite':
+        return scaleMovementDurationMs(Math.max(GAME_CONFIG.enemyMoveIntervalMinMs, Math.floor(baseInterval * 0.7)));
+      case 'normal':
+      default:
+        return scaleMovementDurationMs(baseInterval);
+    }
   }
   private spawnPlayer(): void {
     this.player.gridX = 1;
@@ -1197,6 +1221,53 @@ export class GameScene extends Phaser.Scene {
     this.updateCameraFollowMode();
   }
 
+  private pickEnemyKindForLevel(): EnemyKind {
+    const roll = this.randomFloat();
+
+    if (this.levelIndex <= 1) {
+      return roll < 0.8 ? 'normal' : 'fast';
+    }
+
+    if (this.levelIndex <= 4) {
+      if (roll < 0.6) return 'normal';
+      if (roll < 0.8) return 'fast';
+      return 'tank';
+    }
+
+    if (roll < 0.6) return 'normal';
+    if (roll < 0.8) return 'fast';
+    if (roll < 0.95) return 'tank';
+    return 'elite';
+  }
+
+  private getEnemyScore(kind: EnemyKind): number {
+    switch (kind) {
+      case 'fast':
+        return 150;
+      case 'tank':
+        return 250;
+      case 'elite':
+        return 400;
+      case 'normal':
+      default:
+        return 100;
+    }
+  }
+
+  private getEnemyTextureKey(kind: EnemyKind): string {
+    switch (kind) {
+      case 'fast':
+        return 'rr_enemy_fast';
+      case 'tank':
+        return 'rr_enemy_tank';
+      case 'elite':
+        return 'rr_enemy_elite';
+      case 'normal':
+      default:
+        return 'rr_enemy_basic';
+    }
+  }
+
   private spawnEnemies(): void {
     if (this.gameMode === 'multiplayer' || this.isBossLevel) return;
     const spawnCells = this.getShuffledEnemySpawnCells(this.levelIndex);
@@ -1205,6 +1276,7 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < targetCount; i += 1) {
       const cell = spawnCells[i];
       const key = `enemy-${this.levelIndex}-${i}-${cell.x}-${cell.y}`;
+      const kind = this.pickEnemyKindForLevel();
       this.enemies.set(key, {
         key,
         gridX: cell.x,
@@ -1214,12 +1286,13 @@ export class GameScene extends Phaser.Scene {
         targetX: cell.x,
         targetY: cell.y,
         moveStartedAtMs: 0,
-        moveDurationMs: this.getScaledEnemyMoveInterval('normal'),
+        moveDurationMs: this.getScaledEnemyMoveInterval(kind),
         isMoving: false,
         facing: 'left',
         state: 'idle',
-        kind: 'normal',
-        moveIntervalMs: this.getScaledEnemyMoveInterval('normal'),
+        kind,
+        moveIntervalMs: this.getScaledEnemyMoveInterval(kind),
+        hp: kind === 'tank' ? 2 : 1,
       });
       this.enemyNextMoveAt.set(key, 0);
     }
@@ -1779,6 +1852,7 @@ export class GameScene extends Phaser.Scene {
       state: 'idle',
       kind,
       moveIntervalMs: this.getScaledEnemyMoveInterval(kind),
+      hp: kind === 'tank' ? 2 : 1,
     });
     this.enemyNextMoveAt.set(key, this.time.now);
   }
@@ -1791,7 +1865,10 @@ export class GameScene extends Phaser.Scene {
 
     if (valid.length === 0) return null;
 
-    if (valid.includes(enemy.facing) && this.randomFloat() < GAME_CONFIG.enemyForwardBias) {
+    const forwardBias = enemy.kind === 'fast'
+      ? Math.max(0.1, GAME_CONFIG.enemyForwardBias - 0.2)
+      : GAME_CONFIG.enemyForwardBias;
+    if (valid.includes(enemy.facing) && this.randomFloat() < forwardBias) {
       return enemy.facing;
     }
 
@@ -1812,12 +1889,17 @@ export class GameScene extends Phaser.Scene {
     let scoreChanged = false;
     for (const enemy of [...this.enemies.values()]) {
       if (enemy.gridX !== x || enemy.gridY !== y) continue;
+      enemy.hp -= 1;
+      if (enemy.hp > 0) {
+        this.emitSimulation('enemy.damaged', this.time.now, { key: enemy.key, x, y, hp: enemy.hp, kind: enemy.kind });
+        continue;
+      }
       this.enemies.delete(enemy.key);
       this.enemyNextMoveAt.delete(enemy.key);
       this.enemySprites.get(enemy.key)?.destroy();
       this.enemySprites.delete(enemy.key);
-      this.stats.score += GAME_CONFIG.enemyScore;
-      this.emitSimulation('enemy.defeated', this.time.now, { key: enemy.key, x, y });
+      this.stats.score += this.getEnemyScore(enemy.kind);
+      this.emitSimulation('enemy.defeated', this.time.now, { key: enemy.key, x, y, kind: enemy.kind });
       scoreChanged = true;
     }
     if (scoreChanged) {
@@ -2046,11 +2128,22 @@ export class GameScene extends Phaser.Scene {
         enemy.moveStartedAtMs = 0;
       }
 
+      const baseScale = style.scale ?? 0.72;
+      const kindScaleMultiplier = enemy.kind === 'tank'
+        ? 1.15
+        : enemy.kind === 'fast'
+          ? 0.9
+          : 1;
+      const fastWidthMultiplier = enemy.kind === 'fast' ? 0.88 : 1;
+      const fastHeightMultiplier = enemy.kind === 'fast' ? 1.02 : 1;
       sprite
         .setPosition(renderGX * tileSize + tileSize / 2, renderGY * tileSize + tileSize / 2 + anim.hoverOffset)
-        .setTexture(enemy.kind === 'elite' ? 'rr_enemy_elite' : 'rr_enemy_basic')
+        .setTexture(this.getEnemyTextureKey(enemy.kind))
         .setAngle(this.getFacingAngle(enemy.facing) + anim.extraRotation)
-        .setDisplaySize(tileSize * (style.scale ?? 0.72) * anim.scale, tileSize * (style.scale ?? 0.72) * anim.scale)
+        .setDisplaySize(
+          tileSize * baseScale * anim.scale * kindScaleMultiplier * fastWidthMultiplier,
+          tileSize * baseScale * anim.scale * kindScaleMultiplier * fastHeightMultiplier,
+        )
         .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5);
     }
 
@@ -2086,6 +2179,23 @@ export class GameScene extends Phaser.Scene {
         scale: Phaser.Math.Linear(0.98, 1.08, pulse),
         hoverOffset: wave * 1.4,
         extraRotation: Math.sin(time * 0.0035 + waveSeed) * 6,
+      };
+    }
+
+    if (enemy.kind === 'fast') {
+      const pulse = 0.5 + 0.5 * Math.sin(time * 0.012 + waveSeed);
+      return {
+        scale: Phaser.Math.Linear(0.96, 1.04, pulse),
+        hoverOffset: wave * 1.9,
+        extraRotation: Math.sin(time * 0.006 + waveSeed) * 4,
+      };
+    }
+
+    if (enemy.kind === 'tank') {
+      return {
+        scale: 1,
+        hoverOffset: wave * 1.1,
+        extraRotation: Math.sin(time * 0.002 + waveSeed) * 2,
       };
     }
 
@@ -2936,6 +3046,7 @@ export class GameScene extends Phaser.Scene {
         state: enemy.isMoving ? 'move' : 'idle',
         kind: 'normal',
         moveIntervalMs: this.getScaledEnemyMoveInterval('normal'),
+        hp: 1,
       });
     }
 
