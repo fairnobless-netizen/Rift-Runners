@@ -106,6 +106,7 @@ const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_
 // Enemy MP smoothing: local constant to avoid touching player movement pipeline.
 const MP_MOVE_TICK_MS_ENEMY = 1000 / 20;
 const PLAYER_SILHOUETTE_TEXTURE_KEYS = ['rr_player_a', 'rr_player_b', 'rr_player_c', 'rr_player_d'] as const;
+const ENEMY_HIT_SHAKE_COOLDOWN_MS = 80;
 type PlayerSilhouetteTextureKey = typeof PLAYER_SILHOUETTE_TEXTURE_KEYS[number];
 
 function hashStringFNV1a(value: string): number {
@@ -297,6 +298,7 @@ export class GameScene extends Phaser.Scene {
   private queuedDirectionUntilMs = 0;
   private placeBombUntil = 0;
   private audioSettings: SceneAudioSettings = { musicEnabled: true, sfxEnabled: true };
+  private lastEnemyHitShakeAt = -Infinity;
   private minZoom: number = GAME_CONFIG.minZoom;
   private maxZoom: number = GAME_CONFIG.maxZoom;
   private pinchStartDistance: number | null = null;
@@ -1906,7 +1908,7 @@ export class GameScene extends Phaser.Scene {
         const segment: FlameSegmentKind = impact.key === bomb.key ? 'center' : 'arm';
         const axis: FlameArmAxis | undefined = segment === 'arm' ? (impact.x === bomb.x ? 'vertical' : 'horizontal') : undefined;
         this.spawnFlame(impact.x, impact.y, time + GAME_CONFIG.flameLifetimeMs, segment, axis);
-        this.hitEntitiesAt(impact.x, impact.y);
+        this.hitEntitiesAt(impact.x, impact.y, 'explosion');
         this.tryRegisterDoorWaveHit(impact.x, impact.y, waveId, time, doorRevealedThisWave);
       }
 
@@ -2136,16 +2138,18 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
-  private hitEntitiesAt(x: number, y: number): void {
+  private hitEntitiesAt(x: number, y: number, source: 'explosion' | 'other' = 'other'): void {
     this.hitPlayerAt(x, y);
     let scoreChanged = false;
     for (const enemy of [...this.enemies.values()]) {
       if (enemy.gridX !== x || enemy.gridY !== y) continue;
       enemy.hp -= 1;
       if (enemy.hp > 0) {
+        this.playEnemyHitFeedback(enemy, false, source);
         this.emitSimulation('enemy.damaged', this.time.now, { key: enemy.key, x, y, hp: enemy.hp, kind: enemy.kind });
         continue;
       }
+      this.playEnemyHitFeedback(enemy, true, source);
       this.enemies.delete(enemy.key);
       this.enemyNextMoveAt.delete(enemy.key);
       this.enemySprites.get(enemy.key)?.destroy();
@@ -2159,6 +2163,83 @@ export class GameScene extends Phaser.Scene {
       emitStats(this.stats);
       this.syncCampaignAndPersist();
     }
+  }
+
+  private playEnemyHitFeedback(enemy: EnemyModel, isDeath: boolean, source: 'explosion' | 'other'): void {
+    const sprite = this.enemySprites.get(enemy.key);
+    if (!sprite) {
+      this.playEnemyFeedbackSfx(enemy.kind, isDeath);
+      this.maybeShakeForEnemyFeedback(source, isDeath);
+      return;
+    }
+
+    if (isDeath) {
+      const ghost = this.add.image(sprite.x, sprite.y, sprite.texture.key)
+        .setDepth((sprite.depth ?? DEPTH_ENEMY) + 0.01)
+        .setScale(sprite.scaleX, sprite.scaleY)
+        .setAngle(sprite.angle)
+        .setFlip(sprite.flipX, sprite.flipY)
+        .setAlpha(sprite.alpha)
+        .setTintFill(0xffffff);
+      this.tweens.add({
+        targets: ghost,
+        duration: 120,
+        ease: 'Quad.Out',
+        scaleX: ghost.scaleX * 1.07,
+        scaleY: ghost.scaleY * 1.07,
+        alpha: { from: 0.95, to: 0.35 },
+        yoyo: true,
+        onComplete: () => {
+          ghost.clearTint();
+          ghost.destroy();
+        },
+      });
+    } else {
+      this.tweens.killTweensOf(sprite);
+      sprite.setTintFill(0xffffff);
+      this.tweens.add({
+        targets: sprite,
+        duration: 90,
+        ease: 'Sine.Out',
+        alpha: { from: 1, to: 0.7 },
+        yoyo: true,
+        onComplete: () => {
+          sprite.clearTint();
+          sprite.setAlpha(1);
+        },
+      });
+    }
+
+    this.playEnemyFeedbackSfx(enemy.kind, isDeath);
+    this.maybeShakeForEnemyFeedback(source, isDeath);
+  }
+
+  private maybeShakeForEnemyFeedback(source: 'explosion' | 'other', isDeath: boolean): void {
+    if (source !== 'explosion') return;
+    const now = this.time.now;
+    if (now - this.lastEnemyHitShakeAt < ENEMY_HIT_SHAKE_COOLDOWN_MS) return;
+    this.lastEnemyHitShakeAt = now;
+    this.cameras.main.shake(isDeath ? 120 : 90, isDeath ? 0.005 : 0.0035, true);
+  }
+
+  private playEnemyFeedbackSfx(kind: EnemyKind, isDeath: boolean): void {
+    if (!this.audioSettings.sfxEnabled || !this.sound) return;
+    const phase = isDeath ? 'death' : 'hit';
+    const keysToTry = [`sfx_enemy_${phase}_${kind}`, `sfx_enemy_${phase}`];
+    const selectedKey = keysToTry.find((key) => this.cache.audio.exists(key));
+    if (!selectedKey) return;
+
+    const detuneByKind: Record<EnemyKind, number> = {
+      normal: 0,
+      fast: 140,
+      tank: -130,
+      elite: 220,
+    };
+
+    this.sound.play(selectedKey, {
+      volume: isDeath ? 0.22 : 0.16,
+      detune: detuneByKind[kind],
+    });
   }
 
   private hitPlayerAt(x: number, y: number): void {
