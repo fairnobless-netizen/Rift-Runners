@@ -39,6 +39,7 @@ const REMOTE_RENDER_SNAP_DISTANCE_TILES = 1.5;
 const FIXED_DT = 1000 / 20;
 const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / FIXED_DT));
 const PLAYER_SILHOUETTE_TEXTURE_KEYS = ['rr_player_a', 'rr_player_b', 'rr_player_c', 'rr_player_d'] as const;
+type PlayerSilhouetteTextureKey = typeof PLAYER_SILHOUETTE_TEXTURE_KEYS[number];
 
 function hashStringFNV1a(value: string): number {
   let hash = 0x811c9dc5;
@@ -53,7 +54,7 @@ function getSilhouetteIndexFromId(id: string): 0 | 1 | 2 | 3 {
   return (hashStringFNV1a(id) % PLAYER_SILHOUETTE_TEXTURE_KEYS.length) as 0 | 1 | 2 | 3;
 }
 
-function getPlayerSilhouetteTextureKeyFromId(id: string): string {
+function getPlayerSilhouetteTextureKeyFromId(id: string): PlayerSilhouetteTextureKey {
   return PLAYER_SILHOUETTE_TEXTURE_KEYS[getSilhouetteIndexFromId(id)] ?? PLAYER_SILHOUETTE_TEXTURE_KEYS[0];
 }
 
