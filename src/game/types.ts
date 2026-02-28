@@ -62,7 +62,7 @@ export interface FlameModel extends GridPosition {
   axis?: FlameArmAxis;
 }
 
-export type EnemyKind = 'normal' | 'elite';
+export type EnemyKind = 'normal' | 'fast' | 'tank' | 'elite';
 
 export interface EnemyModel {
   key: string;
@@ -79,6 +79,7 @@ export interface EnemyModel {
   state: Extract<EntityState, 'idle' | 'move'>;
   kind: EnemyKind;
   moveIntervalMs: number;
+  hp: number;
 }
 
 export interface PlayerStats {
