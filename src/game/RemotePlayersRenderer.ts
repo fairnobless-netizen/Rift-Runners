@@ -38,10 +38,34 @@ const INTERP_TUNING = {
 const REMOTE_RENDER_SNAP_DISTANCE_TILES = 1.5;
 const FIXED_DT = 1000 / 20;
 const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / FIXED_DT));
+const PLAYER_SILHOUETTE_TEXTURE_KEYS = ['rr_player_a', 'rr_player_b', 'rr_player_c', 'rr_player_d'] as const;
+type PlayerSilhouetteTextureKey = typeof PLAYER_SILHOUETTE_TEXTURE_KEYS[number];
+
+function hashStringFNV1a(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function getSilhouetteIndexFromId(id: string): 0 | 1 | 2 | 3 {
+  return (hashStringFNV1a(id) % PLAYER_SILHOUETTE_TEXTURE_KEYS.length) as 0 | 1 | 2 | 3;
+}
+
+function getPlayerSilhouetteTextureKeyFromId(id: string): PlayerSilhouetteTextureKey {
+  return PLAYER_SILHOUETTE_TEXTURE_KEYS[getSilhouetteIndexFromId(id)] ?? PLAYER_SILHOUETTE_TEXTURE_KEYS[0];
+}
+
+function getBobPhaseFromId(id: string): number {
+  return (hashStringFNV1a(id) % 6283) / 1000;
+}
+
 
 type RemotePlayerView = {
   container: Phaser.GameObjects.Container;
-  body: Phaser.GameObjects.Rectangle;
+  body: Phaser.GameObjects.Image;
   nameText: Phaser.GameObjects.Text;
 };
 
@@ -687,7 +711,7 @@ export class RemotePlayersRenderer {
   }
 
   private upsertPlayer(
-    player: { tgUserId: string; displayName: string; colorId: number },
+    player: { tgUserId: string; displayName: string; colorId: number; isMoving?: boolean },
     target: { x: number; y: number; targetTickUsed: number },
     renderTick: number = this.renderTick,
     forceSnap: boolean = false,
@@ -751,18 +775,28 @@ export class RemotePlayersRenderer {
       state.segment = undefined;
     }
 
+    const moving = Boolean(player.isMoving ?? state.segment);
+    const bobPhase = getBobPhaseFromId(player.tgUserId);
+    const bobTime = performance.now() * (moving ? 0.016 : 0.006) + bobPhase;
+    const bobOffset = Math.sin(bobTime) * (moving ? 1.8 : 0.5);
+    const swayAngle = Math.sin(performance.now() * 0.02 + bobPhase) * (moving ? 2 : 0.45);
+    const scalePulse = 1 + Math.sin(bobTime) * (moving ? 0.017 : 0.008);
+
     const px = this.offsetX + state.x * this.tileSize + this.tileSize / 2;
     const py = this.offsetY + state.y * this.tileSize + this.tileSize / 2;
     let view = this.players.get(player.tgUserId);
     if (!view) {
       view = this.createPlayer(player, px, py);
       this.players.set(player.tgUserId, view);
-    } else {
-      view.container.setPosition(px, py);
     }
 
+    view.container.setPosition(px, py + bobOffset);
     view.nameText.setText(player.displayName);
-    view.body.setFillStyle(colorFromId(player.colorId), 0.75);
+    view.body
+      .setTexture(getPlayerSilhouetteTextureKeyFromId(player.tgUserId))
+      .setTint(colorFromId(player.colorId))
+      .setAngle(swayAngle)
+      .setScale(scalePulse);
   }
 
   private getStepDurationTicks(): number {
@@ -780,9 +814,12 @@ export class RemotePlayersRenderer {
     }
   }
 
-  private createPlayer(p: { displayName: string; colorId: number }, x: number, y: number): RemotePlayerView {
-    const body = this.scene.add.rectangle(0, 0, 18, 18, colorFromId(p.colorId), 0.75);
+  private createPlayer(p: { displayName: string; colorId: number; tgUserId?: string }, x: number, y: number): RemotePlayerView {
+    const silhouetteKey = getPlayerSilhouetteTextureKeyFromId(p.tgUserId ?? p.displayName);
+    const body = this.scene.add.image(0, 0, silhouetteKey);
     body.setOrigin(0.5, 0.5);
+    body.setDisplaySize(this.tileSize * 0.74, this.tileSize * 0.74);
+    body.setTint(colorFromId(p.colorId));
 
     const nameText = this.scene.add.text(0, -18, p.displayName, {
       fontSize: '10px',
