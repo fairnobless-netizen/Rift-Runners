@@ -106,6 +106,7 @@ const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_
 // Enemy MP smoothing: local constant to avoid touching player movement pipeline.
 const MP_MOVE_TICK_MS_ENEMY = 1000 / 20;
 const PLAYER_SILHOUETTE_TEXTURE_KEYS = ['rr_player_a', 'rr_player_b', 'rr_player_c', 'rr_player_d'] as const;
+type PlayerSilhouetteTextureKey = typeof PLAYER_SILHOUETTE_TEXTURE_KEYS[number];
 
 function hashStringFNV1a(value: string): number {
   let hash = 0x811c9dc5;
@@ -120,7 +121,7 @@ function getSilhouetteIndexFromId(id: string): 0 | 1 | 2 | 3 {
   return (hashStringFNV1a(id) % PLAYER_SILHOUETTE_TEXTURE_KEYS.length) as 0 | 1 | 2 | 3;
 }
 
-function getPlayerSilhouetteTextureKeyFromId(id: string): string {
+function getPlayerSilhouetteTextureKeyFromId(id: string): PlayerSilhouetteTextureKey {
   return PLAYER_SILHOUETTE_TEXTURE_KEYS[getSilhouetteIndexFromId(id)] ?? PLAYER_SILHOUETTE_TEXTURE_KEYS[0];
 }
 
@@ -276,7 +277,7 @@ export class GameScene extends Phaser.Scene {
   private enemyNextMoveAt = new Map<string, number>();
 
   private playerSprite?: Phaser.GameObjects.Image;
-  private localPlayerSilhouetteTextureKey = PLAYER_SILHOUETTE_TEXTURE_KEYS[0];
+  private localPlayerSilhouetteTextureKey: PlayerSilhouetteTextureKey = PLAYER_SILHOUETTE_TEXTURE_KEYS[0];
   private localPlayerBobPhase = 0;
   private bombSprites = new Map<string, Phaser.GameObjects.Image>();
   private itemSprites = new Map<string, Phaser.GameObjects.Image>();
