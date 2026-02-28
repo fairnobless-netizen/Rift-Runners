@@ -43,6 +43,7 @@ import {
   fetchLedger,
   fetchWallet,
   joinRoom,
+  kickRoomMember,
   leaveRoom,
   requestFriend,
   setRoomReady,
@@ -667,16 +668,8 @@ export default function GameView(): JSX.Element {
       .filter((member) => member.tgUserId !== currentRoom?.ownerTgUserId)
       .every((member) => member.ready ?? false),
   );
-  const waitingForOtherPlayer = Boolean(
-    multiplayerUiOpen
-    && currentRoom
-    && !isRoomOwner
-    && ((myRoomMember?.ready ?? false) || startingRoom)
-    && (currentRoom.phase ?? 'LOBBY') !== 'STARTED',
-  );
-
   const rejoinOverlayActive = rejoinPhase !== 'idle' && rejoinPhase !== 'rejoin_complete' && rejoinPhase !== 'rejoin_failed';
-  const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive || waitingForOtherPlayer;
+  const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive;
   const isMobileViewport = Math.min(viewportSize.width, viewportSize.height) < MOBILE_ROTATE_OVERLAY_BREAKPOINT;
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
@@ -2982,6 +2975,35 @@ export default function GameView(): JSX.Element {
     }
   }, [currentRoom?.roomCode, currentRoomMembers, isMultiplayerDebugEnabled, localTgUserId]);
 
+
+  const onKickRoomMember = useCallback(async (targetTgUserId: string): Promise<void> => {
+    if (!currentRoom?.roomCode || !targetTgUserId) return;
+
+    setRoomsError(null);
+    const result = await kickRoomMember(currentRoom.roomCode, targetTgUserId);
+    if (!result) {
+      setRoomsError('Kick failed');
+      return;
+    }
+
+    if (!result.ok) {
+      setRoomsError(mapRoomError(result.error));
+      return;
+    }
+
+    if (result.room) setCurrentRoom(result.room);
+    if (result.members) setCurrentRoomMembers(result.members);
+    if (localTgUserId && localTgUserId === targetTgUserId) {
+      ws.send({ type: 'room:leave' });
+      clearLastSession();
+      setCurrentRoom(null);
+      setCurrentRoomMembers([]);
+      setCurrentMatchId(null);
+      sceneRef.current?.resetMultiplayerNetState();
+      processedWsMessagesRef.current = 0;
+    }
+  }, [currentRoom?.roomCode, localTgUserId, ws]);
+
   const onStartRoom = useCallback(async (): Promise<void> => {
     if (!currentRoom?.roomCode) return;
 
@@ -3662,14 +3684,6 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {gameFlowPhase === 'playing' && waitingForOtherPlayer && (
-        <div className="waiting-overlay" role="status" aria-live="polite">
-          <div className="waiting-overlay__card">
-            <strong>Waiting for other player…</strong>
-            <p>Вы готовы. Ждём, пока второй игрок нажмёт Ready.</p>
-          </div>
-        </div>
-      )}
       {gameFlowPhase === 'playing' && resumeJoinInProgress && (rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying') && (
         <div className="waiting-overlay" role="status" aria-live="polite">
           <div className="waiting-overlay__card">
@@ -4099,6 +4113,7 @@ export default function GameView(): JSX.Element {
         onCloseRoom={onCloseRoom}
         onStartRoom={onStartRoom}
         onToggleReady={onToggleReady}
+        onKickRoomMember={onKickRoomMember}
         onCopyInviteLink={onCopyInviteLink}
         friendsLoading={friendsLoading}
         friendsError={friendsError}

@@ -7,6 +7,7 @@ import {
   getRoomByCode,
   joinRoomTx,
   joinRoomWithPassword,
+  kickRoomMemberTx,
   leaveRoomTx,
   leaveRoomV2,
   listMyRooms,
@@ -197,6 +198,29 @@ roomsRouter.post('/ready', async (req, res) => {
     if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });
     if (error?.code === 'FORBIDDEN') return res.status(403).json({ ok: false, error: 'forbidden' });
     if (error?.code === 'NOT_A_MEMBER') return res.status(403).json({ ok: false, error: 'forbidden' });
+    if (error?.code === 'ROOM_STARTED') return res.status(409).json({ ok: false, error: 'room_started' });
+    if (error?.code === 'ROOM_CLOSED') return res.status(409).json({ ok: false, error: 'room_closed' });
+    return res.status(500).json({ ok: false, error: 'internal_error' });
+  }
+});
+
+
+roomsRouter.post('/kick', async (req, res) => {
+  const session = await resolveSessionFromRequest(req as any);
+  if (!session) return res.status(401).json({ ok: false, error: 'unauthorized' });
+
+  const roomCode = String((req as any).body?.roomCode ?? '').trim().toUpperCase();
+  const targetTgUserId = String((req as any).body?.targetTgUserId ?? '').trim();
+  if (!roomCode) return res.status(400).json({ ok: false, error: 'room_code_required' });
+  if (!targetTgUserId) return res.status(400).json({ ok: false, error: 'target_required' });
+
+  try {
+    const result = await kickRoomMemberTx({ ownerTgUserId: session.tgUserId, roomCode, targetTgUserId });
+    return res.status(200).json({ ok: true, room: { roomCode: result.room.roomCode, ownerTgUserId: result.room.ownerTgUserId, capacity: result.room.capacity, status: result.room.status, phase: result.room.phase ?? 'LOBBY', createdAt: result.room.createdAt }, members: result.members.map((member) => ({ ...member, ready: member.ready ?? false })) });
+  } catch (error: any) {
+    if (error?.code === 'ROOM_NOT_FOUND') return res.status(404).json({ ok: false, error: 'room_not_found' });
+    if (error?.code === 'FORBIDDEN') return res.status(403).json({ ok: false, error: 'forbidden' });
+    if (error?.code === 'NOT_A_MEMBER') return res.status(404).json({ ok: false, error: 'not_a_member' });
     if (error?.code === 'ROOM_STARTED') return res.status(409).json({ ok: false, error: 'room_started' });
     if (error?.code === 'ROOM_CLOSED') return res.status(409).json({ ok: false, error: 'room_closed' });
     return res.status(500).json({ ok: false, error: 'internal_error' });
