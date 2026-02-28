@@ -657,7 +657,6 @@ export default function GameView(): JSX.Element {
   ];
   const currentTutorialStep = tutorialSteps[tutorialStepIndex] ?? null;
 
-  const myRoomMember = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
   const isMultiplayerMode = Boolean(currentRoom && currentRoomMembers.length >= 2);
   const isRoomOwner = Boolean(localTgUserId && currentRoom?.ownerTgUserId && localTgUserId === currentRoom.ownerTgUserId);
   const roomCanStart = Boolean(
