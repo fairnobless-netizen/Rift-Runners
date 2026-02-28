@@ -37,6 +37,7 @@ type Props = {
   onCloseRoom: () => Promise<void>;
   onStartRoom: () => Promise<void>;
   onToggleReady: () => Promise<void>;
+  onKickRoomMember: (targetTgUserId: string) => Promise<void>;
   onCopyInviteLink: () => Promise<void>;
   friendsLoading: boolean;
   friendsError: string | null;
@@ -78,6 +79,7 @@ export function MultiplayerModal({
   onCloseRoom,
   onStartRoom,
   onToggleReady,
+  onKickRoomMember,
   onCopyInviteLink,
   friendsLoading,
   friendsError,
@@ -103,6 +105,7 @@ export function MultiplayerModal({
   const [passwordPromptRoomCode, setPasswordPromptRoomCode] = useState<string | null>(null);
   const [passwordPromptDraft, setPasswordPromptDraft] = useState('');
   const [passwordPromptError, setPasswordPromptError] = useState<string | null>(null);
+  const [kickingTgUserId, setKickingTgUserId] = useState<string | null>(null);
   const autoJoinRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -168,6 +171,13 @@ export function MultiplayerModal({
     && (currentRoom?.phase ?? 'LOBBY') !== 'STARTED'
     && nonHostMembers.length > 0
     && nonHostMembers.every((member) => member.ready ?? false);
+  const shouldShowReadyWaitingInline = !isHost
+    && meReady
+    && (currentRoom?.phase ?? 'LOBBY') !== 'STARTED'
+    && nonHostMembers.some((member) => !(member.ready ?? false));
+  const canKickInLobby = isHost
+    && currentRoom?.status === 'OPEN'
+    && (currentRoom?.phase ?? 'LOBBY') === 'LOBBY';
 
   const filteredRooms = useMemo(() => {
     const roomsSource: PublicRoomEntry[] = publicRooms.length > 0
@@ -337,16 +347,14 @@ export function MultiplayerModal({
               {roomScreen === 'create' ? (
                 <div className="rr-room-flow">
                   <div className="rr-room-flow-head">
-                    <button type="button" className="ghost rr-room-back-button" onClick={() => setRoomScreen('home')}>Back</button>
+                    <button type="button" className="ghost rr-room-back-button" aria-label="Back" onClick={() => setRoomScreen('home')}><span aria-hidden="true">←</span></button>
                   </div>
                   <div className="rr-room-fields-row">
-                    <label className="rr-room-field">
-                      <span>Room name</span>
-                      <input type="text" value={roomNameDraft} placeholder="Room-host" onChange={(event) => setRoomNameDraft(event.target.value)} />
+                    <label className="rr-room-field rr-room-field--name">
+                      <input type="text" value={roomNameDraft} placeholder="Room name" onChange={(event) => setRoomNameDraft(event.target.value)} />
                     </label>
-                    <label className="rr-room-field">
-                      <span>Password (optional)</span>
-                      <input type="password" value={roomPasswordDraft} placeholder="Optional" onChange={(event) => setRoomPasswordDraft(event.target.value)} />
+                    <label className="rr-room-field rr-room-field--password">
+                      <input type="password" value={roomPasswordDraft} placeholder="Password (optional)" onChange={(event) => setRoomPasswordDraft(event.target.value)} />
                     </label>
                   </div>
                   {roomNameError ? <p className="rr-mp-error">{roomNameError}</p> : null}
@@ -395,7 +403,7 @@ export function MultiplayerModal({
                 <div className="rr-room-flow">
                   <div className="rr-room-flow-head">
                     <h4 className="rr-mp-section-title">Join room</h4>
-                    <button type="button" className="ghost rr-room-back-button" onClick={() => setRoomScreen('home')}>Back</button>
+                    <button type="button" className="ghost rr-room-back-button" aria-label="Back" onClick={() => setRoomScreen('home')}><span aria-hidden="true">←</span></button>
                   </div>
 
                   <div className="rr-room-join-card">
@@ -514,12 +522,17 @@ export function MultiplayerModal({
                         >
                           <strong>{slotDisabled ? 'Reserved slot' : (member?.displayName ?? 'Waiting for player')}</strong>
                           <span>{slotDisabled ? 'Not used for this room size' : (isSlotHost ? 'Host' : (member ? (isReady ? 'Ready' : 'Not ready') : 'Open slot'))}</span>
-                          {isHost && member && !isSlotHost ? (
+                          {canKickInLobby && member && !isSlotHost ? (
                             <button
                               type="button"
                               className="rr-slot-kick"
-                              disabled
-                              title="Kick is unavailable with current API"
+                              disabled={kickingTgUserId === member.tgUserId}
+                              onClick={() => {
+                                if (kickingTgUserId) return;
+                                setKickingTgUserId(member.tgUserId);
+                                void onKickRoomMember(member.tgUserId).finally(() => setKickingTgUserId((current) => (current === member.tgUserId ? null : current)));
+                              }}
+                              aria-label={`Kick ${member.displayName}`}
                             >
                               ×
                             </button>
@@ -530,9 +543,12 @@ export function MultiplayerModal({
 
                     <div className="rr-room-board-center">
                       {!isHost ? (
-                        <button type="button" className={meReady ? 'rr-ready-button-on' : ''} disabled={settingReady} onClick={() => { void onToggleReady(); }}>
-                          {settingReady ? 'Saving...' : (meReady ? 'Ready ✓' : 'Ready')}
-                        </button>
+                        <>
+                          <button type="button" className={meReady ? 'rr-ready-button-on' : ''} disabled={settingReady} onClick={() => { void onToggleReady(); }}>
+                            {settingReady ? 'Saving...' : (meReady ? 'Ready ✓' : 'Ready')}
+                          </button>
+                          {shouldShowReadyWaitingInline ? <span className="rr-room-ready-waiting">Waiting for other players to press Ready…</span> : null}
+                        </>
                       ) : (
                         <button type="button" disabled={!canStart} onClick={() => { void onStartRoom(); }}>
                           {startingRoom ? 'Starting...' : 'Start'}

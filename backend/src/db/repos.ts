@@ -1503,6 +1503,102 @@ export async function setRoomMemberReadyTx(params: {
   }
 }
 
+export async function kickRoomMemberTx(params: {
+  ownerTgUserId: string;
+  roomCode: string;
+  targetTgUserId: string;
+}): Promise<{ room: RoomRecord; members: RoomMemberRecord[] }> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const roomRes = await client.query<{ room_code: string; owner_tg_user_id: string; capacity: number; status: string; phase: string | null; started_at: string | null; started_by_tg_user_id: string | null; created_at: string }>(
+      `SELECT room_code, owner_tg_user_id, capacity, status, COALESCE(phase, 'LOBBY') AS phase, started_at, started_by_tg_user_id, created_at FROM rooms WHERE room_code = $1 FOR UPDATE`,
+      [params.roomCode],
+    );
+    const roomRow = roomRes.rows[0];
+    if (!roomRow) {
+      const error = new Error('room_not_found');
+      (error as any).code = 'ROOM_NOT_FOUND';
+      throw error;
+    }
+
+    const ownerTgUserId = String(roomRow.owner_tg_user_id);
+    if (ownerTgUserId !== params.ownerTgUserId) {
+      const error = new Error('forbidden');
+      (error as any).code = 'FORBIDDEN';
+      throw error;
+    }
+
+    if (ownerTgUserId === params.targetTgUserId) {
+      const error = new Error('forbidden');
+      (error as any).code = 'FORBIDDEN';
+      throw error;
+    }
+
+    if (String(roomRow.status) !== 'OPEN') {
+      const error = new Error('room_closed');
+      (error as any).code = 'ROOM_CLOSED';
+      throw error;
+    }
+
+    if (String(roomRow.phase ?? 'LOBBY') === 'STARTED' || roomRow.started_at != null) {
+      const error = new Error('room_started');
+      (error as any).code = 'ROOM_STARTED';
+      throw error;
+    }
+
+    const kicked = await client.query(
+      `DELETE FROM room_members WHERE room_code = $1 AND tg_user_id = $2`,
+      [params.roomCode, params.targetTgUserId],
+    );
+    if (!kicked.rowCount) {
+      const error = new Error('not_a_member');
+      (error as any).code = 'NOT_A_MEMBER';
+      throw error;
+    }
+
+    const membersRes = await client.query<{ tg_user_id: string; display_name: string; joined_at: string; ready: boolean | null }>(
+      `
+      SELECT rm.tg_user_id, u.display_name, rm.joined_at, rm.ready
+      FROM room_members rm
+      JOIN users u ON u.tg_user_id = rm.tg_user_id
+      WHERE rm.room_code = $1
+      ORDER BY rm.joined_at ASC
+      `,
+      [params.roomCode],
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      room: {
+        roomCode: String(roomRow.room_code),
+        ownerTgUserId,
+        capacity: Number(roomRow.capacity),
+        status: String(roomRow.status),
+        phase: String(roomRow.phase ?? 'LOBBY'),
+        startedAt: roomRow.started_at == null ? null : String(roomRow.started_at),
+        startedByTgUserId: roomRow.started_by_tg_user_id == null ? null : String(roomRow.started_by_tg_user_id),
+        createdAt: String(roomRow.created_at),
+      },
+      members: membersRes.rows.map((row) => ({
+        tgUserId: String(row.tg_user_id),
+        displayName: String(row.display_name ?? 'Unknown'),
+        joinedAt: String(row.joined_at),
+        ready: Boolean(row.ready ?? false),
+      })),
+    };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function startRoomTx(params: {
   ownerTgUserId: string;
   roomCode: string;
