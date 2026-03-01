@@ -391,6 +391,10 @@ export default function GameView(): JSX.Element {
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
   const [resumeModal, setResumeModal] = useState<{ open: boolean; roomCode: string; matchId: string | null } | null>(null);
   const initialSoloResumeSnapshotRef = useRef<SoloResumeSnapshotV1 | null>(loadSoloResumeSnapshot());
+  const [isSoloResumeFlow] = useState<boolean>(() => {
+    const snapshot = initialSoloResumeSnapshotRef.current;
+    return Boolean(snapshot && snapshot.campaignState.soloGameOver !== true);
+  });
   const [soloResumeModalOpen, setSoloResumeModalOpen] = useState<boolean>(() => {
     const snapshot = initialSoloResumeSnapshotRef.current;
     return Boolean(snapshot && snapshot.campaignState.soloGameOver !== true);
@@ -2759,6 +2763,7 @@ export default function GameView(): JSX.Element {
   const onSoloResumeAccept = useCallback((): void => {
     setSoloResumeModalOpen(false);
     setSoloStartReady(true);
+    setGameFlowPhase('playing');
   }, []);
 
   const onSoloResumeCancel = useCallback((): void => {
@@ -2772,6 +2777,7 @@ export default function GameView(): JSX.Element {
     }
     setSoloResumeModalOpen(false);
     setSoloStartReady(true);
+    setGameFlowPhase('playing');
   }, []);
 
   const onAcceptResumePrompt = useCallback((): void => {
@@ -3649,7 +3655,7 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {!showBootSplash && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && (
+      {!showBootSplash && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && !isSoloResumeFlow && (
         <div className="game-flow-overlay" role="status" aria-live="polite">
           {gameFlowPhase === 'intro' ? (
             <div className="intro-layer" aria-label="Rift Runners intro animation">
