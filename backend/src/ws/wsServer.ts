@@ -82,7 +82,6 @@ const STALE_CONNECTION_MS = 60_000;
 const INACTIVE_ROOM_MS = 90_000;
 const SNAPSHOT_LOGGING_ENABLED = process.env.RR_LOG_SNAPSHOT_BROADCAST === '1'; // Opt-in snapshot broadcast diagnostics
 const SNAPSHOT_LOG_SAMPLE_EVERY_TICKS = Math.max(1, Number.parseInt(process.env.RR_LOG_SNAPSHOT_BROADCAST_EVERY ?? '20', 10) || 20);
-const REJOIN_HANDSHAKE_ENABLED = process.env.RR_ENABLE_REJOIN_HANDSHAKE === '1'; // Keep handshake path behind explicit flag
 
 function shouldLogSnapshotBroadcastForTick(tick: number): boolean {
   if (!SNAPSHOT_LOGGING_ENABLED) {
@@ -628,7 +627,7 @@ function clearPendingRejoinHandshake(connectionId: string): void {
   pendingRejoinHandshakes.delete(connectionId);
 }
 
-function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchState, reason: 'ready' | 'timeout' | 'immediate'): void {
+function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchState, reason: 'ready' | 'timeout'): void {
   send(ctx.socket, {
     type: 'match:started',
     roomCode: roomId,
@@ -768,13 +767,7 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
     return;
   }
 
-  if (REJOIN_HANDSHAKE_ENABLED) {
-    beginRejoinHandshake(ctx, roomId, activeMatch);
-    return;
-  }
-
-  clearPendingRejoinHandshake(ctx.connectionId);
-  sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'immediate');
+  beginRejoinHandshake(ctx, roomId, activeMatch);
 }
 
 async function detachClientFromRoomDb(roomCode: string, tgUserId: string) {
