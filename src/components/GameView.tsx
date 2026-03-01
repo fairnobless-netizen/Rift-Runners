@@ -182,6 +182,9 @@ function mapRoomError(error?: string): string {
 const JOYSTICK_RADIUS = 56;
 const JOYSTICK_DEADZONE = 10;
 const INTRO_PLACEHOLDER_MS = 5500;
+const MP_RESUME_COUNTDOWN_START = 5;
+const MP_RESUME_COUNTDOWN_STEP_MS = 1000;
+const MP_RESUME_COUNTDOWN_FAILSAFE_MS = 7000;
 const ONBOARDING_DONE_KEY = 'rift_onboarding_v1_done';
 const MOBILE_ROTATE_OVERLAY_BREAKPOINT = 700;
 const DISPLAY_NAME_KEY = 'rr_display_name_v1';
@@ -390,6 +393,10 @@ export default function GameView(): JSX.Element {
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
   const [resumeModal, setResumeModal] = useState<{ open: boolean; roomCode: string; matchId: string | null } | null>(null);
+  const [mpResumeCountdownActive, setMpResumeCountdownActive] = useState(false);
+  const [mpResumeCountdownValue, setMpResumeCountdownValue] = useState(0);
+  const mpResumeCountdownIntervalRef = useRef<number | null>(null);
+  const mpResumeCountdownFailsafeRef = useRef<number | null>(null);
   const initialSoloResumeSnapshotRef = useRef<SoloResumeSnapshotV1 | null>(loadSoloResumeSnapshot());
   const [isSoloResumeFlow] = useState<boolean>(() => {
     const snapshot = initialSoloResumeSnapshotRef.current;
@@ -400,6 +407,39 @@ export default function GameView(): JSX.Element {
     return Boolean(snapshot && snapshot.campaignState.soloGameOver !== true);
   });
   const [soloStartReady, setSoloStartReady] = useState<boolean>(() => !soloResumeModalOpen);
+
+  const stopMpResumeCountdown = useCallback((): void => {
+    if (mpResumeCountdownIntervalRef.current != null) {
+      window.clearInterval(mpResumeCountdownIntervalRef.current);
+      mpResumeCountdownIntervalRef.current = null;
+    }
+    if (mpResumeCountdownFailsafeRef.current != null) {
+      window.clearTimeout(mpResumeCountdownFailsafeRef.current);
+      mpResumeCountdownFailsafeRef.current = null;
+    }
+    setMpResumeCountdownActive(false);
+    setMpResumeCountdownValue(0);
+  }, []);
+
+  const startMpResumeCountdown = useCallback((): void => {
+    stopMpResumeCountdown();
+    setMpResumeCountdownActive(true);
+    setMpResumeCountdownValue(MP_RESUME_COUNTDOWN_START);
+
+    mpResumeCountdownIntervalRef.current = window.setInterval(() => {
+      setMpResumeCountdownValue((prev) => {
+        if (prev <= 1) {
+          stopMpResumeCountdown();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, MP_RESUME_COUNTDOWN_STEP_MS);
+
+    mpResumeCountdownFailsafeRef.current = window.setTimeout(() => {
+      stopMpResumeCountdown();
+    }, MP_RESUME_COUNTDOWN_FAILSAFE_MS);
+  }, [stopMpResumeCountdown]);
 
   const resetResumeAttemptState = useCallback((nextPhase: RejoinPhase = 'idle'): void => {
     if (resumeLifecycleActiveRef.current) {
@@ -427,20 +467,22 @@ export default function GameView(): JSX.Element {
       clearLastSession();
     }
     resetResumeAttemptState(options?.nextPhase ?? 'rejoin_failed');
+    stopMpResumeCountdown();
     setMultiplayerUiOpen(false);
     setDeepLinkJoinCode(null);
-  }, [resetResumeAttemptState]);
+  }, [resetResumeAttemptState, stopMpResumeCountdown]);
   const cancelResumeAttemptByUser = useCallback((): void => {
     const cancellable = rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying';
     if (!resumeJoinInProgress || !cancellable) return;
 
     resetResumeAttemptState('idle');
+    stopMpResumeCountdown();
     setMultiplayerUiOpen(false);
     setDeepLinkJoinCode(null);
     if (isDebugEnabled(window.location.search)) {
       diagnosticsStore.log('ROOM', 'INFO', 'rejoin:cancelled_by_user', { phase: rejoinPhase });
     }
-  }, [rejoinPhase, resetResumeAttemptState, resumeJoinInProgress]);
+  }, [rejoinPhase, resetResumeAttemptState, resumeJoinInProgress, stopMpResumeCountdown]);
   const resetMpMatchRuntimeForNewMatch = useCallback((nextMatchId: string): void => {
     expectedMatchIdRef.current = nextMatchId;
     setCurrentMatchId(nextMatchId);
@@ -587,6 +629,8 @@ export default function GameView(): JSX.Element {
       gateReason = 'world_not_ready';
     } else if (needsNetResync) {
       gateReason = 'await_net_resync';
+    } else if (mpResumeCountdownActive) {
+      gateReason = 'resume_countdown';
     } else if ((phase !== 'STARTED' && !phaseStartedByResumeEvidence) || gameFlowPhase !== 'playing') {
       gateReason = 'phase_not_started';
     }
@@ -634,7 +678,7 @@ export default function GameView(): JSX.Element {
         expectedMatchId,
       },
     );
-  }, [currentRoom?.phase, currentRoom?.roomCode, gameFlowPhase, lastSnapshotAt, ws]);
+  }, [currentRoom?.phase, currentRoom?.roomCode, gameFlowPhase, lastSnapshotAt, mpResumeCountdownActive, ws]);
 
   const isMultiplayerDebugEnabled = isDebugEnabled(window.location.search);
   const wsDiagnostics = {
@@ -936,6 +980,18 @@ export default function GameView(): JSX.Element {
 
 
   const setMovementFromDirection = (direction: Direction | null): void => {
+    if (isMultiplayerMode && mpResumeCountdownActive) {
+      controlsRef.current.up = false;
+      controlsRef.current.down = false;
+      controlsRef.current.left = false;
+      controlsRef.current.right = false;
+      if (activeMoveDirRef.current !== null) {
+        activeMoveDirRef.current = null;
+        sendMatchMoveIntent(null);
+      }
+      return;
+    }
+
     controlsRef.current.up = direction === 'up';
     controlsRef.current.down = direction === 'down';
     controlsRef.current.left = direction === 'left';
@@ -957,6 +1013,19 @@ export default function GameView(): JSX.Element {
   const clearMovement = (): void => {
     setMovementFromDirection(null);
   };
+
+  useEffect(() => {
+    if (!mpResumeCountdownActive) return;
+    controlsRef.current.up = false;
+    controlsRef.current.down = false;
+    controlsRef.current.left = false;
+    controlsRef.current.right = false;
+    if (isMultiplayerMode && activeMoveDirRef.current !== null) {
+      activeMoveDirRef.current = null;
+      sendMatchMoveIntent(null);
+    }
+  }, [isMultiplayerMode, mpResumeCountdownActive, sendMatchMoveIntent]);
+
 
   const applyAudioSettings = useCallback((next: AudioSettings): void => {
     sceneRef.current?.setAudioSettings(next);
@@ -2758,10 +2827,11 @@ export default function GameView(): JSX.Element {
     clearLastSession();
     pendingResumeIntentRef.current = null;
     setResumeModal(null);
+    stopMpResumeCountdown();
     setGameFlowPhase('playing');
     setMultiplayerUiOpen(true);
     resetResumeAttemptState('idle');
-  }, [isMultiplayerDebugEnabled, resetResumeAttemptState, resumeModal]);
+  }, [isMultiplayerDebugEnabled, resetResumeAttemptState, resumeModal, stopMpResumeCountdown]);
 
   const onSoloResumeAccept = useCallback((): void => {
     setSoloResumeModalOpen(false);
@@ -2803,6 +2873,7 @@ export default function GameView(): JSX.Element {
     pendingResumeIntentRef.current = pendingIntent;
     resumeIntentExecutedRef.current = false;
     setResumeModal(null);
+    startMpResumeCountdown();
     setGameFlowPhase('playing');
 
     if (!ws.connected) {
@@ -2815,7 +2886,11 @@ export default function GameView(): JSX.Element {
     resumeIntentExecutedRef.current = true;
     pendingResumeIntentRef.current = null;
     void resumeRoomByCode(pendingIntent.roomCode, pendingIntent.matchId);
-  }, [isMultiplayerDebugEnabled, resumeModal, resumeRoomByCode, ws.connected]);
+  }, [isMultiplayerDebugEnabled, resumeModal, resumeRoomByCode, startMpResumeCountdown, ws.connected]);
+
+  useEffect(() => () => {
+    stopMpResumeCountdown();
+  }, [stopMpResumeCountdown]);
 
   useEffect(() => {
     if (!ws.connected) return;
@@ -3733,6 +3808,12 @@ export default function GameView(): JSX.Element {
             <p>Phase: {rejoinPhase}</p>
             <button type="button" onClick={cancelResumeAttemptByUser}>Cancel rejoin</button>
           </div>
+        </div>
+      )}
+      {gameFlowPhase === 'playing' && mpResumeCountdownActive && isMultiplayerMode && (
+        <div className="mp-resume-countdown-overlay" role="status" aria-live="polite" aria-label="Back to the game countdown">
+          <div className="mp-resume-countdown-overlay__title">Back to the game</div>
+          <div key={mpResumeCountdownValue} className="mp-resume-countdown-overlay__value">{mpResumeCountdownValue}</div>
         </div>
       )}
       {soloResumeModalOpen && !currentRoom?.roomCode && (
