@@ -3304,6 +3304,14 @@ export default function GameView(): JSX.Element {
     void loadStore();
   }, [isStoreOpen, loadStore]);
 
+  const fallbackTeamScoreFromPlayers = Object.values(multiplayerScoreByUserId).reduce(
+    (sum, value) => sum + Math.max(0, Number(value ?? 0)),
+    0,
+  );
+  const multiplayerTeamScore = typeof multiplayerSnapshotTeamScore === 'number'
+    ? Math.max(0, Number(multiplayerSnapshotTeamScore))
+    : fallbackTeamScoreFromPlayers;
+
   useEffect(() => {
     if (!leaderboardOpen) return;
     void loadLeaderboard(leaderboardMode);
@@ -3677,14 +3685,6 @@ export default function GameView(): JSX.Element {
   }, [showBootSplash, updateTgMetrics]);
 
   const bootProgressPercent = Math.round(bootSplashProgress * 100);
-
-  const fallbackTeamScoreFromPlayers = Object.values(multiplayerScoreByUserId).reduce(
-    (sum, value) => sum + Math.max(0, Number(value ?? 0)),
-    0,
-  );
-  const multiplayerTeamScore = typeof multiplayerSnapshotTeamScore === 'number'
-    ? Math.max(0, Number(multiplayerSnapshotTeamScore))
-    : fallbackTeamScoreFromPlayers;
 
   const isMultiplayerHud = currentRoomMembers.length >= 2;
   const renderHudLives = (member: RoomMember | null, ref?: Ref<HTMLSpanElement>): JSX.Element | null => {
