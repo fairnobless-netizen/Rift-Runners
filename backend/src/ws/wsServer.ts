@@ -730,7 +730,7 @@ function beginRejoinHandshake(
       return;
     }
 
-    sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'timeout');
+    sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'timeout', { sendStarted: false });
     logWsEvent('ws_rejoin_ready_timeout_fallback', {
       connectionId: ctx.connectionId,
       tgUserId: ctx.tgUserId,
@@ -1254,7 +1254,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         rejoinAttemptId: msg.rejoinAttemptId,
       });
 
-      sendRejoinSnapshotBundle(ctx, ctx.roomId, activeMatch, 'ready');
+      sendRejoinSnapshotBundle(ctx, ctx.roomId, activeMatch, 'ready', { sendStarted: false });
       return;
     }
 
