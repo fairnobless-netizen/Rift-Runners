@@ -1824,6 +1824,21 @@ export default function GameView(): JSX.Element {
     }
 
     let currentExpectedMatchId = expectedMatchIdRef.current;
+    const canAdoptResumeMatchBeforeStarted = isMultiplayerMode
+      && resumeJoinInProgress
+      && expectedRoomCode === gotRoomCode
+      && !currentExpectedMatchId
+      && Boolean(gotMatchId);
+    if (canAdoptResumeMatchBeforeStarted && gotMatchId) {
+      diagnosticsStore.log('ROOM', 'INFO', 'world_init_adopt_match_before_started', {
+        roomCode: expectedRoomCode,
+        matchId: gotMatchId,
+        resumeJoinInProgress,
+      });
+      switchToNextMatch(gotMatchId);
+      currentExpectedMatchId = gotMatchId;
+    }
+
     if (!currentExpectedMatchId) {
       const roomIsActiveMultiplayer = isMultiplayerMode
         && currentRoom?.phase === 'STARTED'
@@ -1837,15 +1852,6 @@ export default function GameView(): JSX.Element {
         switchToNextMatch(gotMatchId);
         currentExpectedMatchId = gotMatchId;
       }
-    }
-
-    if (gotMatchId && currentExpectedMatchId && gotMatchId !== currentExpectedMatchId) {
-      diagnosticsStore.log('ROOM', 'INFO', 'match_switch:from_world_init', {
-        roomCode: expectedRoomCode,
-        oldMatchId: currentExpectedMatchId,
-        newMatchId: gotMatchId,
-      });
-      switchToNextMatch(gotMatchId);
     }
 
     if (!currentExpectedMatchId && gotMatchId) {
