@@ -9,6 +9,8 @@
   --android-overlay-top: 0px;
   --android-overlay-right: 0px;
   --android-overlay-bottom: 0px;
+  --android-min-pad-top: 100px;
+  --android-min-pad-right: 72px;
   --android-inset-breathing: 20px;
   --header-h: clamp(34px, calc(46px * var(--ui-scale)), 46px);
   --shell-gap: clamp(0.35rem, 1.5vw, 0.7rem);
@@ -91,6 +93,20 @@ html.is-android .page {
   padding-right: calc(var(--tg-content-right, 0px) + var(--safe-right) + var(--android-overlay-right, 0px) + var(--android-inset-breathing, 20px));
   padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom) + var(--android-overlay-bottom, 0px));
   padding-left: calc(var(--tg-content-left, 0px) + var(--safe-left) + var(--android-inset-breathing, 20px));
+}
+
+html.is-android[data-orient="landscape"][data-device="phone"] .page,
+html.is-android[data-orient="landscape"][data-device="tablet"] .page {
+  padding-top: max(
+    calc(var(--tg-content-top, 0px) + var(--safe-top) + var(--android-overlay-top, 0px)),
+    var(--android-min-pad-top)
+  );
+  padding-right: calc(
+    max(
+      calc(var(--tg-content-right, 0px) + var(--safe-right) + var(--android-overlay-right, 0px)),
+      var(--android-min-pad-right)
+    ) + var(--android-inset-breathing, 20px)
+  );
 }
 
 .hud {

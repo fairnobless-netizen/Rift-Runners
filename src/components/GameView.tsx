@@ -793,9 +793,8 @@ export default function GameView(): JSX.Element {
     const stableHeight = tg?.viewportStableHeight ?? viewportHeight;
     const root = document.documentElement;
     const isAndroid = root.classList.contains('is-android');
-    const hasTelegramInsets = top > 0 || right > 0 || bottom > 0 || left > 0;
-    const androidOverlayTop = isAndroid && !hasTelegramInsets ? 48 : 0;
-    const androidOverlayRight = isAndroid && !hasTelegramInsets ? 40 : 0;
+    const androidOverlayTop = isAndroid ? (top < 20 ? 48 : 0) : 0;
+    const androidOverlayRight = isAndroid ? (right < 20 ? 40 : 0) : 0;
 
     root.style.setProperty('--tg-viewport-h', `${Math.floor(viewportHeight)}px`);
     root.style.setProperty('--tg-viewport-stable-h', `${Math.floor(stableHeight)}px`);
