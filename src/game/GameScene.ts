@@ -38,6 +38,7 @@ import {
 import {
   campaignStateToLevelIndex,
   computeNextCampaignState,
+  createInitialCampaignState,
   loadCampaignState,
   saveCampaignState,
   type CampaignState,
@@ -355,8 +356,8 @@ export class GameScene extends Phaser.Scene {
     this.setupCamera();
     this.remotePlayers = new RemotePlayersRenderer(this);
     this.remotePlayers.setTransform({ tileSize: GAME_CONFIG.tileSize, offsetX: 0, offsetY: 0 });
-    const initialLevelIndex = this.loadProgress();
-    this.startLevel(initialLevelIndex, true);
+    const { loaded, initialLevelIndex } = this.loadProgress();
+    this.startLevel(initialLevelIndex, loaded);
   }
 
   private ensurePolishedTextures(): void {
@@ -1020,22 +1021,36 @@ export class GameScene extends Phaser.Scene {
     return mixed === 0 ? 0x6d2b79f5 : mixed;
   }
 
-  private loadProgress(): number {
+  private loadProgress(): { loaded: boolean; initialLevelIndex: number } {
     const fallbackLevelIndex = 0;
     this.progressionUnlockedStages = new Set<number>([0]);
 
     try {
       const campaign = loadCampaignState();
       // TODO backend: merge initData campaign progress instead of localStorage
+      if (!campaign) {
+        this.campaignState = createInitialCampaignState();
+        this.stats.score = 0;
+        this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
+        this.emitCampaignState();
+        this.emitLifeState();
+        return { loaded: false, initialLevelIndex: fallbackLevelIndex };
+      }
+
       this.campaignState = campaign;
       this.stats.score = campaign.score;
       this.nextExtraLifeScore = Math.floor(this.stats.score / EXTRA_LIFE_STEP_SCORE) * EXTRA_LIFE_STEP_SCORE + EXTRA_LIFE_STEP_SCORE;
       this.progressionUnlockedStages = new Set<number>([...this.progressionUnlockedStages, campaign.stage - 1]);
       this.emitCampaignState();
       this.emitLifeState();
-      return campaignStateToLevelIndex(campaign);
+      return { loaded: true, initialLevelIndex: campaignStateToLevelIndex(campaign) };
     } catch {
-      return fallbackLevelIndex;
+      this.campaignState = createInitialCampaignState();
+      this.stats.score = 0;
+      this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
+      this.emitCampaignState();
+      this.emitLifeState();
+      return { loaded: false, initialLevelIndex: fallbackLevelIndex };
     }
   }
 
@@ -1043,6 +1058,8 @@ export class GameScene extends Phaser.Scene {
     this.campaignState = {
       ...this.campaignState,
       score: Math.max(0, Math.floor(this.stats.score)),
+      lastActiveAtMs: Date.now(),
+      soloGameOver: this.soloGameOver,
     };
     saveCampaignState(this.campaignState);
     this.emitCampaignState();
@@ -1312,10 +1329,10 @@ export class GameScene extends Phaser.Scene {
       remoteDetonateUnlocked: false,
     };
     this.campaignState = {
-      stage: 1,
-      zone: 1,
-      score: 0,
+      ...createInitialCampaignState(),
       trophies: [...this.campaignState.trophies],
+      lastActiveAtMs: Date.now(),
+      soloGameOver: false,
     };
     saveCampaignState(this.campaignState);
     this.emitCampaignState();
@@ -1334,6 +1351,8 @@ export class GameScene extends Phaser.Scene {
       ...nextCampaign,
       score: Math.max(0, Math.floor(this.stats.score)),
       trophies: [...this.campaignState.trophies],
+      lastActiveAtMs: Date.now(),
+      soloGameOver: this.soloGameOver,
     };
     saveCampaignState(this.campaignState);
     this.emitCampaignState();
