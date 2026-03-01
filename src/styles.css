@@ -2727,3 +2727,57 @@ html[data-orient="landscape"] .right-panel {
   font-weight: 800;
   letter-spacing: 0.06em;
 }
+
+.mp-resume-countdown-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 88;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 0.7rem;
+  pointer-events: auto;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  background:
+    radial-gradient(circle at 50% 34%, rgba(96, 150, 255, 0.22), transparent 48%),
+    linear-gradient(160deg, rgba(4, 10, 22, 0.8), rgba(5, 8, 18, 0.9));
+}
+
+.mp-resume-countdown-overlay__title {
+  font-size: clamp(1rem, 2.8vw, 1.55rem);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #d6e8ff;
+  text-shadow: 0 0 10px rgba(111, 210, 255, 0.9), 0 0 28px rgba(132, 152, 255, 0.55);
+}
+
+.mp-resume-countdown-overlay__value {
+  min-width: 1.4em;
+  text-align: center;
+  font-size: clamp(4.2rem, 16vw, 10rem);
+  font-weight: 900;
+  line-height: 0.85;
+  color: #f4f8ff;
+  text-shadow: 0 0 15px rgba(146, 221, 255, 0.95), 0 0 52px rgba(140, 163, 255, 0.75);
+  animation: rr-countdown-popfade 1s ease-out both;
+}
+
+@keyframes rr-countdown-popfade {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(1.12);
+    filter: blur(0px);
+  }
+
+  15% {
+    opacity: 1;
+    transform: translateY(0px) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.82);
+    filter: blur(0.6px);
+  }
+}
