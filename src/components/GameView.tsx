@@ -349,6 +349,7 @@ export default function GameView(): JSX.Element {
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
   const [multiplayerLivesByUserId, setMultiplayerLivesByUserId] = useState<Record<string, number>>({});
+  const [multiplayerScoreByUserId, setMultiplayerScoreByUserId] = useState<Record<string, number>>({});
   const [multiplayerDisconnectedByUserId, setMultiplayerDisconnectedByUserId] = useState<Record<string, boolean>>({});
   const [multiplayerColorByUserId, setMultiplayerColorByUserId] = useState<Record<string, string>>({});
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
@@ -2085,6 +2086,27 @@ export default function GameView(): JSX.Element {
       }
       return next;
     });
+    setMultiplayerScoreByUserId(() => {
+      const next: Record<string, number> = {};
+      for (const player of players) {
+        if (!player?.tgUserId) continue;
+        next[player.tgUserId] = Math.max(0, Number(player.score ?? 0));
+      }
+
+      if (isMultiplayerDebugEnabled) {
+        const localScore = localTgUserId ? next[localTgUserId] ?? 0 : null;
+        diagnosticsStore.log('MP', 'INFO', 'score:snapshot', {
+          roomCode: snapshot.roomCode ?? null,
+          matchId: snapshot.matchId ?? null,
+          tick: snapshot.tick ?? null,
+          localTgUserId: localTgUserId ?? null,
+          localScore,
+          snapshotScore: typeof snapshot.score === 'number' ? snapshot.score : null,
+        });
+      }
+
+      return next;
+    });
     setMultiplayerDisconnectedByUserId(() => {
       const next: Record<string, boolean> = {};
       for (const player of players) {
@@ -3285,8 +3307,24 @@ export default function GameView(): JSX.Element {
     lastSubmittedLeaderboardMatchIdRef.current = matchIdentity;
 
     void (async () => {
+      const multiplayerScore = localTgUserId ? (multiplayerScoreByUserId[localTgUserId] ?? 0) : 0;
+      const finalScore = activeLeaderboardMode === 'solo'
+        ? stats.score
+        : Math.max(0, Number(multiplayerScore));
+
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('MP', 'INFO', 'leaderboard:submit_attempt', {
+          activeLeaderboardMode,
+          matchIdentity,
+          roomCode: currentRoom?.roomCode ?? null,
+          currentMatchId,
+          localTgUserId: localTgUserId ?? null,
+          score: finalScore,
+        });
+      }
+
       if (activeLeaderboardMode === 'solo') {
-        const submitResult = await submitLeaderboard('solo', stats.score);
+        const submitResult = await submitLeaderboard('solo', finalScore);
         if (!submitResult) return;
         await loadLeaderboard('solo');
         return;
@@ -3299,11 +3337,11 @@ export default function GameView(): JSX.Element {
         }))
         .sort((a, b) => a.tgUserId.localeCompare(b.tgUserId));
 
-      const submitResult = await submitTeamLeaderboard(activeLeaderboardMode, stats.score, members);
+      const submitResult = await submitTeamLeaderboard(activeLeaderboardMode, finalScore, members);
       if (!submitResult) return;
       await loadLeaderboard(activeLeaderboardMode);
     })();
-  }, [activeLeaderboardMode, currentMatchId, currentRoom?.roomCode, currentRoomMembers, lifeState.gameOver, loadLeaderboard, matchEndState, stats.score]);
+  }, [activeLeaderboardMode, currentMatchId, currentRoom?.roomCode, currentRoomMembers, isMultiplayerDebugEnabled, lifeState.gameOver, loadLeaderboard, localTgUserId, matchEndState, multiplayerScoreByUserId, stats.score]);
 
   useEffect(() => {
     if (!multiplayerUiOpen) return;
@@ -3653,6 +3691,9 @@ export default function GameView(): JSX.Element {
   const hudSlots = isMultiplayerHud
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
     : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
+  const displayedScore = isMultiplayerHud
+    ? Math.max(0, Number((localTgUserId && multiplayerScoreByUserId[localTgUserId]) ?? 0))
+    : stats.score;
 
   const requestTelegramFullscreenBestEffort = async (): Promise<void> => {
     const w = window as Window & { Telegram?: { WebApp?: TelegramWebApp } };
@@ -3947,7 +3988,7 @@ export default function GameView(): JSX.Element {
               </div>
               <div className="hud-card hud-card--score">
                 <div className="hud-card__label">Score</div>
-                <div className="hud-card__value">{stats.score}</div>
+                <div className="hud-card__value">{displayedScore}</div>
               </div>
             </div>
           </div>

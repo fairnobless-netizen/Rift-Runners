@@ -182,6 +182,7 @@ export type MatchSnapshotPlayer = {
   x: number;
   y: number;
   lives?: number;
+  score?: number;
   eliminated?: boolean;
   disconnected?: boolean;
   isMoving?: boolean;
@@ -208,6 +209,7 @@ export type MatchSnapshot = {
     worldHash?: string;
     bombs?: BombSnapshot[];
   };
+  score?: number;
   players: MatchSnapshotPlayer[];
   enemies?: EnemySnapshot[];
 };

@@ -208,6 +208,7 @@ export function createMatch(roomId: string, players: string[]): MatchState {
     disconnectedPlayers: new Set<string>(),
     disconnectedAtMsByUserId: new Map<string, number>(),
     playerLives: new Map<string, number>(),
+    playerScores: new Map<string, number>(),
     eliminatedPlayers: new Set<string>(),
     bombs: new Map(),
     maxBombsPerPlayer: 1,
@@ -250,6 +251,7 @@ export function createMatch(roomId: string, players: string[]): MatchState {
       spawnY: y,
     });
     state.playerLives.set(tgUserId, 3);
+    state.playerScores.set(tgUserId, 0);
   });
 
   matches.set(matchId, state);
