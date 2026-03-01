@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, type CSSProperties, type FormEvent, type Ref } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
+import { clearSoloResumeSnapshot, loadSoloResumeSnapshot, type SoloResumeSnapshotV1 } from '../game/soloResume';
 import { GAME_CONFIG } from '../game/config';
 
 import {
@@ -389,6 +390,12 @@ export default function GameView(): JSX.Element {
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
   const [resumeModal, setResumeModal] = useState<{ open: boolean; roomCode: string; matchId: string | null } | null>(null);
+  const initialSoloResumeSnapshotRef = useRef<SoloResumeSnapshotV1 | null>(loadSoloResumeSnapshot());
+  const [soloResumeModalOpen, setSoloResumeModalOpen] = useState<boolean>(() => {
+    const snapshot = initialSoloResumeSnapshotRef.current;
+    return Boolean(snapshot && snapshot.campaignState.soloGameOver !== true);
+  });
+  const [soloStartReady, setSoloStartReady] = useState<boolean>(() => !soloResumeModalOpen);
 
   const resetResumeAttemptState = useCallback((nextPhase: RejoinPhase = 'idle'): void => {
     if (resumeLifecycleActiveRef.current) {
@@ -1295,9 +1302,9 @@ export default function GameView(): JSX.Element {
   }, [zoomBounds.max, zoomBounds.min]);
 
   useEffect(() => {
-    if (!mountRef.current) return;
+    if (!mountRef.current || !soloStartReady) return;
 
-    const scene = new GameScene(controlsRef.current);
+    const scene = new GameScene(controlsRef.current, initialSoloResumeSnapshotRef.current);
     sceneRef.current = scene;
 
     const game = new Phaser.Game({
@@ -1323,7 +1330,7 @@ export default function GameView(): JSX.Element {
       gameRef.current = null;
       sceneRef.current = null;
     };
-  }, []);
+  }, [soloStartReady]);
 
 
   useEffect(() => {
@@ -2749,6 +2756,24 @@ export default function GameView(): JSX.Element {
     resetResumeAttemptState('idle');
   }, [isMultiplayerDebugEnabled, resetResumeAttemptState, resumeModal]);
 
+  const onSoloResumeAccept = useCallback((): void => {
+    setSoloResumeModalOpen(false);
+    setSoloStartReady(true);
+  }, []);
+
+  const onSoloResumeCancel = useCallback((): void => {
+    clearSoloResumeSnapshot();
+    initialSoloResumeSnapshotRef.current = null;
+    try {
+      const campaign = loadCampaignState() ?? createInitialCampaignState();
+      saveCampaignState({ ...campaign, soloGameOver: true, lastActiveAtMs: Date.now() });
+    } catch {
+      // ignore local persistence errors
+    }
+    setSoloResumeModalOpen(false);
+    setSoloStartReady(true);
+  }, []);
+
   const onAcceptResumePrompt = useCallback((): void => {
     if (!resumeModal?.open) return;
 
@@ -3699,6 +3724,21 @@ export default function GameView(): JSX.Element {
             <button type="button" onClick={cancelResumeAttemptByUser}>Cancel rejoin</button>
           </div>
         </div>
+      )}
+      {soloResumeModalOpen && !currentRoom?.roomCode && (
+        <RROverlayModal
+          title="Resume run?"
+          tabs={[{ key: 'resume', label: 'Resume' }]}
+          activeTab="resume"
+          onTabChange={() => {}}
+          onClose={onSoloResumeCancel}
+        >
+          <div style={{ display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
+            <p style={{ margin: 0 }}>We found a recent solo snapshot from this level. Resume where you left off?</p>
+            <button type="button" onClick={onSoloResumeAccept}>Resume</button>
+            <button type="button" className="ghost" onClick={onSoloResumeCancel}>Cancel</button>
+          </div>
+        </RROverlayModal>
       )}
       {resumeModal?.open && !currentRoom?.roomCode && (
         <div
