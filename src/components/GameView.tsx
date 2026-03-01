@@ -2095,7 +2095,7 @@ export default function GameView(): JSX.Element {
 
       if (isMultiplayerDebugEnabled) {
         const localScore = localTgUserId ? next[localTgUserId] ?? 0 : null;
-        diagnosticsStore.log('MP', 'INFO', 'score:snapshot', {
+        diagnosticsStore.log('ROOM', 'INFO', 'score:snapshot', {
           roomCode: snapshot.roomCode ?? null,
           matchId: snapshot.matchId ?? null,
           tick: snapshot.tick ?? null,
@@ -3313,7 +3313,7 @@ export default function GameView(): JSX.Element {
         : Math.max(0, Number(multiplayerScore));
 
       if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('MP', 'INFO', 'leaderboard:submit_attempt', {
+        diagnosticsStore.log('ROOM', 'INFO', 'leaderboard:submit_attempt', {
           activeLeaderboardMode,
           matchIdentity,
           roomCode: currentRoom?.roomCode ?? null,
