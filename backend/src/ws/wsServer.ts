@@ -665,22 +665,18 @@ function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchSt
   });
 }
 
-function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState): void {
-  clearPendingRejoinHandshake(ctx.connectionId);
-  const rejoinAttemptId = randomUUID();
-  const createdAtMs = Date.now();
-
-  send(ctx.socket, {
-    type: 'match:started',
-    roomCode: roomId,
-    matchId: match.matchId,
-  });
-
+function sendRejoinAck(
+  ctx: ClientCtx,
+  roomId: string,
+  matchId: string,
+  rejoinAttemptId: string,
+  serverTimeMs: number,
+): void {
   send(ctx.socket, {
     type: 'mp:rejoin_ack',
     roomCode: roomId,
-    matchId: match.matchId,
-    serverTime: createdAtMs,
+    matchId,
+    serverTime: serverTimeMs,
     rejoinAttemptId,
   });
 
@@ -688,8 +684,24 @@ function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState)
     connectionId: ctx.connectionId,
     tgUserId: ctx.tgUserId,
     roomId,
-    matchId: match.matchId,
+    matchId,
     rejoinAttemptId,
+  });
+}
+
+function beginRejoinHandshake(
+  ctx: ClientCtx,
+  roomId: string,
+  match: MatchState,
+  rejoinAttemptId: string,
+  createdAtMs: number,
+): void {
+  clearPendingRejoinHandshake(ctx.connectionId);
+
+  send(ctx.socket, {
+    type: 'match:started',
+    roomCode: roomId,
+    matchId: match.matchId,
   });
 
   const timeoutId = setTimeout(() => {
@@ -771,8 +783,12 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
     return;
   }
 
+  const rejoinAttemptId = randomUUID();
+  const createdAtMs = Date.now();
+  sendRejoinAck(ctx, roomId, activeMatch.matchId, rejoinAttemptId, createdAtMs);
+
   if (REJOIN_HANDSHAKE_ENABLED) {
-    beginRejoinHandshake(ctx, roomId, activeMatch);
+    beginRejoinHandshake(ctx, roomId, activeMatch, rejoinAttemptId, createdAtMs);
     return;
   }
 
@@ -1183,7 +1199,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
       const pending = pendingRejoinHandshakes.get(ctx.connectionId);
       if (!pending) {
-        logWsEvent('ws_rejoin_ready_drop_no_pending', {
+        logWsEvent('ws_rejoin_ready_ignored_no_handshake', {
           connectionId: ctx.connectionId,
           tgUserId: ctx.tgUserId,
           roomId: ctx.roomId,
