@@ -628,20 +628,12 @@ function clearPendingRejoinHandshake(connectionId: string): void {
   pendingRejoinHandshakes.delete(connectionId);
 }
 
-function sendRejoinSnapshotBundle(
-  ctx: ClientCtx,
-  roomId: string,
-  match: MatchState,
-  reason: 'ready' | 'timeout' | 'immediate',
-  options?: { sendStarted?: boolean },
-): void {
-  if (options?.sendStarted !== false) {
-    send(ctx.socket, {
-      type: 'match:started',
-      roomCode: roomId,
-      matchId: match.matchId,
-    });
-  }
+function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchState, reason: 'ready' | 'timeout' | 'immediate'): void {
+  send(ctx.socket, {
+    type: 'match:started',
+    roomCode: roomId,
+    matchId: match.matchId,
+  });
 
   send(ctx.socket, {
     type: 'mp:rejoin_sync',
@@ -673,18 +665,22 @@ function sendRejoinSnapshotBundle(
   });
 }
 
-function sendRejoinAck(
-  ctx: ClientCtx,
-  roomId: string,
-  matchId: string,
-  rejoinAttemptId: string,
-  serverTimeMs: number,
-): void {
+function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState): void {
+  clearPendingRejoinHandshake(ctx.connectionId);
+  const rejoinAttemptId = randomUUID();
+  const createdAtMs = Date.now();
+
+  send(ctx.socket, {
+    type: 'match:started',
+    roomCode: roomId,
+    matchId: match.matchId,
+  });
+
   send(ctx.socket, {
     type: 'mp:rejoin_ack',
     roomCode: roomId,
-    matchId,
-    serverTime: serverTimeMs,
+    matchId: match.matchId,
+    serverTime: createdAtMs,
     rejoinAttemptId,
   });
 
@@ -692,24 +688,8 @@ function sendRejoinAck(
     connectionId: ctx.connectionId,
     tgUserId: ctx.tgUserId,
     roomId,
-    matchId,
-    rejoinAttemptId,
-  });
-}
-
-function beginRejoinHandshake(
-  ctx: ClientCtx,
-  roomId: string,
-  match: MatchState,
-  rejoinAttemptId: string,
-  createdAtMs: number,
-): void {
-  clearPendingRejoinHandshake(ctx.connectionId);
-
-  send(ctx.socket, {
-    type: 'match:started',
-    roomCode: roomId,
     matchId: match.matchId,
+    rejoinAttemptId,
   });
 
   const timeoutId = setTimeout(() => {
@@ -730,7 +710,7 @@ function beginRejoinHandshake(
       return;
     }
 
-    sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'timeout', { sendStarted: false });
+    sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'timeout');
     logWsEvent('ws_rejoin_ready_timeout_fallback', {
       connectionId: ctx.connectionId,
       tgUserId: ctx.tgUserId,
@@ -791,23 +771,13 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
     return;
   }
 
-  const rejoinAttemptId = randomUUID();
-  const createdAtMs = Date.now();
-
   if (REJOIN_HANDSHAKE_ENABLED) {
-    beginRejoinHandshake(ctx, roomId, activeMatch, rejoinAttemptId, createdAtMs);
-    sendRejoinAck(ctx, roomId, activeMatch.matchId, rejoinAttemptId, createdAtMs);
+    beginRejoinHandshake(ctx, roomId, activeMatch);
     return;
   }
 
   clearPendingRejoinHandshake(ctx.connectionId);
-  send(ctx.socket, {
-    type: 'match:started',
-    roomCode: roomId,
-    matchId: activeMatch.matchId,
-  });
-  sendRejoinAck(ctx, roomId, activeMatch.matchId, rejoinAttemptId, createdAtMs);
-  sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'immediate', { sendStarted: false });
+  sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'immediate');
 }
 
 async function detachClientFromRoomDb(roomCode: string, tgUserId: string) {
@@ -1213,7 +1183,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
       const pending = pendingRejoinHandshakes.get(ctx.connectionId);
       if (!pending) {
-        logWsEvent('ws_rejoin_ready_ignored_no_handshake', {
+        logWsEvent('ws_rejoin_ready_drop_no_pending', {
           connectionId: ctx.connectionId,
           tgUserId: ctx.tgUserId,
           roomId: ctx.roomId,
@@ -1254,7 +1224,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         rejoinAttemptId: msg.rejoinAttemptId,
       });
 
-      sendRejoinSnapshotBundle(ctx, ctx.roomId, activeMatch, 'ready', { sendStarted: false });
+      sendRejoinSnapshotBundle(ctx, ctx.roomId, activeMatch, 'ready');
       return;
     }
 
