@@ -29,6 +29,12 @@ type ClientCtx = {
   lastSeenMs: number; // ✅ for idle timeout
 };
 
+type InputRateLimitState = {
+  windowStartMs: number;
+  count: number;
+  dropped: number;
+};
+
 type RoomState = {
   roomId: string;
   players: Map<string, WebSocket>;
@@ -78,6 +84,10 @@ const clients = new Set<ClientCtx>();
 const restartVotes = new Map<string, RestartVoteState>();
 const roomRegistry = new RoomRegistry();
 const pendingRejoinHandshakes = new Map<string, PendingRejoinHandshake>(); // key: connectionId
+const inputRateLimitByConnectionId = new Map<string, InputRateLimitState>();
+
+const INPUT_RATE_LIMIT_PER_SECOND = 30;
+const INPUT_QUEUE_MAX_LEN = 500;
 
 const STALE_CONNECTION_MS = 60_000;
 const INACTIVE_ROOM_MS = 90_000;
@@ -226,6 +236,42 @@ function logWsEvent(evt: string, payload: Record<string, unknown>) {
       ts: Date.now(),
     }),
   );
+}
+
+function shouldAcceptInputForRateLimit(ctx: ClientCtx): boolean {
+  const nowMs = Date.now();
+  const current = inputRateLimitByConnectionId.get(ctx.connectionId);
+  const state: InputRateLimitState =
+    current ?? {
+      windowStartMs: nowMs,
+      count: 0,
+      dropped: 0,
+    };
+
+  if (nowMs - state.windowStartMs >= 1_000) {
+    state.windowStartMs = nowMs;
+    state.count = 0;
+    state.dropped = 0;
+  }
+
+  if (state.count >= INPUT_RATE_LIMIT_PER_SECOND) {
+    state.dropped += 1;
+    inputRateLimitByConnectionId.set(ctx.connectionId, state);
+    logWsEvent('ws_input_rate_limited', {
+      tgUserId: ctx.tgUserId,
+      roomId: ctx.roomId,
+      matchId: ctx.matchId,
+      windowStartMs: state.windowStartMs,
+      count: state.count,
+      limit: INPUT_RATE_LIMIT_PER_SECOND,
+      dropped: state.dropped,
+    });
+    return false;
+  }
+
+  state.count += 1;
+  inputRateLimitByConnectionId.set(ctx.connectionId, state);
+  return true;
 }
 
 function isSocketAttachedToRoom(ctx: ClientCtx, room: RoomState): boolean {
@@ -1322,6 +1368,21 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         const dir = payload.dir;
         if (dir !== null && dir !== 'up' && dir !== 'down' && dir !== 'left' && dir !== 'right') return;
 
+        if (!shouldAcceptInputForRateLimit(ctx)) {
+          return;
+        }
+
+        if (match.inputQueue.length >= INPUT_QUEUE_MAX_LEN) {
+          logWsEvent('ws_input_queue_overflow', {
+            roomId: ctx.roomId,
+            matchId: match.matchId,
+            queueLen: match.inputQueue.length,
+            maxQueueLen: INPUT_QUEUE_MAX_LEN,
+            tgUserId: ctx.tgUserId,
+          });
+          return;
+        }
+
         match.inputQueue.push({
           tgUserId: ctx.tgUserId,
           seq,
@@ -1574,6 +1635,7 @@ export function registerWsHandlers(wss: WebSocketServer) {
 
           logWsEvent('ws_player_disconnect', { tgUserId, roomId: roomCode });
           detachClientFromRoom(ctx, 'disconnect');
+          inputRateLimitByConnectionId.delete(ctx.connectionId);
           clients.delete(ctx);
         });
       } catch (error) {
