@@ -350,6 +350,7 @@ export default function GameView(): JSX.Element {
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
   const [multiplayerLivesByUserId, setMultiplayerLivesByUserId] = useState<Record<string, number>>({});
   const [multiplayerScoreByUserId, setMultiplayerScoreByUserId] = useState<Record<string, number>>({});
+  const [multiplayerSnapshotTeamScore, setMultiplayerSnapshotTeamScore] = useState<number | null>(null);
   const [multiplayerDisconnectedByUserId, setMultiplayerDisconnectedByUserId] = useState<Record<string, boolean>>({});
   const [multiplayerColorByUserId, setMultiplayerColorByUserId] = useState<Record<string, string>>({});
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
@@ -1459,6 +1460,8 @@ export default function GameView(): JSX.Element {
       setWrongMatchDrops(0);
       setDuplicateTickDrops(0);
       setMultiplayerLivesByUserId({});
+      setMultiplayerScoreByUserId({});
+      setMultiplayerSnapshotTeamScore(null);
       setMultiplayerDisconnectedByUserId({});
       setLastWorldInitAt(null);
       setLastSnapshotAt(null);
@@ -1490,6 +1493,8 @@ export default function GameView(): JSX.Element {
     lastAppliedSnapshotTickRef.current = null;
     setCurrentMatchId(null);
     setMultiplayerLivesByUserId({});
+    setMultiplayerScoreByUserId({});
+    setMultiplayerSnapshotTeamScore(null);
     setMultiplayerDisconnectedByUserId({});
     handledMatchEventIdsRef.current.clear();
   }, [currentRoom?.roomCode]);
@@ -1505,6 +1510,8 @@ export default function GameView(): JSX.Element {
       lastAppliedSnapshotTickRef.current = null;
       setCurrentMatchId(null);
       setMultiplayerLivesByUserId({});
+      setMultiplayerScoreByUserId({});
+      setMultiplayerSnapshotTeamScore(null);
       setMultiplayerDisconnectedByUserId({});
       handledMatchEventIdsRef.current.clear();
       rejoinAttemptIdRef.current = null;
@@ -2093,6 +2100,15 @@ export default function GameView(): JSX.Element {
         next[player.tgUserId] = Math.max(0, Number(player.score ?? 0));
       }
 
+      const fallbackTeamScore = Object.values(next).reduce(
+        (sum, value) => sum + Math.max(0, Number(value ?? 0)),
+        0,
+      );
+      const snapshotTeamScore = typeof snapshot.score === 'number'
+        ? Math.max(0, Number(snapshot.score))
+        : fallbackTeamScore;
+      setMultiplayerSnapshotTeamScore(snapshotTeamScore);
+
       if (isMultiplayerDebugEnabled) {
         const localScore = localTgUserId ? next[localTgUserId] ?? 0 : null;
         diagnosticsStore.log('ROOM', 'INFO', 'score:snapshot', {
@@ -2101,6 +2117,7 @@ export default function GameView(): JSX.Element {
           tick: snapshot.tick ?? null,
           localTgUserId: localTgUserId ?? null,
           localScore,
+          teamScore: snapshotTeamScore,
           snapshotScore: typeof snapshot.score === 'number' ? snapshot.score : null,
         });
       }
@@ -3007,6 +3024,8 @@ export default function GameView(): JSX.Element {
     setCurrentRoomMembers([]);
     setCurrentMatchId(null);
     setMultiplayerLivesByUserId({});
+    setMultiplayerScoreByUserId({});
+    setMultiplayerSnapshotTeamScore(null);
     setMultiplayerDisconnectedByUserId({});
     setRestartVote(null);
     setMatchEndState(null);
@@ -3307,10 +3326,9 @@ export default function GameView(): JSX.Element {
     lastSubmittedLeaderboardMatchIdRef.current = matchIdentity;
 
     void (async () => {
-      const multiplayerScore = localTgUserId ? (multiplayerScoreByUserId[localTgUserId] ?? 0) : 0;
       const finalScore = activeLeaderboardMode === 'solo'
         ? stats.score
-        : Math.max(0, Number(multiplayerScore));
+        : multiplayerTeamScore;
 
       if (isMultiplayerDebugEnabled) {
         diagnosticsStore.log('ROOM', 'INFO', 'leaderboard:submit_attempt', {
@@ -3319,6 +3337,7 @@ export default function GameView(): JSX.Element {
           roomCode: currentRoom?.roomCode ?? null,
           currentMatchId,
           localTgUserId: localTgUserId ?? null,
+          teamScore: multiplayerTeamScore,
           score: finalScore,
         });
       }
@@ -3341,7 +3360,7 @@ export default function GameView(): JSX.Element {
       if (!submitResult) return;
       await loadLeaderboard(activeLeaderboardMode);
     })();
-  }, [activeLeaderboardMode, currentMatchId, currentRoom?.roomCode, currentRoomMembers, isMultiplayerDebugEnabled, lifeState.gameOver, loadLeaderboard, localTgUserId, matchEndState, multiplayerScoreByUserId, stats.score]);
+  }, [activeLeaderboardMode, currentMatchId, currentRoom?.roomCode, currentRoomMembers, isMultiplayerDebugEnabled, lifeState.gameOver, loadLeaderboard, localTgUserId, matchEndState, multiplayerTeamScore, stats.score]);
 
   useEffect(() => {
     if (!multiplayerUiOpen) return;
@@ -3659,6 +3678,14 @@ export default function GameView(): JSX.Element {
 
   const bootProgressPercent = Math.round(bootSplashProgress * 100);
 
+  const fallbackTeamScoreFromPlayers = Object.values(multiplayerScoreByUserId).reduce(
+    (sum, value) => sum + Math.max(0, Number(value ?? 0)),
+    0,
+  );
+  const multiplayerTeamScore = typeof multiplayerSnapshotTeamScore === 'number'
+    ? Math.max(0, Number(multiplayerSnapshotTeamScore))
+    : fallbackTeamScoreFromPlayers;
+
   const isMultiplayerHud = currentRoomMembers.length >= 2;
   const renderHudLives = (member: RoomMember | null, ref?: Ref<HTMLSpanElement>): JSX.Element | null => {
     if (!member) return null;
@@ -3692,7 +3719,7 @@ export default function GameView(): JSX.Element {
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
     : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
   const displayedScore = isMultiplayerHud
-    ? Math.max(0, Number((localTgUserId && multiplayerScoreByUserId[localTgUserId]) ?? 0))
+    ? multiplayerTeamScore
     : stats.score;
 
   const requestTelegramFullscreenBestEffort = async (): Promise<void> => {

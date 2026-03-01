@@ -219,6 +219,10 @@ function isSocketAttachedToRoom(ctx: ClientCtx, room: RoomState): boolean {
   return room.players.get(ctx.tgUserId) === ctx.socket;
 }
 
+function getTeamScore(match: MatchState): number {
+  return Array.from(match.playerScores.values()).reduce((sum, value) => sum + Math.max(0, Number(value ?? 0)), 0);
+}
+
 function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, { type: 'match:snapshot' }>['snapshot'] {
   const now = Date.now();
   return {
@@ -241,7 +245,7 @@ function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, 
         explodeAtTick: bomb.explodeAtTick,
       })),
     },
-    score: Array.from(match.playerScores.values()).reduce((max, value) => Math.max(max, value), 0),
+    score: getTeamScore(match),
     players: Array.from(match.players.values()).map((player) => ({
       tgUserId: player.tgUserId,
       displayName: player.displayName,
