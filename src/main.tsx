@@ -21,14 +21,20 @@ function bootstrapAndroidViewportFix() {
   const syncSafeInsets = (): void => {
     const vv = window.visualViewport;
     if (!vv) {
+      root.style.setProperty('--safe-top', '0px');
+      root.style.setProperty('--safe-bottom', '0px');
       root.style.setProperty('--safe-left', '0px');
       root.style.setProperty('--safe-right', '0px');
       return;
     }
 
+    const safeTop = clampInset(vv.offsetTop);
+    const safeBottom = clampInset(window.innerHeight - (vv.offsetTop + vv.height));
     const safeLeft = clampInset(vv.offsetLeft);
     const safeRight = clampInset(window.innerWidth - (vv.offsetLeft + vv.width));
 
+    root.style.setProperty('--safe-top', `${safeTop}px`);
+    root.style.setProperty('--safe-bottom', `${safeBottom}px`);
     root.style.setProperty('--safe-left', `${safeLeft}px`);
     root.style.setProperty('--safe-right', `${safeRight}px`);
   };
