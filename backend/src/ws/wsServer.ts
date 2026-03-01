@@ -1529,52 +1529,61 @@ export function registerWsHandlers(wss: WebSocketServer) {
     const url = new URL(req.url ?? '/', 'http://localhost');
 
     void (async () => {
-      const authResult = await authenticateWsConnection(req, url);
-      if (!authResult.ok) {
-        logWsEvent('ws_auth_failed', {
-          reason: authResult.reason,
-          hasCredential: authResult.hasCredential,
-        });
-        socket.close(4401, 'ws_auth_failed');
-        return;
-      }
-
-      const ctx: ClientCtx = {
-        connectionId: randomUUID(),
-        socket,
-        tgUserId: authResult.tgUserId,
-        roomId: null,
-        matchId: null,
-        lastSeenMs: Date.now(),
-      };
-      clients.add(ctx);
-
-      logWsEvent('ws_auth_ok', {
-        tgUserId: authResult.tgUserId,
-        mode: authResult.mode,
-      });
-
-      send(socket, { type: 'connected' });
-
-      socket.on('message', (raw) => {
-        const msg = parseMessage(raw);
-        if (!msg) {
-          send(socket, { type: 'match:error', error: 'invalid_message' });
+      try {
+        const authResult = await authenticateWsConnection(req, url);
+        if (!authResult.ok) {
+          logWsEvent('ws_auth_failed', {
+            reason: authResult.reason,
+            hasCredential: authResult.hasCredential,
+          });
+          socket.close(4401, 'ws_auth_failed');
           return;
         }
-        ctx.lastSeenMs = Date.now();
-        roomRegistry.heartbeat(ctx.connectionId, ctx.lastSeenMs);
-        void handleMessage(ctx, msg);
-      });
 
-      socket.on('close', () => {
-        const roomCode = ctx.roomId;
-        const tgUserId = ctx.tgUserId;
+        const ctx: ClientCtx = {
+          connectionId: randomUUID(),
+          socket,
+          tgUserId: authResult.tgUserId,
+          roomId: null,
+          matchId: null,
+          lastSeenMs: Date.now(),
+        };
+        clients.add(ctx);
 
-        logWsEvent('ws_player_disconnect', { tgUserId, roomId: roomCode });
-        detachClientFromRoom(ctx, 'disconnect');
-        clients.delete(ctx);
-      });
+        logWsEvent('ws_auth_ok', {
+          tgUserId: authResult.tgUserId,
+          mode: authResult.mode,
+        });
+
+        send(socket, { type: 'connected' });
+
+        socket.on('message', (raw) => {
+          const msg = parseMessage(raw);
+          if (!msg) {
+            send(socket, { type: 'match:error', error: 'invalid_message' });
+            return;
+          }
+          ctx.lastSeenMs = Date.now();
+          roomRegistry.heartbeat(ctx.connectionId, ctx.lastSeenMs);
+          void handleMessage(ctx, msg);
+        });
+
+        socket.on('close', () => {
+          const roomCode = ctx.roomId;
+          const tgUserId = ctx.tgUserId;
+
+          logWsEvent('ws_player_disconnect', { tgUserId, roomId: roomCode });
+          detachClientFromRoom(ctx, 'disconnect');
+          clients.delete(ctx);
+        });
+      } catch (error) {
+        logWsEvent('ws_auth_error', {
+          reason: 'internal_error',
+          error: error instanceof Error ? error.message : String(error),
+        });
+        socket.close(4500, 'ws_auth_error');
+        return;
+      }
     })();
   });
 }
