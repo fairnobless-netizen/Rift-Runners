@@ -4,6 +4,27 @@ import App from './App';
 import { getDebugState } from './debug/debugFlags';
 import './styles.css';
 
+function isAndroidRuntime(): boolean {
+  return /Android/i.test(window.navigator.userAgent);
+}
+
+function bootstrapAndroidViewportFix() {
+  if (!isAndroidRuntime()) {
+    return;
+  }
+
+  const root = document.documentElement;
+  root.classList.add('is-android');
+
+  const syncViewportHeight = (): void => {
+    root.style.setProperty('--app-vh', `${window.innerHeight * 0.01}px`);
+  };
+
+  syncViewportHeight();
+  window.addEventListener('resize', syncViewportHeight);
+  window.addEventListener('orientationchange', syncViewportHeight);
+}
+
 function bootstrapDebugFlags() {
   const debugState = getDebugState(window.location.search);
   if (!debugState.enabled) return;
@@ -22,6 +43,7 @@ if ((window as any).Telegram?.WebApp) {
 }
 
 bootstrapDebugFlags();
+bootstrapAndroidViewportFix();
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
