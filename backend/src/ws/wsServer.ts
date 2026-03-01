@@ -241,6 +241,7 @@ function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, 
         explodeAtTick: bomb.explodeAtTick,
       })),
     },
+    score: Array.from(match.playerScores.values()).reduce((max, value) => Math.max(max, value), 0),
     players: Array.from(match.players.values()).map((player) => ({
       tgUserId: player.tgUserId,
       displayName: player.displayName,
@@ -259,6 +260,7 @@ function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, 
       moveStartServerTimeMs: now,
       moveDurationMs: 0,
       lives: match.playerLives.get(player.tgUserId) ?? 0,
+      score: match.playerScores.get(player.tgUserId) ?? 0,
       eliminated: match.eliminatedPlayers.has(player.tgUserId),
       disconnected: match.disconnectedPlayers.has(player.tgUserId),
     })),
@@ -883,6 +885,12 @@ async function startMatchInRoom(room: RoomState): Promise<void> {
       broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
 
       if (event.type === 'match:end') {
+        logWsEvent('ws_match_end_scores', {
+          roomId: activeRoom.roomId,
+          matchId: event.matchId,
+          scores: Array.from(match.playerScores.entries()).map(([tgUserId, score]) => ({ tgUserId, score })),
+        });
+
         endMatch(event.matchId);
         activeRoom.matchId = null;
         clearRestartVote(activeRoom.roomId);
