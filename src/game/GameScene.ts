@@ -41,8 +41,14 @@ import {
   createInitialCampaignState,
   loadCampaignState,
   saveCampaignState,
+  SOLO_RESUME_WINDOW_MS,
   type CampaignState,
 } from './campaign';
+import {
+  clearSoloResumeSnapshot,
+  saveSoloResumeSnapshot,
+  type SoloResumeSnapshotV1,
+} from './soloResume';
 import {
   DOOR_REVEALED,
   PREBOSS_DOOR_REVEALED,
@@ -109,6 +115,18 @@ const MP_MOVE_TICK_MS_ENEMY = 1000 / 20;
 const PLAYER_SILHOUETTE_TEXTURE_KEYS = ['rr_player_a', 'rr_player_b', 'rr_player_c', 'rr_player_d'] as const;
 const ENEMY_HIT_SHAKE_COOLDOWN_MS = 80;
 const PLAYER_HIT_FEEDBACK_COOLDOWN_MS = 240;
+const TILE_TO_CODE: Record<TileType, number> = {
+  Floor: 0,
+  HardWall: 1,
+  BreakableBlock: 2,
+  ANOMALOUS_STONE: 3,
+};
+const CODE_TO_TILE: Record<number, TileType> = {
+  0: 'Floor',
+  1: 'HardWall',
+  2: 'BreakableBlock',
+  3: 'ANOMALOUS_STONE',
+};
 type PlayerSilhouetteTextureKey = typeof PLAYER_SILHOUETTE_TEXTURE_KEYS[number];
 
 function hashStringFNV1a(value: string): number {
@@ -174,7 +192,10 @@ export class GameScene extends Phaser.Scene {
   private multiplayerEliminated = false;
   private multiplayerRespawning = false;
   private readonly baseSeed = 0x52494654;
-  private readonly runId = 1;
+  private runSeed = 1;
+  private pendingSoloResumeSnapshot: SoloResumeSnapshotV1 | null = null;
+  private soloSnapshotSaveTimer: number | null = null;
+  private lastSoloSnapshotPersistAtMs = 0;
   private rng: DeterministicRng = createDeterministicRng(this.baseSeed);
   private simulationTick = 0;
   private lastSnapshotTick = -1;
@@ -309,9 +330,10 @@ export class GameScene extends Phaser.Scene {
   private cameraFollowThresholdZoom: number = GAME_CONFIG.minZoom;
   private isCameraFollowingPlayer = false;
 
-  constructor(controls: ControlsState) {
+  constructor(controls: ControlsState, soloResumeSnapshot?: SoloResumeSnapshotV1 | null) {
     super('GameScene');
     this.controls = controls;
+    this.pendingSoloResumeSnapshot = soloResumeSnapshot ?? null;
   }
 
   preload(): void {
@@ -356,8 +378,14 @@ export class GameScene extends Phaser.Scene {
     this.setupCamera();
     this.remotePlayers = new RemotePlayersRenderer(this);
     this.remotePlayers.setTransform({ tileSize: GAME_CONFIG.tileSize, offsetX: 0, offsetY: 0 });
-    const { loaded, initialLevelIndex } = this.loadProgress();
-    this.startLevel(initialLevelIndex, loaded);
+    this.setupSoloResumeLifecycleHooks();
+    const restored = this.tryRestoreFromPendingSoloSnapshot();
+    if (!restored) {
+      const { loaded, initialLevelIndex } = this.loadProgress();
+      this.runSeed = this.generateRunSeed();
+      this.startLevel(initialLevelIndex, loaded);
+      this.persistSoloResumeSnapshot('fresh_start');
+    }
   }
 
   private ensurePolishedTextures(): void {
@@ -888,6 +916,7 @@ export class GameScene extends Phaser.Scene {
       this.doorController.update(time, this.isLevelCleared);
     }
     this.updateDoorVisual(time);
+    this.persistSoloResumeSnapshot('tick');
   }
 
   private fixedUpdate(): void {
@@ -974,6 +1003,14 @@ export class GameScene extends Phaser.Scene {
 
   private onSceneShutdown(): void {
     this.scale.off('resize', this.onScaleResize, this);
+    if (this.soloSnapshotSaveTimer !== null) {
+      window.clearTimeout(this.soloSnapshotSaveTimer);
+      this.soloSnapshotSaveTimer = null;
+    }
+    document.removeEventListener('visibilitychange', this.onDocumentVisibilityChange);
+    window.removeEventListener('pagehide', this.onPageHide);
+    window.removeEventListener('beforeunload', this.onBeforeUnload);
+    this.persistSoloResumeSnapshot('scene_shutdown', true);
   }
 
   private getLevelProgressModel(): LevelProgressModel {
@@ -1017,8 +1054,241 @@ export class GameScene extends Phaser.Scene {
   }
 
   private mixLevelSeed(levelIndex: number): number {
-    const mixed = (this.baseSeed ^ Math.imul(levelIndex + 1, 0x9e3779b1) ^ Math.imul(this.runId, 0x85ebca6b)) >>> 0;
+    const mixed = (this.baseSeed ^ Math.imul(levelIndex + 1, 0x9e3779b1) ^ Math.imul(this.runSeed, 0x85ebca6b)) >>> 0;
     return mixed === 0 ? 0x6d2b79f5 : mixed;
+  }
+
+  private generateRunSeed(): number {
+    try {
+      const randomSeed = window.crypto?.getRandomValues?.(new Uint32Array(1))[0] ?? 0;
+      if (randomSeed !== 0) return randomSeed >>> 0;
+    } catch {
+      // fallback below
+    }
+    const randomPart = Math.floor(Math.random() * 0xffffffff) >>> 0;
+    const mixed = ((Date.now() >>> 0) ^ randomPart ^ 0xa5a5a5a5) >>> 0;
+    return mixed === 0 ? 0x6d2b79f5 : mixed;
+  }
+
+
+  private setupSoloResumeLifecycleHooks(): void {
+    document.addEventListener('visibilitychange', this.onDocumentVisibilityChange);
+    window.addEventListener('pagehide', this.onPageHide);
+    window.addEventListener('beforeunload', this.onBeforeUnload);
+  }
+
+  private onDocumentVisibilityChange = (): void => {
+    if (document.visibilityState === 'hidden') {
+      this.persistSoloResumeSnapshot('visibility_hidden', true);
+    }
+  };
+
+  private onPageHide = (): void => {
+    this.persistSoloResumeSnapshot('pagehide', true);
+  };
+
+  private onBeforeUnload = (): void => {
+    this.persistSoloResumeSnapshot('beforeunload', true);
+  };
+
+  private buildSoloResumeSnapshot(): SoloResumeSnapshotV1 | null {
+    if (this.gameMode !== 'solo' || this.soloGameOver) return null;
+    const tiles: number[] = [];
+    for (let y = 0; y < this.arena.height; y += 1) {
+      for (let x = 0; x < this.arena.width; x += 1) {
+        const code = TILE_TO_CODE[this.arena.tiles[y]?.[x] ?? 'Floor'];
+        tiles.push(code ?? 0);
+      }
+    }
+
+    const enemies = [...this.enemies.values()].map((enemy) => ({
+      kind: enemy.kind,
+      x: enemy.gridX,
+      y: enemy.gridY,
+      hp: enemy.hp,
+    }));
+
+    return {
+      version: 1,
+      savedAtMs: Date.now(),
+      levelIndex: this.levelIndex,
+      runSeed: this.runSeed >>> 0,
+      lives: this.lives,
+      stats: {
+        score: Math.max(0, Math.floor(this.stats.score)),
+        capacity: this.stats.capacity,
+        range: this.stats.range,
+        remoteDetonateUnlocked: this.stats.remoteDetonateUnlocked,
+      },
+      player: { x: this.player.gridX, y: this.player.gridY },
+      arena: { width: this.arena.width, height: this.arena.height, tiles },
+      enemies,
+      door: { revealed: this.doorRevealed, entered: this.doorEntered, cell: this.hiddenDoorCell ?? null },
+      campaignState: {
+        stage: this.campaignState.stage,
+        zone: this.campaignState.zone,
+        trophies: [...this.campaignState.trophies],
+        score: Math.max(0, Math.floor(this.stats.score)),
+        soloGameOver: this.soloGameOver,
+        lastActiveAtMs: Date.now(),
+      },
+    };
+  }
+
+  private persistSoloResumeSnapshot(_reason: string, force = false): void {
+    if (this.gameMode !== 'solo') return;
+    const now = Date.now();
+    const delayMs = 700;
+    if (!force && now - this.lastSoloSnapshotPersistAtMs < delayMs) {
+      if (this.soloSnapshotSaveTimer !== null) return;
+      this.soloSnapshotSaveTimer = window.setTimeout(() => {
+        this.soloSnapshotSaveTimer = null;
+        this.persistSoloResumeSnapshot('debounced_flush', true);
+      }, delayMs);
+      return;
+    }
+
+    const snapshot = this.buildSoloResumeSnapshot();
+    if (!snapshot) {
+      clearSoloResumeSnapshot();
+      return;
+    }
+    this.lastSoloSnapshotPersistAtMs = now;
+    saveSoloResumeSnapshot(snapshot);
+  }
+
+  private tryRestoreFromPendingSoloSnapshot(): boolean {
+    const snapshot = this.pendingSoloResumeSnapshot;
+    this.pendingSoloResumeSnapshot = null;
+    if (!snapshot) return false;
+    if (snapshot.campaignState.soloGameOver === true) {
+      clearSoloResumeSnapshot();
+      return false;
+    }
+    if (Date.now() - snapshot.savedAtMs > SOLO_RESUME_WINDOW_MS) {
+      clearSoloResumeSnapshot();
+      return false;
+    }
+    try {
+      this.restoreFromSoloResumeSnapshot(snapshot);
+      this.persistSoloResumeSnapshot('restore');
+      return true;
+    } catch {
+      clearSoloResumeSnapshot();
+      return false;
+    }
+  }
+
+  private restoreFromSoloResumeSnapshot(snapshot: SoloResumeSnapshotV1): void {
+    this.gameMode = 'solo';
+    this.awaitingSoloContinue = false;
+    this.soloGameOver = false;
+    this.multiplayerEliminated = false;
+    this.multiplayerRespawning = false;
+    this.playerSprite?.setVisible(true);
+
+    this.runSeed = snapshot.runSeed >>> 0;
+    this.levelIndex = Math.max(0, Math.floor(snapshot.levelIndex));
+    this.zoneIndex = Math.floor(this.levelIndex / LEVELS_PER_ZONE);
+    this.levelInZone = this.levelIndex % LEVELS_PER_ZONE;
+    this.isBossLevel = this.bossController.isBossLevel(this.levelIndex);
+
+    const width = Math.max(1, Math.floor(snapshot.arena.width));
+    const height = Math.max(1, Math.floor(snapshot.arena.height));
+    const tiles2d: TileType[][] = [];
+    for (let y = 0; y < height; y += 1) {
+      const row: TileType[] = [];
+      for (let x = 0; x < width; x += 1) {
+        const idx = y * width + x;
+        row.push(CODE_TO_TILE[snapshot.arena.tiles[idx]] ?? 'Floor');
+      }
+      tiles2d.push(row);
+    }
+
+    this.rng = createDeterministicRng(this.mixLevelSeed(this.levelIndex));
+    this.arena = {
+      tiles: tiles2d,
+      bombs: new Map(),
+      items: new Map(),
+      hiddenDoorKey: snapshot.door.cell ? toKey(snapshot.door.cell.x, snapshot.door.cell.y) : toKey(1, 1),
+      isSpawnCell: (x: number, y: number) => new Set(['1,1', '1,2', '2,1', '2,2']).has(toKey(x, y)),
+      width,
+      height,
+    };
+
+    this.hiddenDoorCell = snapshot.door.cell ?? undefined;
+    this.doorRevealed = Boolean(snapshot.door.revealed);
+    this.doorEntered = Boolean(snapshot.door.entered);
+    this.isLevelCleared = this.doorEntered;
+    this.doorEnterStartedAt = null;
+    this.waveSequence = 0;
+    this.enemySequence = snapshot.enemies.length;
+    this.pickupsSpawnedThisLevel = 0;
+    this.bossAnchorKey = null;
+    this.doorController.reset();
+    this.clearDynamicSprites();
+
+    this.enemies.clear();
+    this.enemyNextMoveAt.clear();
+    for (let i = 0; i < snapshot.enemies.length; i += 1) {
+      const source = snapshot.enemies[i];
+      const key = `enemy-resume-${this.levelIndex}-${i}-${source.x}-${source.y}`;
+      const moveIntervalMs = this.getScaledEnemyMoveInterval(source.kind);
+      this.enemies.set(key, {
+        key,
+        gridX: source.x,
+        gridY: source.y,
+        moveFromX: source.x,
+        moveFromY: source.y,
+        targetX: source.x,
+        targetY: source.y,
+        moveStartedAtMs: 0,
+        moveDurationMs: moveIntervalMs,
+        isMoving: false,
+        facing: 'left',
+        state: 'idle',
+        kind: source.kind,
+        moveIntervalMs,
+        hp: Math.max(1, source.hp ?? (source.kind === 'tank' ? 2 : 1)),
+      });
+      this.enemyNextMoveAt.set(key, this.time.now);
+    }
+
+    this.lives = Math.max(0, Math.floor(snapshot.lives));
+    this.nextExtraLifeScore = Math.floor(Math.max(0, snapshot.stats.score) / EXTRA_LIFE_STEP_SCORE) * EXTRA_LIFE_STEP_SCORE + EXTRA_LIFE_STEP_SCORE;
+    this.stats = {
+      capacity: Math.max(1, Math.floor(snapshot.stats.capacity)),
+      placed: 0,
+      range: Math.max(1, Math.floor(snapshot.stats.range)),
+      score: Math.max(0, Math.floor(snapshot.stats.score)),
+      lives: this.lives,
+      remoteDetonateUnlocked: Boolean(snapshot.stats.remoteDetonateUnlocked),
+    };
+
+    this.campaignState = {
+      stage: snapshot.campaignState.stage,
+      zone: snapshot.campaignState.zone,
+      score: Math.max(0, Math.floor(snapshot.campaignState.score)),
+      trophies: [...snapshot.campaignState.trophies],
+      lastActiveAtMs: Date.now(),
+      soloGameOver: false,
+    };
+    saveCampaignState(this.campaignState);
+
+    this.simulationTick = 0;
+    this.accumulator = 0;
+    this.localInputQueue.length = 0;
+    this.activeFlames.clear();
+
+    this.rebuildArenaTiles();
+    this.syncCameraBoundsToArena();
+    this.spawnPlayer(snapshot.player.x, snapshot.player.y);
+    this.playerSprite?.setVisible(true);
+    this.bossController.reset({ arena: this.arena, isBossLevel: this.isBossLevel, playerCount: 1 });
+    emitStats(this.stats);
+    this.emitLifeState();
+    this.emitCampaignState();
+    this.updateCameraFollowMode();
   }
 
   private loadProgress(): { loaded: boolean; initialLevelIndex: number } {
@@ -1063,6 +1333,7 @@ export class GameScene extends Phaser.Scene {
     };
     saveCampaignState(this.campaignState);
     this.emitCampaignState();
+    this.persistSoloResumeSnapshot('campaign_sync');
   }
 
   private getShuffledEnemySpawnCells(levelIndex: number = this.levelIndex): Array<{ x: number; y: number }> {
@@ -1147,6 +1418,7 @@ export class GameScene extends Phaser.Scene {
       ...this.getLevelProgressModel(),
       hiddenDoorKey: this.getHiddenDoorKey(),
     });
+    this.persistSoloResumeSnapshot('level_started');
   }
 
   private assignHiddenDoorCellForPvE(): void {
@@ -1308,6 +1580,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnPlayer();
     this.playerSprite?.setVisible(true);
     this.emitLifeState();
+    this.persistSoloResumeSnapshot('continue_solo');
   }
 
   public restartSoloRun(): void {
@@ -1318,6 +1591,8 @@ export class GameScene extends Phaser.Scene {
     this.multiplayerEliminated = false;
     this.multiplayerRespawning = false;
     this.playerSprite?.setVisible(true);
+    clearSoloResumeSnapshot();
+    this.runSeed = this.generateRunSeed();
     this.lives = INITIAL_LIVES;
     this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
     this.stats = {
@@ -1336,6 +1611,7 @@ export class GameScene extends Phaser.Scene {
     };
     saveCampaignState(this.campaignState);
     this.emitCampaignState();
+    this.persistSoloResumeSnapshot('campaign_sync');
     emitStats(this.stats);
     this.emitLifeState();
     this.startLevel(0, false);
@@ -1356,6 +1632,7 @@ export class GameScene extends Phaser.Scene {
     };
     saveCampaignState(this.campaignState);
     this.emitCampaignState();
+    this.persistSoloResumeSnapshot('campaign_sync');
     this.progressionUnlockedStages.add(this.campaignState.stage - 1);
 
     const nextLevelIndex = campaignStateToLevelIndex(this.campaignState);
@@ -1473,13 +1750,15 @@ export class GameScene extends Phaser.Scene {
         return scaleMovementDurationMs(baseInterval);
     }
   }
-  private spawnPlayer(): void {
-    this.player.gridX = 1;
-    this.player.gridY = 1;
+  private spawnPlayer(forcedX?: number, forcedY?: number): void {
+    const spawnX = forcedX ?? 1;
+    const spawnY = forcedY ?? 1;
+    this.player.gridX = spawnX;
+    this.player.gridY = spawnY;
     this.player.targetX = null;
     this.player.targetY = null;
-    this.player.moveFromX = 1;
-    this.player.moveFromY = 1;
+    this.player.moveFromX = spawnX;
+    this.player.moveFromY = spawnY;
     this.player.moveStartedAtMs = 0;
     this.player.moveDurationMs = 0;
     this.player.isMoving = false;
