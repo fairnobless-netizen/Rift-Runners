@@ -680,6 +680,7 @@ export default function GameView(): JSX.Element {
       .every((member) => member.ready ?? false),
   );
   const rejoinOverlayActive = rejoinPhase !== 'idle' && rejoinPhase !== 'rejoin_complete' && rejoinPhase !== 'rejoin_failed';
+  const isMpResumeFlow = Boolean(resumeModal?.open || resumeJoinInProgress || rejoinOverlayActive);
   const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive;
   const isMobileViewport = Math.min(viewportSize.width, viewportSize.height) < MOBILE_ROTATE_OVERLAY_BREAKPOINT;
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
@@ -2757,6 +2758,8 @@ export default function GameView(): JSX.Element {
     clearLastSession();
     pendingResumeIntentRef.current = null;
     setResumeModal(null);
+    setGameFlowPhase('playing');
+    setMultiplayerUiOpen(true);
     resetResumeAttemptState('idle');
   }, [isMultiplayerDebugEnabled, resetResumeAttemptState, resumeModal]);
 
@@ -2800,6 +2803,7 @@ export default function GameView(): JSX.Element {
     pendingResumeIntentRef.current = pendingIntent;
     resumeIntentExecutedRef.current = false;
     setResumeModal(null);
+    setGameFlowPhase('playing');
 
     if (!ws.connected) {
       if (isMultiplayerDebugEnabled) {
@@ -3655,7 +3659,7 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {!showBootSplash && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && !isSoloResumeFlow && (
+      {!showBootSplash && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && !isSoloResumeFlow && !isMpResumeFlow && (
         <div className="game-flow-overlay" role="status" aria-live="polite">
           {gameFlowPhase === 'intro' ? (
             <div className="intro-layer" aria-label="Rift Runners intro animation">
@@ -3748,22 +3752,20 @@ export default function GameView(): JSX.Element {
         </RROverlayModal>
       )}
       {resumeModal?.open && !currentRoom?.roomCode && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Resume previous game"
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.6)', display: 'grid', placeItems: 'center', zIndex: 2500 }}
+        <RROverlayModal
+          title="Do you want to resume the match?"
+          tabs={[{ key: 'resume', label: 'Resume' }]}
+          activeTab="resume"
+          onTabChange={() => {}}
+          onClose={onCancelResumePrompt}
         >
-          <div className="rr-overlay-modal" style={{ width: 'min(420px, calc(100vw - 2rem))' }}>
-            <div className="settings-header">
-              <strong>Return to your previous game?</strong>
-            </div>
-            <div className="settings-panel" style={{ display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
-              <button type="button" onClick={onAcceptResumePrompt}>Resume</button>
-              <button type="button" className="ghost" onClick={onCancelResumePrompt}>Cancel</button>
+          <div className="solo-resume-modal-content">
+            <div className="solo-resume-modal-actions">
+              <button type="button" className="rr-btn-neon-green" onClick={onAcceptResumePrompt}>Resume</button>
+              <button type="button" className="rr-btn-neon-orange" onClick={onCancelResumePrompt}>Cancel</button>
             </div>
           </div>
-        </div>
+        </RROverlayModal>
       )}
       {gameFlowPhase === 'playing' && lifeState.awaitingContinue && (
         <div className="waiting-overlay" role="dialog" aria-modal="true" aria-label="Continue overlay">
