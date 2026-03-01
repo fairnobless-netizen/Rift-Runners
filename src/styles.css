@@ -10,6 +10,7 @@
   --android-overlay-right: 0px;
   --android-overlay-bottom: 0px;
   --android-min-pad-top: 60px;
+  --android-min-pad-left: 36px;
   --android-min-pad-right: 56px;
   --android-inset-breathing: 20px;
   --header-h: clamp(34px, calc(46px * var(--ui-scale)), 46px);
@@ -106,6 +107,12 @@ html.is-android[data-orient="landscape"][data-device="tablet"] .page {
     max(
       calc(var(--tg-content-right, 0px) + var(--safe-right) + var(--android-overlay-right, 0px)),
       var(--android-min-pad-right)
+    ) + var(--android-inset-breathing, 20px)
+  );
+  padding-left: calc(
+    max(
+      calc(var(--tg-content-left, 0px) + var(--safe-left)),
+      var(--android-min-pad-left)
     ) + var(--android-inset-breathing, 20px)
   );
 }
