@@ -144,11 +144,6 @@ type MatchSnapshotMessage = Extract<
   { type: 'match:snapshot' }
 >;
 
-type MatchStartedMessage = Extract<
-  MatchServerMessage,
-  { type: 'match:started' }
->;
-
 type MatchRejoinAckMessage = Extract<
   MatchServerMessage,
   { type: 'mp:rejoin_ack' }
@@ -397,7 +392,6 @@ export default function GameView(): JSX.Element {
   const resumedActiveMatchIdRef = useRef<string | null>(null);
   const rejoinAttemptIdRef = useRef<string | null>(null);
   const rejoinCompletionSentRef = useRef(false);
-  const rejoinAckTransitionedRef = useRef(false);
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
   const [resumeModal, setResumeModal] = useState<{ open: boolean; roomCode: string; matchId: string | null } | null>(null);
@@ -463,7 +457,6 @@ export default function GameView(): JSX.Element {
     resumeRoomCodeRef.current = null;
     resumeExpectedMatchIdRef.current = null;
     rejoinAttemptIdRef.current = null;
-    rejoinAckTransitionedRef.current = false;
     pendingWorldInitRef.current = null;
     pendingSnapshotRef.current = null;
     rejoinCompletionSentRef.current = false;
@@ -552,38 +545,6 @@ export default function GameView(): JSX.Element {
       respawning: false,
     }));
   }, [resetMpMatchRuntimeForNewMatch]);
-
-  const maybeImplicitRejoinAck = useCallback((matchId: string, roomCode: string, reason: 'match:started' | 'match:world_init' | 'match:snapshot'): void => {
-    if (!resumeJoinInProgress) return;
-    if (rejoinPhase !== 'rejoin_wait_ack') return;
-    if (rejoinAckTransitionedRef.current) return;
-
-    const resumeRoomCode = resumeRoomCodeRef.current;
-    if (!resumeRoomCode || resumeRoomCode !== roomCode) return;
-
-    rejoinAckTransitionedRef.current = true;
-    rejoinAttemptIdRef.current = null;
-    expectedMatchIdRef.current = matchId;
-    setCurrentMatchId(matchId);
-    worldReadyRef.current = false;
-    firstSnapshotReadyRef.current = false;
-    rejoinCompletionSentRef.current = false;
-    pendingWorldInitRef.current = null;
-    pendingSnapshotRef.current = null;
-    lastAppliedSnapshotTickRef.current = null;
-    handledMatchEventIdsRef.current.clear();
-    sceneRef.current?.setActiveMultiplayerSession(roomCode, matchId);
-    sceneRef.current?.resetMultiplayerNetState();
-    setRejoinPhase('rejoin_ready');
-
-    if (isDebugEnabled(window.location.search)) {
-      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:implicit_ack', {
-        roomCode,
-        matchId,
-        reason,
-      });
-    }
-  }, [rejoinPhase, resumeJoinInProgress]);
 
   const [settingReady, setSettingReady] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(false);
@@ -1587,7 +1548,6 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    rejoinAckTransitionedRef.current = true;
     rejoinAttemptIdRef.current = lastAck.rejoinAttemptId;
     setRejoinPhase('rejoin_resetting');
     expectedMatchIdRef.current = lastAck.matchId;
@@ -1626,37 +1586,6 @@ export default function GameView(): JSX.Element {
 
     setRejoinPhase('rejoin_ready');
   }, [handleResumeFailure, rejoinPhase, resetMpMatchRuntimeForNewMatch, resumeJoinInProgress, ws, ws.messages]);
-
-  useEffect(() => {
-    if (!resumeJoinInProgress) return;
-    if (rejoinPhase !== 'rejoin_wait_ack') return;
-
-    const lastEvidence = [...ws.messages].reverse().find((message): message is MatchStartedMessage | MatchWorldInitMessage | MatchSnapshotMessage => (
-      message.type === 'match:started' || message.type === 'match:world_init' || message.type === 'match:snapshot'
-    ));
-    if (!lastEvidence) return;
-
-    if (lastEvidence.type === 'match:started') {
-      const evidenceRoomCode = lastEvidence.roomCode;
-      const evidenceMatchId = typeof lastEvidence.matchId === 'string' ? lastEvidence.matchId.trim() : '';
-      if (!evidenceRoomCode || !evidenceMatchId) return;
-      maybeImplicitRejoinAck(evidenceMatchId, evidenceRoomCode, 'match:started');
-      return;
-    }
-
-    if (lastEvidence.type === 'match:world_init') {
-      const evidenceRoomCode = lastEvidence.roomCode;
-      const evidenceMatchId = typeof lastEvidence.matchId === 'string' ? lastEvidence.matchId.trim() : '';
-      if (!evidenceRoomCode || !evidenceMatchId) return;
-      maybeImplicitRejoinAck(evidenceMatchId, evidenceRoomCode, 'match:world_init');
-      return;
-    }
-
-    const evidenceRoomCode = lastEvidence.snapshot.roomCode;
-    const evidenceMatchId = typeof lastEvidence.snapshot.matchId === 'string' ? lastEvidence.snapshot.matchId.trim() : '';
-    if (!evidenceRoomCode || !evidenceMatchId) return;
-    maybeImplicitRejoinAck(evidenceMatchId, evidenceRoomCode, 'match:snapshot');
-  }, [maybeImplicitRejoinAck, rejoinPhase, resumeJoinInProgress, ws.messages]);
 
 
   useEffect(() => {
@@ -2741,7 +2670,6 @@ export default function GameView(): JSX.Element {
     setResumeJoinInProgress(true);
     setRejoinPhase('rejoin_wait_ack');
     rejoinCompletionSentRef.current = false;
-    rejoinAckTransitionedRef.current = false;
     resumeRoomCodeRef.current = roomCode;
     resumeExpectedMatchIdRef.current = expectedMatchId;
 
