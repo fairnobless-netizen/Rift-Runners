@@ -16,13 +16,33 @@ function bootstrapAndroidViewportFix() {
   const root = document.documentElement;
   root.classList.add('is-android');
 
+  const clampInset = (value: number): number => Math.min(80, Math.max(0, value));
+
+  const syncSafeInsets = (): void => {
+    const vv = window.visualViewport;
+    if (!vv) {
+      root.style.setProperty('--safe-left', '0px');
+      root.style.setProperty('--safe-right', '0px');
+      return;
+    }
+
+    const safeLeft = clampInset(vv.offsetLeft);
+    const safeRight = clampInset(window.innerWidth - (vv.offsetLeft + vv.width));
+
+    root.style.setProperty('--safe-left', `${safeLeft}px`);
+    root.style.setProperty('--safe-right', `${safeRight}px`);
+  };
+
   const syncViewportHeight = (): void => {
     root.style.setProperty('--app-vh', `${window.innerHeight * 0.01}px`);
+    syncSafeInsets();
   };
 
   syncViewportHeight();
   window.addEventListener('resize', syncViewportHeight);
   window.addEventListener('orientationchange', syncViewportHeight);
+  window.visualViewport?.addEventListener('resize', syncViewportHeight);
+  window.visualViewport?.addEventListener('scroll', syncViewportHeight);
 }
 
 function bootstrapDebugFlags() {
