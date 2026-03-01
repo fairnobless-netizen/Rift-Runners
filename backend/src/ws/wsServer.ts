@@ -14,6 +14,7 @@ import {
 } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 import { touchLastMpSession } from '../mp/lastSessionStore';
+import { authenticateWsConnection } from '../auth/wsAuth';
 
 // ✅ add DB cleanup
 import { closeRoomTx, getRoomByCode, leaveRoomV2, removeRoomCascade, setRoomPhase } from '../db/repos';
@@ -1052,10 +1053,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return send(ctx.socket, { type: 'match:error', error: 'invalid_room_id' });
       }
 
-      if (msg.tgUserId && typeof msg.tgUserId === 'string') {
-        ctx.tgUserId = msg.tgUserId;
-      }
-
       const dbRoom = await getRoomByCode(msg.roomId);
       if (!dbRoom) {
         return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
@@ -1530,40 +1527,54 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 export function registerWsHandlers(wss: WebSocketServer) {
   wss.on('connection', (socket, req) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    const tgUserId = url.searchParams.get('tgUserId') ?? `guest_${Math.random().toString(36).slice(2, 10)}`;
 
-    const ctx: ClientCtx = {
-      connectionId: randomUUID(),
-      socket,
-      tgUserId,
-      roomId: null,
-      matchId: null,
-      lastSeenMs: Date.now(),
-    };
-    clients.add(ctx);
-
-
-    send(socket, { type: 'connected' });
-
-    socket.on('message', (raw) => {
-      const msg = parseMessage(raw);
-      if (!msg) {
-        send(socket, { type: 'match:error', error: 'invalid_message' });
+    void (async () => {
+      const authResult = await authenticateWsConnection(req, url);
+      if (!authResult.ok) {
+        logWsEvent('ws_auth_failed', {
+          reason: authResult.reason,
+          hasCredential: authResult.hasCredential,
+        });
+        socket.close(4401, 'ws_auth_failed');
         return;
       }
-      ctx.lastSeenMs = Date.now();
-      roomRegistry.heartbeat(ctx.connectionId, ctx.lastSeenMs);
-      void handleMessage(ctx, msg);
-    });
 
-    socket.on('close', () => {
-      const roomCode = ctx.roomId;
-      const tgUserId = ctx.tgUserId;
+      const ctx: ClientCtx = {
+        connectionId: randomUUID(),
+        socket,
+        tgUserId: authResult.tgUserId,
+        roomId: null,
+        matchId: null,
+        lastSeenMs: Date.now(),
+      };
+      clients.add(ctx);
 
-      logWsEvent('ws_player_disconnect', { tgUserId, roomId: roomCode });
-      detachClientFromRoom(ctx, 'disconnect');
-      clients.delete(ctx);
+      logWsEvent('ws_auth_ok', {
+        tgUserId: authResult.tgUserId,
+        mode: authResult.mode,
+      });
 
-    });
+      send(socket, { type: 'connected' });
+
+      socket.on('message', (raw) => {
+        const msg = parseMessage(raw);
+        if (!msg) {
+          send(socket, { type: 'match:error', error: 'invalid_message' });
+          return;
+        }
+        ctx.lastSeenMs = Date.now();
+        roomRegistry.heartbeat(ctx.connectionId, ctx.lastSeenMs);
+        void handleMessage(ctx, msg);
+      });
+
+      socket.on('close', () => {
+        const roomCode = ctx.roomId;
+        const tgUserId = ctx.tgUserId;
+
+        logWsEvent('ws_player_disconnect', { tgUserId, roomId: roomCode });
+        detachClientFromRoom(ctx, 'disconnect');
+        clients.delete(ctx);
+      });
+    })();
   });
 }
