@@ -107,6 +107,7 @@ const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_
 const MP_MOVE_TICK_MS_ENEMY = 1000 / 20;
 const PLAYER_SILHOUETTE_TEXTURE_KEYS = ['rr_player_a', 'rr_player_b', 'rr_player_c', 'rr_player_d'] as const;
 const ENEMY_HIT_SHAKE_COOLDOWN_MS = 80;
+const PLAYER_HIT_FEEDBACK_COOLDOWN_MS = 240;
 type PlayerSilhouetteTextureKey = typeof PLAYER_SILHOUETTE_TEXTURE_KEYS[number];
 
 function hashStringFNV1a(value: string): number {
@@ -299,6 +300,7 @@ export class GameScene extends Phaser.Scene {
   private placeBombUntil = 0;
   private audioSettings: SceneAudioSettings = { musicEnabled: true, sfxEnabled: true };
   private lastEnemyHitShakeAt = -Infinity;
+  private lastPlayerHitFeedbackAt = -Infinity;
   private minZoom: number = GAME_CONFIG.minZoom;
   private maxZoom: number = GAME_CONFIG.maxZoom;
   private pinchStartDistance: number | null = null;
@@ -1166,6 +1168,10 @@ export class GameScene extends Phaser.Scene {
 
   private handlePlayerDeath(reason: 'bomb' | 'enemy' = 'enemy'): void {
     if (this.awaitingSoloContinue || this.soloGameOver || this.multiplayerEliminated) return;
+
+    if (reason === 'enemy') {
+      this.playPlayerHitFeedback();
+    }
 
     this.stats.score = Math.max(0, this.stats.score - GAME_CONFIG.playerDeathPenalty);
     this.lives = Math.max(0, this.lives - 1);
@@ -2220,6 +2226,33 @@ export class GameScene extends Phaser.Scene {
     if (now - this.lastEnemyHitShakeAt < ENEMY_HIT_SHAKE_COOLDOWN_MS) return;
     this.lastEnemyHitShakeAt = now;
     this.cameras.main.shake(isDeath ? 120 : 90, isDeath ? 0.005 : 0.0035, true);
+  }
+
+  private playPlayerHitFeedback(): void {
+    const now = this.time.now;
+    if (now - this.lastPlayerHitFeedbackAt < PLAYER_HIT_FEEDBACK_COOLDOWN_MS) return;
+    this.lastPlayerHitFeedbackAt = now;
+
+    const camera = this.cameras?.main;
+    if (camera) {
+      camera.shake(90, 0.0035, true);
+    }
+
+    const sprite = this.playerSprite;
+    if (!sprite) return;
+
+    this.tweens.killTweensOf(sprite);
+    sprite.setAlpha(1);
+    this.tweens.add({
+      targets: sprite,
+      duration: 55,
+      alpha: 0.32,
+      yoyo: true,
+      repeat: 2,
+      onComplete: () => {
+        sprite.setAlpha(1);
+      },
+    });
   }
 
   private playEnemyFeedbackSfx(kind: EnemyKind, isDeath: boolean): void {
@@ -3547,7 +3580,11 @@ export class GameScene extends Phaser.Scene {
 
   public applyAuthoritativePlayerDamaged(payload: { tgUserId: string; lives: number }, localTgUserId?: string): void {
     if (payload.tgUserId !== localTgUserId) return;
+    const previousLives = this.lives;
     this.lives = Math.max(0, payload.lives);
+    if (this.lives < previousLives) {
+      this.playPlayerHitFeedback();
+    }
     this.stats.lives = this.lives;
     this.multiplayerRespawning = this.lives > 0;
     this.emitLifeState();
