@@ -568,6 +568,8 @@ export default function GameView(): JSX.Element {
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
     rejoinCompletionSentRef.current = false;
+    pendingWorldInitRef.current = null;
+    pendingSnapshotRef.current = null;
     lastAppliedSnapshotTickRef.current = null;
     handledMatchEventIdsRef.current.clear();
     sceneRef.current?.setActiveMultiplayerSession(roomCode, matchId);
