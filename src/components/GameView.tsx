@@ -791,13 +791,21 @@ export default function GameView(): JSX.Element {
     const left = insets?.left ?? 0;
     const viewportHeight = tg?.viewportHeight ?? window.innerHeight;
     const stableHeight = tg?.viewportStableHeight ?? viewportHeight;
+    const root = document.documentElement;
+    const isAndroid = root.classList.contains('is-android');
+    const hasTelegramInsets = top > 0 || right > 0 || bottom > 0 || left > 0;
+    const androidOverlayTop = isAndroid && !hasTelegramInsets ? 48 : 0;
+    const androidOverlayRight = isAndroid && !hasTelegramInsets ? 40 : 0;
 
-    document.documentElement.style.setProperty('--tg-viewport-h', `${Math.floor(viewportHeight)}px`);
-    document.documentElement.style.setProperty('--tg-viewport-stable-h', `${Math.floor(stableHeight)}px`);
-    document.documentElement.style.setProperty('--tg-content-top', `${Math.floor(top)}px`);
-    document.documentElement.style.setProperty('--tg-content-right', `${Math.floor(right)}px`);
-    document.documentElement.style.setProperty('--tg-content-bottom', `${Math.floor(bottom)}px`);
-    document.documentElement.style.setProperty('--tg-content-left', `${Math.floor(left)}px`);
+    root.style.setProperty('--tg-viewport-h', `${Math.floor(viewportHeight)}px`);
+    root.style.setProperty('--tg-viewport-stable-h', `${Math.floor(stableHeight)}px`);
+    root.style.setProperty('--tg-content-top', `${Math.floor(top)}px`);
+    root.style.setProperty('--tg-content-right', `${Math.floor(right)}px`);
+    root.style.setProperty('--tg-content-bottom', `${Math.floor(bottom)}px`);
+    root.style.setProperty('--tg-content-left', `${Math.floor(left)}px`);
+    root.style.setProperty('--android-overlay-top', `${androidOverlayTop}px`);
+    root.style.setProperty('--android-overlay-right', `${androidOverlayRight}px`);
+    root.style.setProperty('--android-overlay-bottom', '0px');
   }, []);
 
   useEffect(() => {
