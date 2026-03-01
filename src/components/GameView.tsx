@@ -563,6 +563,10 @@ export default function GameView(): JSX.Element {
   const [gameUserIdCopied, setGameUserIdCopied] = useState(false);
   const [registrationOpen, setRegistrationOpen] = useState<boolean>(() => !(localStorage.getItem(DISPLAY_NAME_KEY) ?? '').trim());
   const lastSubmittedLeaderboardMatchIdRef = useRef<string>('');
+  const prevMpMatchIdRef = useRef<string | null>(null);
+  const prevMpRoomCodeRef = useRef<string | null>(null);
+  const mpMatchWasActiveRef = useRef(false);
+  const lastMpTeamScoreRef = useRef<number | null>(null);
   const [gameFlowPhase, setGameFlowPhase] = useState<GameFlowPhase>('intro');
   const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
   const [tutorialActive, setTutorialActive] = useState(false);
@@ -3313,6 +3317,10 @@ export default function GameView(): JSX.Element {
     : fallbackTeamScoreFromPlayers;
 
   useEffect(() => {
+    lastMpTeamScoreRef.current = Math.max(0, Number(multiplayerTeamScore ?? 0));
+  }, [multiplayerTeamScore]);
+
+  useEffect(() => {
     if (!leaderboardOpen) return;
     void loadLeaderboard(leaderboardMode);
   }, [leaderboardMode, leaderboardOpen, loadLeaderboard]);
@@ -3323,29 +3331,83 @@ export default function GameView(): JSX.Element {
   }, [activeLeaderboardMode, leaderboardOpen]);
 
   useEffect(() => {
+    const isMpMode = activeLeaderboardMode !== 'solo';
+    const currentRoomCode = currentRoom?.roomCode ?? null;
+    const mpMatchIsActiveNow = Boolean(currentMatchId) && Boolean(currentRoomCode);
+
+    if (isMpMode && mpMatchIsActiveNow) {
+      mpMatchWasActiveRef.current = true;
+      if (currentMatchId) prevMpMatchIdRef.current = currentMatchId;
+      if (currentRoomCode) prevMpRoomCodeRef.current = currentRoomCode;
+    }
+
+    const mpEndedByExplicit = Boolean(matchEndState);
+    const mpEndedByTransition = mpMatchWasActiveRef.current && !mpMatchIsActiveNow;
+    const mpEndedByRoomChange = Boolean(
+      mpMatchWasActiveRef.current
+      && prevMpRoomCodeRef.current
+      && currentRoomCode
+      && currentRoomCode !== prevMpRoomCodeRef.current,
+    );
+    const mpEndedByMatchIdChange = Boolean(
+      mpMatchWasActiveRef.current
+      && prevMpMatchIdRef.current
+      && currentMatchId
+      && currentMatchId !== prevMpMatchIdRef.current,
+    );
+    const aliveMemberIds = currentRoomMembers
+      .map((member) => member.tgUserId)
+      .filter((tgUserId) => Boolean(tgUserId));
+    const mpEndedByElimination = aliveMemberIds.length > 0 && aliveMemberIds.every((tgUserId) => {
+      const lives = Number(multiplayerLivesByUserId[tgUserId] ?? 0);
+      return lives <= 0;
+    });
+
     const isTrueMatchEnd = lifeState.gameOver || Boolean(matchEndState);
-    if (!isTrueMatchEnd) {
+    const isTrueMpMatchEnd = mpEndedByExplicit
+      || mpEndedByTransition
+      || mpEndedByRoomChange
+      || mpEndedByMatchIdChange
+      || mpEndedByElimination;
+    const isTrueMatchEndFinal = isMpMode ? isTrueMpMatchEnd : isTrueMatchEnd;
+    if (!isTrueMatchEndFinal) {
       lastSubmittedLeaderboardMatchIdRef.current = '';
       return;
     }
 
-    const matchIdentity = currentMatchId ?? `${activeLeaderboardMode}:${currentRoom?.roomCode ?? 'solo'}`;
+    const matchIdentity = activeLeaderboardMode === 'solo'
+      ? (currentMatchId ?? `${activeLeaderboardMode}:${currentRoomCode ?? 'solo'}`)
+      : (prevMpMatchIdRef.current
+        ?? currentMatchId
+        ?? `mp:${prevMpRoomCodeRef.current ?? currentRoomCode ?? 'unknown'}`);
     if (lastSubmittedLeaderboardMatchIdRef.current === matchIdentity) return;
     lastSubmittedLeaderboardMatchIdRef.current = matchIdentity;
+
+    if (isMpMode) {
+      mpMatchWasActiveRef.current = false;
+    }
 
     void (async () => {
       const finalScore = activeLeaderboardMode === 'solo'
         ? stats.score
-        : multiplayerTeamScore;
+        : Math.max(0, Number(lastMpTeamScoreRef.current ?? multiplayerTeamScore ?? 0));
 
       if (isMultiplayerDebugEnabled) {
         diagnosticsStore.log('ROOM', 'INFO', 'leaderboard:submit_attempt', {
           activeLeaderboardMode,
           matchIdentity,
-          roomCode: currentRoom?.roomCode ?? null,
+          roomCode: currentRoomCode,
+          prevRoomCode: prevMpRoomCodeRef.current,
           currentMatchId,
+          prevMatchId: prevMpMatchIdRef.current,
+          mpEndedByExplicit,
+          mpEndedByTransition,
+          mpEndedByRoomChange,
+          mpEndedByMatchIdChange,
+          mpEndedByElimination,
           localTgUserId: localTgUserId ?? null,
           teamScore: multiplayerTeamScore,
+          lastMpTeamScore: lastMpTeamScoreRef.current,
           score: finalScore,
         });
       }
@@ -3368,7 +3430,7 @@ export default function GameView(): JSX.Element {
       if (!submitResult) return;
       await loadLeaderboard(activeLeaderboardMode);
     })();
-  }, [activeLeaderboardMode, currentMatchId, currentRoom?.roomCode, currentRoomMembers, isMultiplayerDebugEnabled, lifeState.gameOver, loadLeaderboard, localTgUserId, matchEndState, multiplayerTeamScore, stats.score]);
+  }, [activeLeaderboardMode, currentMatchId, currentRoom?.roomCode, currentRoomMembers, isMultiplayerDebugEnabled, lifeState.gameOver, loadLeaderboard, localTgUserId, matchEndState, multiplayerLivesByUserId, multiplayerTeamScore, stats.score]);
 
   useEffect(() => {
     if (!multiplayerUiOpen) return;
