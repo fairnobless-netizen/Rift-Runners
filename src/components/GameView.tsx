@@ -1825,10 +1825,24 @@ export default function GameView(): JSX.Element {
 
     let currentExpectedMatchId = expectedMatchIdRef.current;
     if (!currentExpectedMatchId) {
+      const isResumeRejoinAdoption = isMultiplayerMode
+        && resumeJoinInProgress
+        && expectedRoomCode === gotRoomCode;
+      if (isResumeRejoinAdoption && gotMatchId) {
+        diagnosticsStore.log('ROOM', 'INFO', 'world_init_adopt_match_before_started', {
+          roomCode: expectedRoomCode,
+          matchId: gotMatchId,
+          resumeJoinInProgress,
+          expectedMatchIdWasNull: true,
+        });
+        switchToNextMatch(gotMatchId);
+        currentExpectedMatchId = gotMatchId;
+      }
+
       const roomIsActiveMultiplayer = isMultiplayerMode
         && currentRoom?.phase === 'STARTED'
         && currentRoom.roomCode === expectedRoomCode;
-      if (roomIsActiveMultiplayer && gotMatchId) {
+      if (!currentExpectedMatchId && roomIsActiveMultiplayer && gotMatchId) {
         diagnosticsStore.log('ROOM', 'INFO', 'world_init_adopted_match_id', {
           roomCode: expectedRoomCode,
           matchId: gotMatchId,
