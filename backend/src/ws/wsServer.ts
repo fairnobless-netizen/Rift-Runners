@@ -628,20 +628,12 @@ function clearPendingRejoinHandshake(connectionId: string): void {
   pendingRejoinHandshakes.delete(connectionId);
 }
 
-function sendRejoinSnapshotBundle(
-  ctx: ClientCtx,
-  roomId: string,
-  match: MatchState,
-  reason: 'ready' | 'timeout' | 'immediate',
-  options?: { sendStarted?: boolean },
-): void {
-  if (options?.sendStarted !== false) {
-    send(ctx.socket, {
-      type: 'match:started',
-      roomCode: roomId,
-      matchId: match.matchId,
-    });
-  }
+function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchState, reason: 'ready' | 'timeout' | 'immediate'): void {
+  send(ctx.socket, {
+    type: 'match:started',
+    roomCode: roomId,
+    matchId: match.matchId,
+  });
 
   send(ctx.socket, {
     type: 'mp:rejoin_sync',
@@ -793,21 +785,15 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
 
   const rejoinAttemptId = randomUUID();
   const createdAtMs = Date.now();
+  sendRejoinAck(ctx, roomId, activeMatch.matchId, rejoinAttemptId, createdAtMs);
 
   if (REJOIN_HANDSHAKE_ENABLED) {
     beginRejoinHandshake(ctx, roomId, activeMatch, rejoinAttemptId, createdAtMs);
-    sendRejoinAck(ctx, roomId, activeMatch.matchId, rejoinAttemptId, createdAtMs);
     return;
   }
 
   clearPendingRejoinHandshake(ctx.connectionId);
-  send(ctx.socket, {
-    type: 'match:started',
-    roomCode: roomId,
-    matchId: activeMatch.matchId,
-  });
-  sendRejoinAck(ctx, roomId, activeMatch.matchId, rejoinAttemptId, createdAtMs);
-  sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'immediate', { sendStarted: false });
+  sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'immediate');
 }
 
 async function detachClientFromRoomDb(roomCode: string, tgUserId: string) {
