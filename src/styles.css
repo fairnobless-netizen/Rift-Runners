@@ -1676,6 +1676,28 @@ html[data-orient="landscape"] .right-panel {
   display: none;
 }
 
+
+.rr-overlay[aria-label="Do you want to resume the match?"] {
+  place-items: center;
+  padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top) + 10px);
+  padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom) + 10px);
+}
+
+.rr-overlay[aria-label="Do you want to resume the match?"] .rr-overlay-modal {
+  width: min(90vw, 480px);
+  max-height: min(72vh, calc(var(--tg-viewport-stable-h) - var(--safe-top) - var(--safe-bottom) - 20px));
+  padding: 0.75rem;
+}
+
+.rr-overlay[aria-label="Do you want to resume the match?"] .rr-overlay-header {
+  justify-content: center;
+}
+
+.rr-overlay[aria-label="Do you want to resume the match?"] .rr-overlay-close,
+.rr-overlay[aria-label="Do you want to resume the match?"] .rr-overlay-tabs {
+  display: none;
+}
+
 .solo-resume-modal-content {
   display: flex;
   justify-content: center;
@@ -1729,6 +1751,12 @@ html[data-orient="landscape"] .right-panel {
 
 @media (max-width: 560px) {
   .rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-modal {
+    width: min(94vw, 420px);
+    padding: 0.68rem;
+  }
+
+
+  .rr-overlay[aria-label="Do you want to resume the match?"] .rr-overlay-modal {
     width: min(94vw, 420px);
     padding: 0.68rem;
   }
