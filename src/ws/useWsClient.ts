@@ -179,7 +179,6 @@ export function useWsClient(token?: string) {
     setUrlUsed(wsUrl);
     setLastError(null);
     diagnosticsStore.setWsState({ wsUrlUsed: wsUrl, status: 'CONNECTING', lastError: null });
-    const diagnosticsEnabled = diagnosticsStore.isEnabled();
     diagnosticsStore.log('WS', 'INFO', 'connect:starting', { wsUrlUsed: wsUrl });
 
     const client = new WsClient({
@@ -240,12 +239,10 @@ export function useWsClient(token?: string) {
         }
 
         diagnosticsStore.setWsState({ lastMessageAt: new Date().toISOString() });
-        if (diagnosticsEnabled) {
-          diagnosticsStore.log('WS', 'INFO', `recv:${msg.type}`, {
-            type: msg.type,
-            preview: JSON.stringify(msg).slice(0, 1000),
-          });
-        }
+        diagnosticsStore.log('WS', 'INFO', `recv:${msg.type}`, {
+          type: msg.type,
+          preview: JSON.stringify(msg).slice(0, 1000),
+        });
 
         let messageMatchId: string | null = null;
         if (msg.type === 'match:world_init' && typeof msg.matchId === 'string') {
@@ -395,12 +392,10 @@ export function useWsClient(token?: string) {
     send: (msg: WsClientMessage, debugContext?: WsTraceContext) => {
       const sentAt = Date.now();
       setOutboundTrace((prev) => [...prev.slice(-80), { at: sentAt, message_type: msg.type, message: msg, traceContext: debugContext }]);
-      if (diagnosticsStore.isEnabled()) {
-        diagnosticsStore.log('WS', 'INFO', `send:${msg.type}`, {
-          type: msg.type,
-          preview: JSON.stringify(msg).slice(0, 1000),
-        });
-      }
+      diagnosticsStore.log('WS', 'INFO', `send:${msg.type}`, {
+        type: msg.type,
+        preview: JSON.stringify(msg).slice(0, 1000),
+      });
       const config = netSimConfigRef.current;
       const shouldSimulateInput = import.meta.env.DEV && msg.type === 'match:input' && config.enabled;
       if (shouldSimulateInput && shouldDrop(config)) return;
