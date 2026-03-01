@@ -4,12 +4,15 @@ export const CAMPAIGN_STORAGE_KEY = 'rift_campaign_v1';
 export const SESSION_TOKEN_KEY = 'rift_session_token';
 export const MAX_STAGE = 7;
 export const ZONES_PER_STAGE = 10;
+export const SOLO_RESUME_WINDOW_MS = 60_000;
 
 export interface CampaignState {
   stage: number;
   zone: number;
   score: number;
   trophies: string[];
+  lastActiveAtMs?: number;
+  soloGameOver?: boolean;
 }
 
 export type CampaignSyncStatus = 'synced' | 'offline';
@@ -29,6 +32,10 @@ const DEFAULT_CAMPAIGN_STATE: CampaignState = {
   trophies: [],
 };
 
+export function createInitialCampaignState(): CampaignState {
+  return { ...DEFAULT_CAMPAIGN_STATE };
+}
+
 function sanitizeCampaignState(value: unknown): CampaignState {
   if (!value || typeof value !== 'object') return { ...DEFAULT_CAMPAIGN_STATE };
 
@@ -37,13 +44,25 @@ function sanitizeCampaignState(value: unknown): CampaignState {
   const zone = Number.isInteger(source.zone) ? Number(source.zone) : DEFAULT_CAMPAIGN_STATE.zone;
   const score = typeof source.score === 'number' && Number.isFinite(source.score) ? source.score : DEFAULT_CAMPAIGN_STATE.score;
   const trophies = Array.isArray(source.trophies) ? source.trophies.filter((item): item is string => typeof item === 'string') : [];
+  const lastActiveAtMs = typeof source.lastActiveAtMs === 'number' && Number.isFinite(source.lastActiveAtMs)
+    ? Math.max(0, Math.floor(source.lastActiveAtMs))
+    : undefined;
+  const soloGameOver = typeof source.soloGameOver === 'boolean' ? source.soloGameOver : undefined;
 
   return {
     stage: Math.min(MAX_STAGE, Math.max(1, Math.floor(stage))),
     zone: Math.min(ZONES_PER_STAGE, Math.max(1, Math.floor(zone))),
     score: Math.max(0, Math.floor(score)),
     trophies,
+    ...(lastActiveAtMs !== undefined ? { lastActiveAtMs } : {}),
+    ...(soloGameOver !== undefined ? { soloGameOver } : {}),
   };
+}
+
+export function shouldResumeCampaign(state: CampaignState, nowMs: number = Date.now()): boolean {
+  if (typeof state.lastActiveAtMs !== 'number' || !Number.isFinite(state.lastActiveAtMs)) return false;
+  if (state.soloGameOver === true) return false;
+  return nowMs - state.lastActiveAtMs <= SOLO_RESUME_WINDOW_MS;
 }
 
 function getSessionToken(): string | null {
@@ -106,7 +125,11 @@ export async function fetchCampaignFromBackend(): Promise<{ ok: boolean; hasProg
 }
 
 export function saveCampaignState(state: CampaignState): void {
-  const payload = sanitizeCampaignState(state);
+  const payload = sanitizeCampaignState({
+    ...state,
+    lastActiveAtMs: Date.now(),
+    soloGameOver: state.soloGameOver === true,
+  });
 
   try {
     window.localStorage.setItem(CAMPAIGN_STORAGE_KEY, JSON.stringify(payload));
@@ -125,15 +148,17 @@ export function saveCampaignState(state: CampaignState): void {
   }, CAMPAIGN_POST_DEBOUNCE_MS);
 }
 
-export function loadCampaignState(): CampaignState {
+export function loadCampaignState(): CampaignState | null {
   try {
     // TODO backend: persist campaign via API instead of localStorage
     // TODO backend: replace loadCampaignState with API call GET /campaign/progress
     const raw = window.localStorage.getItem(CAMPAIGN_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_CAMPAIGN_STATE };
-    return sanitizeCampaignState(JSON.parse(raw));
+    if (!raw) return null;
+    const state = sanitizeCampaignState(JSON.parse(raw));
+    if (!shouldResumeCampaign(state, Date.now())) return null;
+    return state;
   } catch {
-    return { ...DEFAULT_CAMPAIGN_STATE };
+    return null;
   }
 }
 
@@ -185,12 +210,7 @@ export function levelIndexToCampaignState(levelIndex: number, score: number, tro
 }
 
 export function resetCampaignState(): CampaignState {
-  const initial: CampaignState = {
-    stage: 1,
-    zone: 1,
-    score: 0,
-    trophies: [],
-  };
+  const initial: CampaignState = createInitialCampaignState();
 
   try {
     window.localStorage.setItem(CAMPAIGN_STORAGE_KEY, JSON.stringify(initial));

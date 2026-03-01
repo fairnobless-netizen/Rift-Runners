@@ -19,6 +19,7 @@ import {
 } from '../game/gameEvents';
 
 import {
+  createInitialCampaignState,
   fetchCampaignFromBackend,
   getCampaignSyncStatus,
   loadCampaignState,
@@ -299,7 +300,7 @@ export default function GameView(): JSX.Element {
     eliminated: false,
     respawning: false,
   });
-  const [campaign, setCampaign] = useState<CampaignState>(() => loadCampaignState());
+  const [campaign, setCampaign] = useState<CampaignState>(() => loadCampaignState() ?? createInitialCampaignState());
   const [zoomBounds, setZoomBounds] = useState<{ min: number; max: number }>({ min: GAME_CONFIG.minZoom, max: GAME_CONFIG.maxZoom });
   const [zoom, setZoom] = useState<number>(GAME_CONFIG.minZoom);
   const [isRemoteDetonateUnlocked, setIsRemoteDetonateUnlocked] = useState(false);
@@ -1152,7 +1153,7 @@ export default function GameView(): JSX.Element {
               saveCampaignState(remote.campaignState);
             } else {
               // backend empty → seed it from local cache once
-              const local = loadCampaignState();
+              const local = loadCampaignState() ?? createInitialCampaignState();
               saveCampaignState(local); // this will POST best-effort now that token exists
             }
           }
