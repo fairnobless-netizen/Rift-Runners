@@ -125,12 +125,9 @@ export async function fetchCampaignFromBackend(): Promise<{ ok: boolean; hasProg
 }
 
 export function saveCampaignState(state: CampaignState): void {
-  const lastActiveAtMs = typeof state.lastActiveAtMs === 'number' && Number.isFinite(state.lastActiveAtMs)
-    ? state.lastActiveAtMs
-    : Date.now();
   const payload = sanitizeCampaignState({
     ...state,
-    lastActiveAtMs,
+    lastActiveAtMs: Date.now(),
     soloGameOver: state.soloGameOver === true,
   });
 
