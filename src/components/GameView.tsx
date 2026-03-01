@@ -2873,6 +2873,20 @@ export default function GameView(): JSX.Element {
     pendingResumeIntentRef.current = pendingIntent;
     resumeIntentExecutedRef.current = false;
     setResumeModal(null);
+    // Ensure Telegram returns to expanded/fullscreen mode on the user gesture (Resume click).
+    try {
+      const tg = (window as any)?.Telegram?.WebApp as TelegramWebApp | undefined;
+      tg?.ready?.();
+      tg?.expand?.();
+      tg?.disableVerticalSwipes?.();
+
+      const res = tg?.requestFullscreen?.();
+      if (res && typeof (res as any).catch === 'function') {
+        (res as Promise<void>).catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
     startMpResumeCountdown();
     setGameFlowPhase('playing');
 
