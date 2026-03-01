@@ -3727,16 +3727,17 @@ export default function GameView(): JSX.Element {
       )}
       {soloResumeModalOpen && !currentRoom?.roomCode && (
         <RROverlayModal
-          title="Resume run?"
+          title="Do you want to resume the run?"
           tabs={[{ key: 'resume', label: 'Resume' }]}
           activeTab="resume"
           onTabChange={() => {}}
           onClose={onSoloResumeCancel}
         >
-          <div style={{ display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
-            <p style={{ margin: 0 }}>We found a recent solo snapshot from this level. Resume where you left off?</p>
-            <button type="button" onClick={onSoloResumeAccept}>Resume</button>
-            <button type="button" className="ghost" onClick={onSoloResumeCancel}>Cancel</button>
+          <div className="solo-resume-modal-content">
+            <div className="solo-resume-modal-actions">
+              <button type="button" className="rr-btn-neon-green" onClick={onSoloResumeAccept}>Resume</button>
+              <button type="button" className="rr-btn-neon-orange" onClick={onSoloResumeCancel}>Cancel</button>
+            </div>
           </div>
         </RROverlayModal>
       )}
