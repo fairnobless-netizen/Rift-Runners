@@ -9,8 +9,8 @@
   --android-overlay-top: 0px;
   --android-overlay-right: 0px;
   --android-overlay-bottom: 0px;
-  --android-min-pad-top: 100px;
-  --android-min-pad-right: 72px;
+  --android-min-pad-top: 60px;
+  --android-min-pad-right: 56px;
   --android-inset-breathing: 20px;
   --header-h: clamp(34px, calc(46px * var(--ui-scale)), 46px);
   --shell-gap: clamp(0.35rem, 1.5vw, 0.7rem);
@@ -62,6 +62,7 @@ html.is-android body {
 html.is-android #root {
   height: calc(var(--app-vh, 1vh) * 100);
   min-height: calc(var(--app-vh, 1vh) * 100);
+  padding: 0;
 }
 
 .page {
