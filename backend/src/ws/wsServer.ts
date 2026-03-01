@@ -733,7 +733,6 @@ function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState)
 function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
   const room = getRoom(roomId);
   if (!room) {
-    clearPendingRejoinHandshake(ctx.connectionId);
     logWsEvent('ws_rejoin_sync_skipped_no_match', {
       tgUserId: ctx.tgUserId,
       roomId,
@@ -746,7 +745,6 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
   const activeMatch = getMatchByRoom(roomId);
 
   if (!roomMatchId || !activeMatch) {
-    clearPendingRejoinHandshake(ctx.connectionId);
     logWsEvent('ws_rejoin_sync_skipped_no_match', {
       tgUserId: ctx.tgUserId,
       roomId,
@@ -757,7 +755,6 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
   }
 
   if (activeMatch.matchId !== roomMatchId) {
-    clearPendingRejoinHandshake(ctx.connectionId);
     logWsEvent('ws_rejoin_sync_skipped_no_match', {
       tgUserId: ctx.tgUserId,
       roomId,
