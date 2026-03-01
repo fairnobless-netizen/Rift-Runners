@@ -83,6 +83,8 @@ html.is-android #root {
 html.is-android .page {
   height: calc(var(--app-vh, 1vh) * 100);
   min-height: calc(var(--app-vh, 1vh) * 100);
+  padding-left: calc(var(--tg-content-left, 0px) + max(8px, var(--safe-left)));
+  padding-right: calc(var(--tg-content-right, 0px) + max(8px, var(--safe-right)));
   padding-bottom: calc(var(--tg-content-bottom, 0px) + max(8px, env(safe-area-inset-bottom, 0px)));
 }
 
@@ -556,6 +558,24 @@ html.is-android .page {
   height: 100%;
   flex: 1 1 auto;
   overflow: hidden;
+}
+
+
+html.is-android .hud {
+  width: min(92vw, calc(100% - var(--safe-left) - var(--safe-right) - 16px));
+  margin-left: auto;
+  margin-right: auto;
+}
+
+html.is-android .playfield-shell {
+  gap: clamp(0.18rem, 1vw, 0.42rem);
+  padding-left: clamp(2px, 0.45vw, 8px);
+  padding-right: clamp(2px, 0.45vw, 8px);
+}
+
+html.is-android .control-column {
+  padding-left: clamp(0.28rem, 1.05vw, 0.42rem);
+  padding-right: clamp(0.28rem, 1.05vw, 0.42rem);
 }
 
 .game-canvas {
