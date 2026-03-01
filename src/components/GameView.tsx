@@ -3727,11 +3727,11 @@ export default function GameView(): JSX.Element {
       )}
       {soloResumeModalOpen && !currentRoom?.roomCode && (
         <RROverlayModal
-          open={soloResumeModalOpen}
-          title="Resume solo run?"
+          title="Resume run?"
+          tabs={[{ key: 'resume', label: 'Resume' }]}
+          activeTab="resume"
+          onTabChange={() => {}}
           onClose={onSoloResumeCancel}
-          width={420}
-          zIndex={2600}
         >
           <div style={{ display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
             <p style={{ margin: 0 }}>We found a recent solo snapshot from this level. Resume where you left off?</p>
