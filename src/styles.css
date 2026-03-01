@@ -1655,6 +1655,90 @@ html[data-orient="landscape"] .right-panel {
   letter-spacing: 0.06em;
 }
 
+.rr-overlay[aria-label="Do you want to resume the run?"] {
+  place-items: center;
+  padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top) + 10px);
+  padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom) + 10px);
+}
+
+.rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-modal {
+  width: min(90vw, 480px);
+  max-height: min(72vh, calc(var(--tg-viewport-stable-h) - var(--safe-top) - var(--safe-bottom) - 20px));
+  padding: 0.75rem;
+}
+
+.rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-header {
+  justify-content: center;
+}
+
+.rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-close,
+.rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-tabs {
+  display: none;
+}
+
+.solo-resume-modal-content {
+  display: flex;
+  justify-content: center;
+}
+
+.solo-resume-modal-actions {
+  display: flex;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.rr-btn-neon-green,
+.rr-btn-neon-orange {
+  min-width: 148px;
+  padding: 0.5rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-weight: 700;
+}
+
+.rr-btn-neon-green {
+  border-color: #3cff8f;
+  background: linear-gradient(160deg, #12301f, #0e2318);
+  color: #deffe8;
+  box-shadow: 0 0 10px rgba(60, 255, 143, 0.38), inset 0 0 10px rgba(64, 255, 148, 0.14);
+}
+
+.rr-btn-neon-green:hover:not(:disabled) {
+  box-shadow: 0 0 14px rgba(60, 255, 143, 0.54), inset 0 0 12px rgba(64, 255, 148, 0.2);
+}
+
+.rr-btn-neon-green:active:not(:disabled) {
+  box-shadow: 0 0 9px rgba(60, 255, 143, 0.45), inset 0 0 14px rgba(64, 255, 148, 0.28);
+}
+
+.rr-btn-neon-orange {
+  border-color: #ff9a3c;
+  background: linear-gradient(160deg, #352213, #25170d);
+  color: #ffe9d5;
+  box-shadow: 0 0 10px rgba(255, 154, 60, 0.38), inset 0 0 10px rgba(255, 166, 82, 0.14);
+}
+
+.rr-btn-neon-orange:hover:not(:disabled) {
+  box-shadow: 0 0 14px rgba(255, 154, 60, 0.54), inset 0 0 12px rgba(255, 166, 82, 0.2);
+}
+
+.rr-btn-neon-orange:active:not(:disabled) {
+  box-shadow: 0 0 9px rgba(255, 154, 60, 0.45), inset 0 0 14px rgba(255, 166, 82, 0.28);
+}
+
+@media (max-width: 560px) {
+  .rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-modal {
+    width: min(94vw, 420px);
+    padding: 0.68rem;
+  }
+
+  .rr-btn-neon-green,
+  .rr-btn-neon-orange {
+    min-width: 136px;
+  }
+}
+
 .rr-overlay-content {
   display: flex;
   flex-direction: column;
