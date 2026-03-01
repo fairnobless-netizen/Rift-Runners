@@ -26,6 +26,10 @@ export const REJOIN_GRACE_MS = 60_000;
 
 type MatchEvent = MatchBombSpawned | MatchBombExploded | MatchTilesDestroyed | MatchPlayerDamaged | MatchPlayerRespawned | MatchPlayerEliminated | MatchEnd;
 
+function getTeamScore(match: MatchState): number {
+  return Array.from(match.playerScores.values()).reduce((sum, value) => sum + Math.max(0, Number(value ?? 0)), 0);
+}
+
 export type BombPlacementRejectReason =
   | 'player_missing'
   | 'player_eliminated'
@@ -95,7 +99,7 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
         explodeAtTick: bomb.explodeAtTick,
       })),
     },
-    score: Array.from(match.playerScores.values()).reduce((max, value) => Math.max(max, value), 0),
+    score: getTeamScore(match),
     players: Array.from(match.players.values()).map((p) => ({
       tgUserId: p.tgUserId,
       displayName: p.displayName,
