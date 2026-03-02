@@ -765,6 +765,33 @@ export default function GameView(): JSX.Element {
   const shellSizeRef = useRef<{ width: number; height: number }>({ width: window.innerWidth, height: window.innerHeight });
 
   useEffect(() => {
+    const hasMultiplayerRoom = Boolean(currentRoom?.roomCode);
+    const shouldAutoClearSoloResume = hasMultiplayerRoom || isMultiplayerMode;
+    if (!shouldAutoClearSoloResume) {
+      return;
+    }
+
+    if (!soloResumeModalOpen && soloStartReady) {
+      return;
+    }
+
+    diagnosticsStore.log('UI', 'INFO', 'solo_resume:auto_clear_for_multiplayer', {
+      hasMultiplayerRoom,
+      isMultiplayerMode,
+      roomCode: currentRoom?.roomCode ?? null,
+      soloResumeModalOpen,
+      soloStartReady,
+    });
+
+    if (soloResumeModalOpen) {
+      setSoloResumeModalOpen(false);
+    }
+    if (!soloStartReady) {
+      setSoloStartReady(true);
+    }
+  }, [currentRoom?.roomCode, isMultiplayerMode, soloResumeModalOpen, soloStartReady]);
+
+  useEffect(() => {
     if (!isMultiplayerDebugEnabled) return;
     diagnosticsStore.setRoomState({
       roomCode: currentRoom?.roomCode ?? null,
