@@ -374,6 +374,7 @@ export default function GameView(): JSX.Element {
   const [wrongRoomDrops, setWrongRoomDrops] = useState(0);
   const [wrongMatchDrops, setWrongMatchDrops] = useState(0);
   const [duplicateTickDrops, setDuplicateTickDrops] = useState(0);
+  const ws = useWsClient(token || undefined);
   const processedWsMessagesRef = useRef(0);
   const wsMessagesRef = useRef(ws.messages);
 
@@ -582,7 +583,6 @@ export default function GameView(): JSX.Element {
     width: window.innerWidth,
     height: window.innerHeight,
   }));
-  const ws = useWsClient(token || undefined);
   const markUserInteracted = useCallback((): void => {
     userInteractedRef.current = true;
   }, []);
