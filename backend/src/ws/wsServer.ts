@@ -674,12 +674,7 @@ function clearPendingRejoinHandshake(connectionId: string): void {
   pendingRejoinHandshakes.delete(connectionId);
 }
 
-function sendRejoinSnapshotBundle(
-  ctx: ClientCtx,
-  roomId: string,
-  match: MatchState,
-  reason: 'ready' | 'timeout' | 'no_pending_fallback',
-): void {
+function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchState, reason: 'ready' | 'timeout'): void {
   send(ctx.socket, {
     type: 'match:started',
     roomCode: roomId,
@@ -764,7 +759,7 @@ function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState)
       rejoinAttemptId,
       createdAtMs,
     });
-  }, 5_000);
+  }, 4_000);
 
   pendingRejoinHandshakes.set(ctx.connectionId, {
     roomCode: roomId,
@@ -1228,37 +1223,12 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
       const pending = pendingRejoinHandshakes.get(ctx.connectionId);
       if (!pending) {
-        const fallbackRoom = rooms.get(ctx.roomId);
-        const activeMatch = getMatch(ctx.matchId);
-        const canFallbackSend = Boolean(
-          fallbackRoom
-          && activeMatch
-          && fallbackRoom.matchId === ctx.matchId
-          && activeMatch.roomId === ctx.roomId
-          && activeMatch.matchId === msg.matchId,
-        );
-
-        if (canFallbackSend && fallbackRoom && activeMatch) {
-          sendRejoinSnapshotBundle(ctx, ctx.roomId, activeMatch, 'no_pending_fallback');
-          logWsEvent('ws_rejoin_ready_no_pending_fallback_sent', {
-            connectionId: ctx.connectionId,
-            tgUserId: ctx.tgUserId,
-            roomId: ctx.roomId,
-            matchId: ctx.matchId,
-            gotAttemptId: msg.rejoinAttemptId,
-          });
-          return;
-        }
-
         logWsEvent('ws_rejoin_ready_drop_no_pending', {
           connectionId: ctx.connectionId,
           tgUserId: ctx.tgUserId,
           roomId: ctx.roomId,
           matchId: ctx.matchId,
           gotAttemptId: msg.rejoinAttemptId,
-          fallbackRoomMatchId: fallbackRoom?.matchId ?? null,
-          fallbackMatchRoomId: activeMatch?.roomId ?? null,
-          fallbackMatchId: activeMatch?.matchId ?? null,
         });
         return;
       }
