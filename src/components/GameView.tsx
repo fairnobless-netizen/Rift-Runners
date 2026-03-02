@@ -185,7 +185,6 @@ const INTRO_PLACEHOLDER_MS = 5500;
 const MP_RESUME_COUNTDOWN_START = 5;
 const MP_RESUME_COUNTDOWN_STEP_MS = 1000;
 const MP_RESUME_COUNTDOWN_FAILSAFE_MS = 7000;
-const REJOIN_BOOTSTRAP_RETRY_DELAYS_MS = [250, 750, 1500] as const;
 const ONBOARDING_DONE_KEY = 'rift_onboarding_v1_done';
 const MOBILE_ROTATE_OVERLAY_BREAKPOINT = 700;
 const DISPLAY_NAME_KEY = 'rr_display_name_v1';
@@ -395,10 +394,6 @@ export default function GameView(): JSX.Element {
   const rejoinImplicitWorldInitMatchIdRef = useRef<string | null>(null);
   const rejoinImplicitSnapshotMatchIdRef = useRef<string | null>(null);
   const rejoinAttemptIdRef = useRef<string | null>(null);
-  const rejoinBootstrapRetryCountRef = useRef(0);
-  const rejoinBootstrapRetryTimerRef = useRef<number | null>(null);
-  const rejoinBootstrapWorldInitSeenRef = useRef(false);
-  const rejoinBootstrapLastSnapshotKeyRef = useRef<string | null>(null);
   const rejoinCompletionSentRef = useRef(false);
   const resumeApplyRejectStreakRef = useRef(0);
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
@@ -453,20 +448,6 @@ export default function GameView(): JSX.Element {
     }, MP_RESUME_COUNTDOWN_FAILSAFE_MS);
   }, [stopMpResumeCountdown]);
 
-  const stopRejoinBootstrapRetry = useCallback((reason: 'world_init_seen' | 'world_ready' | 'room_or_match_changed' | 'max_retries'): void => {
-    if (rejoinBootstrapRetryTimerRef.current != null) {
-      window.clearTimeout(rejoinBootstrapRetryTimerRef.current);
-      rejoinBootstrapRetryTimerRef.current = null;
-    }
-    diagnosticsStore.log('ROOM', 'INFO', 'rejoin:bootstrap_retry_stop', {
-      reason,
-      retryCount: rejoinBootstrapRetryCountRef.current,
-      roomCode: expectedRoomCodeRef.current,
-      matchId: expectedMatchIdRef.current,
-      attemptId: rejoinAttemptIdRef.current,
-    });
-  }, []);
-
   const resetResumeAttemptState = useCallback((nextPhase: RejoinPhase = 'idle'): void => {
     if (resumeLifecycleActiveRef.current) {
       diagnosticsStore.log('ROOM', 'INFO', 'resume_exit', { nextPhase });
@@ -481,13 +462,6 @@ export default function GameView(): JSX.Element {
     resumeRoomCodeRef.current = null;
     resumeExpectedMatchIdRef.current = null;
     rejoinAttemptIdRef.current = null;
-    rejoinBootstrapRetryCountRef.current = 0;
-    rejoinBootstrapWorldInitSeenRef.current = false;
-    rejoinBootstrapLastSnapshotKeyRef.current = null;
-    if (rejoinBootstrapRetryTimerRef.current != null) {
-      window.clearTimeout(rejoinBootstrapRetryTimerRef.current);
-      rejoinBootstrapRetryTimerRef.current = null;
-    }
     resumeApplyRejectStreakRef.current = 0;
     pendingWorldInitRef.current = null;
     pendingSnapshotRef.current = null;
@@ -1541,13 +1515,6 @@ export default function GameView(): JSX.Element {
     setMultiplayerSnapshotTeamScore(null);
     setMultiplayerDisconnectedByUserId({});
     handledMatchEventIdsRef.current.clear();
-    rejoinBootstrapRetryCountRef.current = 0;
-    rejoinBootstrapWorldInitSeenRef.current = false;
-    rejoinBootstrapLastSnapshotKeyRef.current = null;
-    if (rejoinBootstrapRetryTimerRef.current != null) {
-      window.clearTimeout(rejoinBootstrapRetryTimerRef.current);
-      rejoinBootstrapRetryTimerRef.current = null;
-    }
   }, [currentRoom?.roomCode]);
 
   useEffect(() => {
@@ -1566,13 +1533,6 @@ export default function GameView(): JSX.Element {
       setMultiplayerDisconnectedByUserId({});
       handledMatchEventIdsRef.current.clear();
       rejoinAttemptIdRef.current = null;
-      rejoinBootstrapRetryCountRef.current = 0;
-      rejoinBootstrapWorldInitSeenRef.current = false;
-      rejoinBootstrapLastSnapshotKeyRef.current = null;
-      if (rejoinBootstrapRetryTimerRef.current != null) {
-        window.clearTimeout(rejoinBootstrapRetryTimerRef.current);
-        rejoinBootstrapRetryTimerRef.current = null;
-      }
       setRejoinPhase('idle');
       sceneRef.current?.resetMultiplayerNetState();
     }
@@ -1603,13 +1563,6 @@ export default function GameView(): JSX.Element {
     }
 
     rejoinAttemptIdRef.current = lastAck.rejoinAttemptId;
-    rejoinBootstrapRetryCountRef.current = 0;
-    rejoinBootstrapWorldInitSeenRef.current = false;
-    rejoinBootstrapLastSnapshotKeyRef.current = null;
-    if (rejoinBootstrapRetryTimerRef.current != null) {
-      window.clearTimeout(rejoinBootstrapRetryTimerRef.current);
-      rejoinBootstrapRetryTimerRef.current = null;
-    }
     setRejoinPhase('rejoin_resetting');
     expectedMatchIdRef.current = lastAck.matchId;
     setCurrentMatchId(lastAck.matchId);
@@ -1647,20 +1600,6 @@ export default function GameView(): JSX.Element {
 
     setRejoinPhase('rejoin_ready');
   }, [handleResumeFailure, rejoinPhase, resetMpMatchRuntimeForNewMatch, resumeJoinInProgress, ws, ws.messages]);
-
-  useEffect(() => {
-    const lastWorldInit = [...ws.messages].reverse().find(isMatchWorldInit);
-    if (!lastWorldInit) return;
-
-    const expectedRoomCode = expectedRoomCodeRef.current;
-    const expectedMatchId = expectedMatchIdRef.current;
-    if (!expectedRoomCode || !expectedMatchId) return;
-
-    if (lastWorldInit.roomCode === expectedRoomCode && lastWorldInit.matchId === expectedMatchId) {
-      rejoinBootstrapWorldInitSeenRef.current = true;
-      stopRejoinBootstrapRetry('world_init_seen');
-    }
-  }, [stopRejoinBootstrapRetry, ws.messages]);
 
 
   useEffect(() => {
@@ -1877,102 +1816,6 @@ export default function GameView(): JSX.Element {
       }
     }
   }, [resumeJoinInProgress, switchToNextMatch, ws.messages]);
-
-  useEffect(() => {
-    const lastSnapshotMsg = [...ws.messages].reverse().find((message): message is MatchSnapshotMessage => message.type === 'match:snapshot');
-    if (!lastSnapshotMsg) return;
-    if (!resumeJoinInProgress) return;
-    if (!rejoinAttemptIdRef.current) return;
-
-    const expectedRoomCode = expectedRoomCodeRef.current;
-    const expectedMatchId = expectedMatchIdRef.current;
-    if (!expectedRoomCode || !expectedMatchId) return;
-
-    const roomCode = currentRoom?.roomCode ?? null;
-    const roomPhase = currentRoom?.phase ?? null;
-    if (roomCode !== expectedRoomCode || roomPhase !== 'STARTED') {
-      stopRejoinBootstrapRetry('room_or_match_changed');
-      return;
-    }
-
-    if (worldReadyRef.current) {
-      stopRejoinBootstrapRetry('world_ready');
-      return;
-    }
-
-    if (rejoinBootstrapWorldInitSeenRef.current) {
-      stopRejoinBootstrapRetry('world_init_seen');
-      return;
-    }
-
-    const snapshot = lastSnapshotMsg.snapshot;
-    const gotRoomCode = snapshot.roomCode ?? null;
-    const gotMatchId = snapshot.matchId ?? null;
-    if (gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId) {
-      stopRejoinBootstrapRetry('room_or_match_changed');
-      return;
-    }
-
-    const snapshotKey = `${gotRoomCode}:${gotMatchId}:${snapshot.tick}`;
-    if (rejoinBootstrapLastSnapshotKeyRef.current === snapshotKey) return;
-    rejoinBootstrapLastSnapshotKeyRef.current = snapshotKey;
-
-    if (rejoinBootstrapRetryTimerRef.current != null) return;
-
-    const retryCount = rejoinBootstrapRetryCountRef.current;
-    if (retryCount >= REJOIN_BOOTSTRAP_RETRY_DELAYS_MS.length) {
-      stopRejoinBootstrapRetry('max_retries');
-      return;
-    }
-
-    const retryDelayMs = REJOIN_BOOTSTRAP_RETRY_DELAYS_MS[retryCount];
-    rejoinBootstrapRetryTimerRef.current = window.setTimeout(() => {
-      rejoinBootstrapRetryTimerRef.current = null;
-
-      const expectedRoomCodeNow = expectedRoomCodeRef.current;
-      const expectedMatchIdNow = expectedMatchIdRef.current;
-      const attemptId = rejoinAttemptIdRef.current;
-      const roomNow = currentRoom;
-
-      if (!expectedRoomCodeNow || !expectedMatchIdNow || !attemptId) return;
-      if (roomNow?.roomCode !== expectedRoomCodeNow || roomNow?.phase !== 'STARTED') {
-        stopRejoinBootstrapRetry('room_or_match_changed');
-        return;
-      }
-      if (worldReadyRef.current) {
-        stopRejoinBootstrapRetry('world_ready');
-        return;
-      }
-      if (rejoinBootstrapWorldInitSeenRef.current) {
-        stopRejoinBootstrapRetry('world_init_seen');
-        return;
-      }
-
-      rejoinBootstrapRetryCountRef.current += 1;
-      const retryAttempt = rejoinBootstrapRetryCountRef.current;
-      ws.send({
-        type: 'mp:rejoin_ready',
-        roomCode: expectedRoomCodeNow,
-        matchId: expectedMatchIdNow,
-        rejoinAttemptId: attemptId,
-      }, {
-        roomCode: expectedRoomCodeNow,
-        expectedMatchId: expectedMatchIdNow,
-      });
-
-      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:bootstrap_retry_sent', {
-        roomCode: expectedRoomCodeNow,
-        matchId: expectedMatchIdNow,
-        attemptId,
-        retryAttempt,
-        rejoin_bootstrap_retry_count: retryAttempt,
-      });
-
-      if (retryAttempt >= REJOIN_BOOTSTRAP_RETRY_DELAYS_MS.length) {
-        stopRejoinBootstrapRetry('max_retries');
-      }
-    }, retryDelayMs);
-  }, [currentRoom, resumeJoinInProgress, stopRejoinBootstrapRetry, ws, ws.messages]);
 
   useEffect(() => {
     const lastWorldInit = [...ws.messages].reverse().find(isMatchWorldInit);
