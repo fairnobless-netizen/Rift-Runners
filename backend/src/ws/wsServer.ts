@@ -1417,6 +1417,10 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return;
       }
 
+      if (!shouldAcceptInputForRateLimit(ctx)) {
+        return;
+      }
+
       const rawClientX = msg.payload?.x;
       const rawClientY = msg.payload?.y;
       const clientX = Number.isFinite(Number(rawClientX)) ? Number(rawClientX) : null;
