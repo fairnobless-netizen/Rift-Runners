@@ -2199,47 +2199,6 @@ export default function GameView(): JSX.Element {
     }
 
     if (!worldReadyRef.current) {
-      const pendingWorldInit = pendingWorldInitRef.current;
-      const scene = sceneRef.current;
-      const pendingWorldInitRoomCode = pendingWorldInit?.roomCode ?? null;
-      const pendingWorldInitMatchId = pendingWorldInit?.matchId ?? null;
-      const canFlushPendingWorldInit = Boolean(
-        scene
-        && pendingWorldInit
-        && expectedRoomCode
-        && snapshotExpectedMatchId
-        && pendingWorldInitRoomCode === expectedRoomCode
-        && pendingWorldInitMatchId === snapshotExpectedMatchId,
-      );
-
-      if (canFlushPendingWorldInit && scene && pendingWorldInit) {
-        try {
-          scene.applyMatchWorldInit(pendingWorldInit);
-          pendingWorldInitRef.current = null;
-          worldReadyRef.current = true;
-          scene.applyMatchSnapshot(snapshot, localTgUserId);
-          firstSnapshotReadyRef.current = true;
-          lastAppliedSnapshotTickRef.current = snapshot.tick;
-          maybeCompleteRejoinFromAppliedSnapshot(snapshot);
-          diagnosticsStore.log('ROOM', 'INFO', 'rejoin:flushed_world_init_on_snapshot', {
-            roomCode: expectedRoomCode,
-            matchId: snapshotExpectedMatchId,
-            snapTick: snapshot.tick ?? null,
-          });
-          return;
-        } catch (error) {
-          worldReadyRef.current = false;
-          diagnosticsStore.log('ROOM', 'ERROR', 'world_init:flush_failed_on_snapshot', {
-            roomCode: expectedRoomCode,
-            matchId: snapshotExpectedMatchId,
-            snapTick: snapshot.tick ?? null,
-            errorMessage: error instanceof Error ? error.message : String(error),
-            errorStack: error instanceof Error ? error.stack ?? null : null,
-          });
-          scene.triggerNetResync('world_init_apply_failed');
-        }
-      }
-
       const pendingSnapshot = pendingSnapshotRef.current;
       if (!pendingSnapshot || snapshot.tick > pendingSnapshot.tick) {
         pendingSnapshotRef.current = snapshot;
