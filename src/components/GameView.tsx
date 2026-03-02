@@ -390,6 +390,9 @@ export default function GameView(): JSX.Element {
   const resumeFirstSnapshotLoggedRef = useRef(false);
   const resumeInputUnblockedLoggedRef = useRef(false);
   const resumedActiveMatchIdRef = useRef<string | null>(null);
+  const rejoinImplicitStartedMatchIdRef = useRef<string | null>(null);
+  const rejoinImplicitWorldInitMatchIdRef = useRef<string | null>(null);
+  const rejoinImplicitSnapshotMatchIdRef = useRef<string | null>(null);
   const rejoinAttemptIdRef = useRef<string | null>(null);
   const rejoinCompletionSentRef = useRef(false);
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
@@ -463,6 +466,9 @@ export default function GameView(): JSX.Element {
     rejoinCompletionSentRef.current = false;
     pendingResumeIntentRef.current = null;
     resumeIntentExecutedRef.current = false;
+    rejoinImplicitStartedMatchIdRef.current = null;
+    rejoinImplicitWorldInitMatchIdRef.current = null;
+    rejoinImplicitSnapshotMatchIdRef.current = null;
   }, []);
   const handleResumeFailure = useCallback((message: string, options?: { stale?: boolean; nextPhase?: RejoinPhase }): void => {
     setRoomsError(message);
@@ -533,6 +539,9 @@ export default function GameView(): JSX.Element {
 
   const switchToNextMatch = useCallback((nextMatchId: string): void => {
     resetMpMatchRuntimeForNewMatch(nextMatchId);
+    rejoinImplicitStartedMatchIdRef.current = null;
+    rejoinImplicitWorldInitMatchIdRef.current = null;
+    rejoinImplicitSnapshotMatchIdRef.current = null;
     sceneRef.current?.forceEnterMatchStarted();
     setGameFlowPhase('playing');
     setMatchEndState(null);
@@ -1626,6 +1635,14 @@ export default function GameView(): JSX.Element {
       });
       switchToNextMatch(nextMatchId);
     }
+
+    if (resumeJoinInProgress && rejoinPhase === 'rejoin_wait_ack' && gotMatchId) {
+      rejoinImplicitStartedMatchIdRef.current = gotMatchId;
+      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:implicit_started_seen', {
+        roomCode: expectedRoomCode,
+        matchId: gotMatchId,
+      });
+    }
     setCurrentRoom((prev) => {
       if (!prev || prev.roomCode !== expectedRoomCode) return prev;
       if (prev.phase === 'STARTED') return prev;
@@ -1635,7 +1652,7 @@ export default function GameView(): JSX.Element {
       roomCode: expectedRoomCode,
       matchId: lastStarted.matchId,
     });
-  }, [resumeJoinInProgress, switchToNextMatch, ws.messages]);
+  }, [rejoinPhase, resumeJoinInProgress, switchToNextMatch, ws.messages]);
 
   useEffect(() => {
     const lastError = [...ws.messages].reverse().find((message) => message.type === 'match:error');
@@ -1848,7 +1865,34 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    if (resumeJoinInProgress && !(rejoinPhase === 'rejoin_ready' || rejoinPhase === 'rejoin_applying')) {
+    if (resumeJoinInProgress && rejoinPhase === 'rejoin_wait_ack') {
+      rejoinImplicitWorldInitMatchIdRef.current = gotMatchId;
+      const implicitStartedMatchId = rejoinImplicitStartedMatchIdRef.current;
+      const implicitSnapshotMatchId = rejoinImplicitSnapshotMatchIdRef.current;
+      const canImplicitReady = Boolean(
+        implicitStartedMatchId
+        && implicitStartedMatchId === gotMatchId
+        && implicitSnapshotMatchId
+        && implicitSnapshotMatchId === gotMatchId,
+      );
+      if (canImplicitReady) {
+        expectedMatchIdRef.current = gotMatchId;
+        setCurrentMatchId(gotMatchId);
+        setRejoinPhase('rejoin_ready');
+        diagnosticsStore.log('ROOM', 'WARN', 'rejoin:implicit_ack_failsafe_ready', {
+          roomCode: gotRoomCode,
+          matchId: gotMatchId,
+          source: 'world_init',
+        });
+      }
+    }
+
+    const isImplicitReadyFromWorldInit = resumeJoinInProgress
+      && rejoinPhase === 'rejoin_wait_ack'
+      && rejoinImplicitStartedMatchIdRef.current === gotMatchId
+      && rejoinImplicitSnapshotMatchIdRef.current === gotMatchId;
+
+    if (resumeJoinInProgress && !isImplicitReadyFromWorldInit && !(rejoinPhase === 'rejoin_ready' || rejoinPhase === 'rejoin_applying')) {
       pendingWorldInitRef.current = lastWorldInit;
       diagnosticsStore.log('ROOM', 'INFO', 'rejoin:buffer_world_init_not_ready', {
         roomCode: gotRoomCode,
@@ -2097,18 +2141,48 @@ export default function GameView(): JSX.Element {
     }
 
     if (resumeJoinInProgress && !(rejoinPhase === 'rejoin_ready' || rejoinPhase === 'rejoin_applying')) {
-      const pendingSnapshot = pendingSnapshotRef.current;
-      if (!pendingSnapshot || snapshot.tick > pendingSnapshot.tick) {
-        pendingSnapshotRef.current = snapshot;
+      if (rejoinPhase === 'rejoin_wait_ack') {
+        rejoinImplicitSnapshotMatchIdRef.current = gotMatchId;
+        const implicitStartedMatchId = rejoinImplicitStartedMatchIdRef.current;
+        const implicitWorldInitMatchId = rejoinImplicitWorldInitMatchIdRef.current;
+        const canImplicitReady = Boolean(
+          gotMatchId
+          && implicitStartedMatchId
+          && implicitStartedMatchId === gotMatchId
+          && implicitWorldInitMatchId
+          && implicitWorldInitMatchId === gotMatchId,
+        );
+        if (canImplicitReady) {
+          expectedMatchIdRef.current = gotMatchId;
+          setCurrentMatchId(gotMatchId);
+          setRejoinPhase('rejoin_ready');
+          diagnosticsStore.log('ROOM', 'WARN', 'rejoin:implicit_ack_failsafe_ready', {
+            roomCode: expectedRoomCode,
+            matchId: gotMatchId,
+            source: 'snapshot',
+          });
+        }
       }
-      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:buffer_snapshot_not_ready', {
-        expectedRoomCode,
-        gotRoomCode,
-        gotMatchId,
-        rejoinPhase,
-        snapTick: snapshot.tick ?? null,
-      });
-      return;
+
+      const isImplicitReadyFromSnapshot = rejoinPhase === 'rejoin_wait_ack'
+        && rejoinImplicitStartedMatchIdRef.current === gotMatchId
+        && rejoinImplicitWorldInitMatchIdRef.current === gotMatchId;
+      if (isImplicitReadyFromSnapshot) {
+        // Continue with normal apply flow below.
+      } else {
+        const pendingSnapshot = pendingSnapshotRef.current;
+        if (!pendingSnapshot || snapshot.tick > pendingSnapshot.tick) {
+          pendingSnapshotRef.current = snapshot;
+        }
+        diagnosticsStore.log('ROOM', 'INFO', 'rejoin:buffer_snapshot_not_ready', {
+          expectedRoomCode,
+          gotRoomCode,
+          gotMatchId,
+          rejoinPhase,
+          snapTick: snapshot.tick ?? null,
+        });
+        return;
+      }
     }
 
     if (gotMatchId !== snapshotExpectedMatchId) {
