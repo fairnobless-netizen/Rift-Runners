@@ -194,6 +194,16 @@ export function useWsClient(token?: string) {
       },
       onClose: (event) => {
         setConnected(false);
+        if (event.code === 4401) {
+          const authError = `Session expired (WS close ${event.code}${event.reason ? `: ${event.reason}` : ''})`;
+          setLastError(authError);
+          diagnosticsStore.setWsState({ status: 'ERROR', lastError: authError });
+          diagnosticsStore.log('WS', 'ERROR', 'connect:close_auth_failed', {
+            code: event.code,
+            reason: event.reason || null,
+          });
+        }
+
         const now = new Date().toISOString();
         diagnosticsStore.setWsState({
           status: 'CLOSED',
