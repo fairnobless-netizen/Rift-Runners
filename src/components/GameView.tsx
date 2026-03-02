@@ -375,6 +375,7 @@ export default function GameView(): JSX.Element {
   const [wrongMatchDrops, setWrongMatchDrops] = useState(0);
   const [duplicateTickDrops, setDuplicateTickDrops] = useState(0);
   const processedWsMessagesRef = useRef(0);
+  const wsMessagesRef = useRef(ws.messages);
 
   const wsJoinedRoomCodeRef = useRef<string | null>(null);
   const authReadyAtRef = useRef<number | null>(null);
@@ -1533,6 +1534,10 @@ export default function GameView(): JSX.Element {
 
 
   useEffect(() => {
+    wsMessagesRef.current = ws.messages;
+  }, [ws.messages]);
+
+  useEffect(() => {
     if (!resumeJoinInProgress) return;
     if (rejoinPhase !== 'rejoin_wait_ack') return;
 
@@ -1615,12 +1620,13 @@ export default function GameView(): JSX.Element {
     const roomCode = currentRoom.roomCode;
     const guardTimer = window.setTimeout(() => {
       if (!resumeJoinInProgress || rejoinPhase !== 'rejoin_wait_ack') return;
+      const msgs = wsMessagesRef.current;
 
-      const hasStartedForRoom = [...ws.messages].reverse().some((message) => (
+      const hasStartedForRoom = [...msgs].reverse().some((message) => (
         message.type === 'match:started'
         && message.roomCode === roomCode
       ));
-      const hasBundleTrafficForRoom = [...ws.messages].reverse().some((message) => {
+      const hasBundleTrafficForRoom = [...msgs].reverse().some((message) => {
         if (message.type === 'match:world_init') return message.roomCode === roomCode;
         if (message.type === 'match:snapshot') return message.snapshot?.roomCode === roomCode;
         return false;
@@ -1632,7 +1638,7 @@ export default function GameView(): JSX.Element {
         roomCode,
         hasStartedForRoom,
         hasBundleTrafficForRoom,
-        wsMessagesLength: ws.messages.length,
+        wsMessagesLength: msgs.length,
       });
       setRejoinPhase('rejoin_ready');
     }, 2000);
@@ -1640,7 +1646,7 @@ export default function GameView(): JSX.Element {
     return () => {
       window.clearTimeout(guardTimer);
     };
-  }, [currentRoom?.roomCode, rejoinPhase, resumeJoinInProgress, ws.messages]);
+  }, [currentRoom?.roomCode, rejoinPhase, resumeJoinInProgress]);
 
 
   useEffect(() => {
