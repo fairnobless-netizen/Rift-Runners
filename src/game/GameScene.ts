@@ -3606,20 +3606,20 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
-  public applyMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string): boolean {
+  public applyMatchSnapshot(snapshot: MatchSnapshotV1, localTgUserId?: string) {
     const accepted = this.pushMatchSnapshot(snapshot, localTgUserId);
-    if (!accepted) return false;
+    if (!accepted) return;
 
     const effectiveLocalId = localTgUserId ?? this.localTgUserId;
-    if (!effectiveLocalId) return false;
+    if (!effectiveLocalId) return;
 
     this.syncEnemiesFromSnapshot(snapshot.enemies ?? []);
 
     const me = snapshot.players?.find((p) => p.tgUserId === effectiveLocalId);
-    if (!me) return false;
+    if (!me) return;
 
     if (!this.worldReady) {
-      return false;
+      return;
     }
 
     if (!isInsideArena(this.arena, me.x, me.y) || !canOccupyCell(this.arena, me.x, me.y)) {
@@ -3627,7 +3627,7 @@ export class GameScene extends Phaser.Scene {
       this.needsNetResync = true;
       this.netResyncReason = 'invalid_authoritative_position';
       this.warnInvalidAuthoritativePosition(snapshot, me, effectiveLocalId);
-      return false;
+      return;
     }
 
     const localX = this.player.gridX;
@@ -3645,7 +3645,7 @@ export class GameScene extends Phaser.Scene {
       // otherwise we stay in hard-snap/reset loop forever
       this.needsNetResync = false;
       this.netResyncReason = null;
-      return true;
+      return;
     }
 
     this.prediction.reconcile({
@@ -3661,8 +3661,6 @@ export class GameScene extends Phaser.Scene {
     this.mpLocalInputQueue = this.mpLocalInputQueue.filter((queued) => queued.seq > me.lastInputSeq);
     this.mpLastAppliedSeq = Math.max(this.mpLastAppliedSeq, me.lastInputSeq);
     this.tryStartMpBufferedMove(this.time.now);
-
-    return true;
   }
 
 
