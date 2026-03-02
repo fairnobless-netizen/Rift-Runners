@@ -633,6 +633,8 @@ export default function GameView(): JSX.Element {
       gateReason = 'no_match';
     } else if (!worldReadyRef.current) {
       gateReason = 'world_not_ready';
+    } else if (!firstSnapshotReadyRef.current) {
+      gateReason = 'await_first_snapshot';
     } else if (needsNetResync) {
       gateReason = 'await_net_resync';
     } else if (mpResumeCountdownActive) {
@@ -654,6 +656,14 @@ export default function GameView(): JSX.Element {
     });
 
     if (gateReason) {
+      if (gateReason === 'await_first_snapshot') {
+        diagnosticsStore.log('ROOM', 'INFO', 'input_gate_denied_await_first_snapshot', {
+          roomCode: expectedRoomCode ?? currentRoom?.roomCode ?? null,
+          matchId: expectedMatchId ?? null,
+          resumeJoinInProgress,
+          worldReady: worldReadyRef.current,
+        });
+      }
       setBombGateReason(gateReason);
       return;
     }
@@ -684,7 +694,7 @@ export default function GameView(): JSX.Element {
         expectedMatchId,
       },
     );
-  }, [currentRoom?.phase, currentRoom?.roomCode, gameFlowPhase, lastSnapshotAt, mpResumeCountdownActive, ws]);
+  }, [currentRoom?.phase, currentRoom?.roomCode, gameFlowPhase, lastSnapshotAt, mpResumeCountdownActive, resumeJoinInProgress, ws]);
 
   const isMultiplayerDebugEnabled = isDebugEnabled(window.location.search);
   const wsDiagnostics = {
@@ -1547,7 +1557,13 @@ export default function GameView(): JSX.Element {
       handledMatchEventIdsRef.current.clear();
       rejoinAttemptIdRef.current = null;
       setRejoinPhase('idle');
+      sceneRef.current?.hardResetMultiplayerRejoinRuntime('ws_disconnected');
       sceneRef.current?.resetMultiplayerNetState();
+      diagnosticsStore.log('ROOM', 'INFO', 'mp_rejoin_hard_reset', {
+        reason: 'ws_disconnected',
+        matchId: expectedMatchIdRef.current ?? null,
+        roomCode: expectedRoomCodeRef.current ?? null,
+      });
     }
   }, [ws.connected]);
 
@@ -1587,7 +1603,13 @@ export default function GameView(): JSX.Element {
     lastAppliedSnapshotTickRef.current = null;
     handledMatchEventIdsRef.current.clear();
     sceneRef.current?.setActiveMultiplayerSession(lastAck.roomCode, lastAck.matchId);
+    sceneRef.current?.hardResetMultiplayerRejoinRuntime('rejoin_resetting');
     sceneRef.current?.resetMultiplayerNetState();
+    diagnosticsStore.log('ROOM', 'INFO', 'mp_rejoin_hard_reset', {
+      reason: 'rejoin_resetting',
+      matchId: lastAck.matchId,
+      roomCode: lastAck.roomCode,
+    });
 
     ws.send({
       type: 'mp:rejoin_ready',
