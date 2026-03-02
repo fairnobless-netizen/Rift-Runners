@@ -395,7 +395,6 @@ export default function GameView(): JSX.Element {
   const rejoinImplicitSnapshotMatchIdRef = useRef<string | null>(null);
   const rejoinAttemptIdRef = useRef<string | null>(null);
   const rejoinCompletionSentRef = useRef(false);
-  const resumeApplyRejectStreakRef = useRef(0);
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
   const [sceneEpoch, setSceneEpoch] = useState(0);
@@ -462,7 +461,6 @@ export default function GameView(): JSX.Element {
     resumeRoomCodeRef.current = null;
     resumeExpectedMatchIdRef.current = null;
     rejoinAttemptIdRef.current = null;
-    resumeApplyRejectStreakRef.current = 0;
     pendingWorldInitRef.current = null;
     pendingSnapshotRef.current = null;
     rejoinCompletionSentRef.current = false;
@@ -1921,31 +1919,7 @@ export default function GameView(): JSX.Element {
     }
 
     try {
-      const applied = scene.applyMatchWorldInit(lastWorldInit);
-      if (!applied) {
-        worldReadyRef.current = false;
-        pendingWorldInitRef.current = lastWorldInit;
-        if (resumeJoinInProgress) {
-          resumeApplyRejectStreakRef.current += 1;
-          if (resumeApplyRejectStreakRef.current >= 3) {
-            handleResumeFailure('Resume failed: unable to apply world state (client out of sync).', { stale: false });
-          }
-        }
-        const routingStats = scene.getSnapshotRoutingStats();
-        diagnosticsStore.log('ROOM', 'WARN', 'world_init:rejected_by_scene', {
-          expectedRoomCode,
-          expectedMatchId,
-          gotRoomCode,
-          gotMatchId,
-          sceneSessionRoomCode: routingStats.currentRoomCode,
-          sceneSessionMatchId: routingStats.currentMatchId,
-        });
-        if (resumeJoinInProgress && expectedRoomCode && expectedMatchId && (gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId)) {
-          scene.triggerNetResync('resume_apply_rejected');
-        }
-        return;
-      }
-      resumeApplyRejectStreakRef.current = 0;
+      scene.applyMatchWorldInit(lastWorldInit);
       pendingWorldInitRef.current = null;
     } catch (error) {
       worldReadyRef.current = false;
@@ -1984,35 +1958,18 @@ export default function GameView(): JSX.Element {
 
     const pendingSnapshot = pendingSnapshotRef.current;
     if (pendingSnapshot) {
-      const appliedSnapshot = scene.applyMatchSnapshot(pendingSnapshot, localTgUserId);
-      if (appliedSnapshot) {
-        resumeApplyRejectStreakRef.current = 0;
-        firstSnapshotReadyRef.current = true;
-        lastAppliedSnapshotTickRef.current = pendingSnapshot.tick;
-        pendingSnapshotRef.current = null;
-        maybeCompleteRejoinFromAppliedSnapshot(pendingSnapshot);
-        diagnosticsStore.log('ROOM', 'INFO', 'snapshot:applied_pending_after_world_init', {
-          roomCode: pendingSnapshot.roomCode ?? null,
-          matchId: pendingSnapshot.matchId ?? null,
-          snapTick: pendingSnapshot.tick ?? null,
-        });
-      } else {
-        pendingSnapshotRef.current = pendingSnapshot;
-        if (resumeJoinInProgress) {
-          resumeApplyRejectStreakRef.current += 1;
-          if (resumeApplyRejectStreakRef.current >= 3) {
-            handleResumeFailure('Resume failed: unable to apply world state (client out of sync).', { stale: false });
-          }
-        }
-        diagnosticsStore.log('ROOM', 'WARN', 'snapshot:rejected_by_scene_pending_after_world_init', {
-          roomCode: pendingSnapshot.roomCode ?? null,
-          matchId: pendingSnapshot.matchId ?? null,
-          snapTick: pendingSnapshot.tick ?? null,
-          resumeJoinInProgress,
-        });
-      }
+      scene.applyMatchSnapshot(pendingSnapshot, localTgUserId);
+      firstSnapshotReadyRef.current = true;
+      lastAppliedSnapshotTickRef.current = pendingSnapshot.tick;
+      pendingSnapshotRef.current = null;
+      maybeCompleteRejoinFromAppliedSnapshot(pendingSnapshot);
+      diagnosticsStore.log('ROOM', 'INFO', 'snapshot:applied_pending_after_world_init', {
+        roomCode: pendingSnapshot.roomCode ?? null,
+        matchId: pendingSnapshot.matchId ?? null,
+        snapTick: pendingSnapshot.tick ?? null,
+      });
     }
-  }, [handleResumeFailure, localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, ws.messages]);
+  }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, ws.messages]);
 
   useEffect(() => {
     const pendingWorldInit = pendingWorldInitRef.current;
@@ -2055,28 +2012,7 @@ export default function GameView(): JSX.Element {
     }
 
     try {
-      const applied = scene.applyMatchWorldInit(pendingWorldInit);
-      if (!applied) {
-        worldReadyRef.current = false;
-        pendingWorldInitRef.current = pendingWorldInit;
-        if (resumeJoinInProgress) {
-          resumeApplyRejectStreakRef.current += 1;
-          if (resumeApplyRejectStreakRef.current >= 3) {
-            handleResumeFailure('Resume failed: unable to apply world state (client out of sync).', { stale: false });
-          }
-        }
-        diagnosticsStore.log('ROOM', 'WARN', 'world_init:rejected_by_scene', {
-          expectedRoomCode,
-          expectedMatchId,
-          gotRoomCode,
-          gotMatchId,
-        });
-        if (resumeJoinInProgress && expectedRoomCode && expectedMatchId && (gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId)) {
-          scene.triggerNetResync('resume_apply_rejected');
-        }
-        return;
-      }
-      resumeApplyRejectStreakRef.current = 0;
+      scene.applyMatchWorldInit(pendingWorldInit);
       pendingWorldInitRef.current = null;
     } catch (error) {
       worldReadyRef.current = false;
@@ -2114,30 +2050,12 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    const appliedSnapshot = scene.applyMatchSnapshot(pendingSnapshot, localTgUserId);
-    if (!appliedSnapshot) {
-      pendingSnapshotRef.current = pendingSnapshot;
-      if (resumeJoinInProgress) {
-        resumeApplyRejectStreakRef.current += 1;
-        if (resumeApplyRejectStreakRef.current >= 3) {
-          handleResumeFailure('Resume failed: unable to apply world state (client out of sync).', { stale: false });
-        }
-      }
-      diagnosticsStore.log('ROOM', 'WARN', 'snapshot:rejected_by_scene_after_buffered_world_init_flush', {
-        expectedRoomCode,
-        expectedMatchId,
-        gotRoomCode: pendingSnapshot.roomCode ?? null,
-        gotMatchId: pendingSnapshot.matchId ?? null,
-        snapTick: pendingSnapshot.tick ?? null,
-      });
-      return;
-    }
-    resumeApplyRejectStreakRef.current = 0;
+    scene.applyMatchSnapshot(pendingSnapshot, localTgUserId);
     firstSnapshotReadyRef.current = true;
     lastAppliedSnapshotTickRef.current = pendingSnapshot.tick;
     pendingSnapshotRef.current = null;
     maybeCompleteRejoinFromAppliedSnapshot(pendingSnapshot);
-  }, [handleResumeFailure, localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, sceneEpoch, soloStartReady]);
+  }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, sceneEpoch, soloStartReady]);
 
 
   useEffect(() => {
@@ -2386,51 +2304,10 @@ export default function GameView(): JSX.Element {
 
       if (canFlushPendingWorldInit && scene && pendingWorldInit) {
         try {
-          const appliedWorldInit = scene.applyMatchWorldInit(pendingWorldInit);
-          if (!appliedWorldInit) {
-            worldReadyRef.current = false;
-            pendingWorldInitRef.current = pendingWorldInit;
-            if (resumeJoinInProgress) {
-              resumeApplyRejectStreakRef.current += 1;
-              if (resumeApplyRejectStreakRef.current >= 3) {
-                handleResumeFailure('Resume failed: unable to apply world state (client out of sync).', { stale: false });
-              }
-            }
-            diagnosticsStore.log('ROOM', 'WARN', 'world_init:rejected_by_scene', {
-              expectedRoomCode,
-              expectedMatchId: snapshotExpectedMatchId,
-              gotRoomCode: pendingWorldInitRoomCode,
-              gotMatchId: pendingWorldInitMatchId,
-            });
-            if (resumeJoinInProgress && expectedRoomCode && snapshotExpectedMatchId && (pendingWorldInitRoomCode !== expectedRoomCode || pendingWorldInitMatchId !== snapshotExpectedMatchId)) {
-              scene.triggerNetResync('resume_apply_rejected');
-            }
-            return;
-          }
+          scene.applyMatchWorldInit(pendingWorldInit);
           pendingWorldInitRef.current = null;
           worldReadyRef.current = true;
-          const appliedSnapshot = scene.applyMatchSnapshot(snapshot, localTgUserId);
-          if (!appliedSnapshot) {
-            pendingSnapshotRef.current = snapshot;
-            if (resumeJoinInProgress) {
-              resumeApplyRejectStreakRef.current += 1;
-              if (resumeApplyRejectStreakRef.current >= 3) {
-                handleResumeFailure('Resume failed: unable to apply world state (client out of sync).', { stale: false });
-              }
-            }
-            if (resumeJoinInProgress && expectedRoomCode && snapshotExpectedMatchId && (gotRoomCode !== expectedRoomCode || gotMatchId !== snapshotExpectedMatchId)) {
-              scene.triggerNetResync('resume_snapshot_rejected');
-            }
-            diagnosticsStore.log('ROOM', 'WARN', 'snapshot:rejected_by_scene_after_world_init_flush', {
-              expectedRoomCode,
-              expectedMatchId: snapshotExpectedMatchId,
-              gotRoomCode,
-              gotMatchId,
-              snapTick: snapshot.tick ?? null,
-            });
-            return;
-          }
-          resumeApplyRejectStreakRef.current = 0;
+          scene.applyMatchSnapshot(snapshot, localTgUserId);
           firstSnapshotReadyRef.current = true;
           lastAppliedSnapshotTickRef.current = snapshot.tick;
           maybeCompleteRejoinFromAppliedSnapshot(snapshot);
@@ -2470,29 +2347,7 @@ export default function GameView(): JSX.Element {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    const appliedSnapshot = scene.applyMatchSnapshot(snapshot, localTgUserId);
-    if (!appliedSnapshot) {
-      if (resumeJoinInProgress) {
-        pendingSnapshotRef.current = snapshot;
-        resumeApplyRejectStreakRef.current += 1;
-        if (resumeApplyRejectStreakRef.current >= 3) {
-          handleResumeFailure('Resume failed: unable to apply world state (client out of sync).', { stale: false });
-        }
-        if (expectedRoomCode && snapshotExpectedMatchId && (gotRoomCode !== expectedRoomCode || gotMatchId !== snapshotExpectedMatchId)) {
-          scene.triggerNetResync('resume_snapshot_rejected');
-        }
-      }
-      diagnosticsStore.log('ROOM', 'WARN', 'snapshot:rejected_by_scene', {
-        expectedRoomCode,
-        expectedMatchId: snapshotExpectedMatchId,
-        gotRoomCode,
-        gotMatchId,
-        snapTick: snapshot.tick ?? null,
-        resumeJoinInProgress,
-      });
-      return;
-    }
-    resumeApplyRejectStreakRef.current = 0;
+    scene.applyMatchSnapshot(snapshot, localTgUserId);
     firstSnapshotReadyRef.current = true;
     if (resumeLifecycleActiveRef.current && !resumeFirstSnapshotLoggedRef.current) {
       resumeFirstSnapshotLoggedRef.current = true;
@@ -2517,7 +2372,7 @@ export default function GameView(): JSX.Element {
         });
       }
     }
-  }, [currentRoom?.phase, currentRoom?.roomCode, handleResumeFailure, isMultiplayerDebugEnabled, localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, multiplayerUiOpen, rejoinPhase, resumeJoinInProgress, switchToNextMatch, ws, ws.messages]);
+  }, [ws, ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode, currentRoom?.phase, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, switchToNextMatch]);
 
 
   useEffect(() => {
