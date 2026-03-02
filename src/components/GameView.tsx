@@ -2116,6 +2116,22 @@ export default function GameView(): JSX.Element {
     }
 
     const snapshotExpectedMatchId = expectedMatchIdRef.current;
+
+    if (
+      resumeJoinInProgress
+      && rejoinPhase === 'rejoin_wait_ack'
+      && currentRoom?.phase === 'STARTED'
+      && gotMatchId
+      && rejoinImplicitStartedMatchIdRef.current !== gotMatchId
+    ) {
+      rejoinImplicitStartedMatchIdRef.current = gotMatchId;
+      diagnosticsStore.log('ROOM', 'WARN', 'rejoin:started_promoted_from_snapshot', {
+        roomCode: expectedRoomCode,
+        matchId: gotMatchId,
+        source: 'snapshot_phase_started_fallback',
+      });
+    }
+
     if (!snapshotExpectedMatchId) {
       if (!gotMatchId) {
         const pendingSnapshot = pendingSnapshotRef.current;
@@ -2356,7 +2372,7 @@ export default function GameView(): JSX.Element {
         });
       }
     }
-  }, [ws, ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, switchToNextMatch]);
+  }, [ws, ws.messages, localTgUserId, multiplayerUiOpen, isMultiplayerDebugEnabled, currentRoom?.roomCode, currentRoom?.phase, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, switchToNextMatch]);
 
 
   useEffect(() => {
