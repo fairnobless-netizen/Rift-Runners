@@ -124,7 +124,7 @@ type AccountInfo = {
 };
 
 type GameFlowPhase = 'intro' | 'start' | 'playing';
-type RejoinPhase = 'idle' | 'rejoin_wait_ack' | 'rejoin_resetting' | 'rejoin_ready' | 'rejoin_applying' | 'rejoin_complete' | 'rejoin_failed';
+type RejoinPhase = 'idle' | 'rejoin_wait_ack' | 'rejoin_ready' | 'rejoin_applying' | 'rejoin_complete' | 'rejoin_failed';
 type NicknameCheckState =
   | 'idle'
   | 'checking'
@@ -474,7 +474,7 @@ export default function GameView(): JSX.Element {
     setDeepLinkJoinCode(null);
   }, [resetResumeAttemptState, stopMpResumeCountdown]);
   const cancelResumeAttemptByUser = useCallback((): void => {
-    const cancellable = rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying';
+    const cancellable = rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_applying';
     if (!resumeJoinInProgress || !cancellable) return;
 
     resetResumeAttemptState('idle');
@@ -1576,7 +1576,6 @@ export default function GameView(): JSX.Element {
     }
 
     rejoinAttemptIdRef.current = lastAck.rejoinAttemptId;
-    setRejoinPhase('rejoin_resetting');
     expectedMatchIdRef.current = lastAck.matchId;
     setCurrentMatchId(lastAck.matchId);
     worldReadyRef.current = false;
@@ -1587,7 +1586,6 @@ export default function GameView(): JSX.Element {
     lastAppliedSnapshotTickRef.current = null;
     handledMatchEventIdsRef.current.clear();
     sceneRef.current?.setActiveMultiplayerSession(lastAck.roomCode, lastAck.matchId);
-    sceneRef.current?.resetMultiplayerNetState();
 
     ws.send({
       type: 'mp:rejoin_ready',
@@ -1612,7 +1610,7 @@ export default function GameView(): JSX.Element {
     });
 
     setRejoinPhase('rejoin_ready');
-  }, [handleResumeFailure, rejoinPhase, resetMpMatchRuntimeForNewMatch, resumeJoinInProgress, ws, ws.messages]);
+  }, [handleResumeFailure, rejoinPhase, resumeJoinInProgress, ws, ws.messages]);
 
 
   useEffect(() => {
@@ -3972,7 +3970,7 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {gameFlowPhase === 'playing' && resumeJoinInProgress && (rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying') && (
+      {gameFlowPhase === 'playing' && resumeJoinInProgress && (rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_applying') && (
         <div className="waiting-overlay" role="status" aria-live="polite">
           <div className="waiting-overlay__card">
             <strong>Rejoining match…</strong>
