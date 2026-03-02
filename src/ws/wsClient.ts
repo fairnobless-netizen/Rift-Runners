@@ -19,8 +19,9 @@ export class WsClient {
 
     const url = new URL(this.opts.url);
     url.searchParams.set('token', this.opts.token);
+    const authSubprotocol = this.opts.token ? `session_token.${encodeURIComponent(this.opts.token)}` : undefined;
 
-    this.ws = new WebSocket(url.toString(), []);
+    this.ws = authSubprotocol ? new WebSocket(url.toString(), [authSubprotocol]) : new WebSocket(url.toString());
     this.ws.onopen = () => {
       this.opts.onOpen?.();
     };
@@ -35,6 +36,12 @@ export class WsClient {
     };
 
     this.ws.onclose = (event) => {
+      if (event.code === 4401) {
+        console.warn('[WS] Authentication failed on close (4401).', {
+          code: event.code,
+          reason: event.reason || '(no reason)',
+        });
+      }
       this.ws = undefined;
       this.opts.onClose?.(event);
     };
