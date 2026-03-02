@@ -1,3 +1,5 @@
+import { getDebugState } from './debugFlags';
+
 export type DiagnosticsLevel = 'INFO' | 'WARN' | 'ERROR';
 export type DiagnosticsCategory = 'WS' | 'ROOM' | 'AUTH' | 'UI' | 'NET';
 
@@ -78,30 +80,42 @@ const state: DiagnosticsSnapshot = {
 const listeners = new Set<() => void>();
 
 
-function resolveDiagnosticsEnabled(): boolean {
+type DiagnosticsEnablement = {
+  enabled: boolean;
+  reason: 'dev' | 'diag' | 'debug' | 'disabled';
+};
+
+function resolveDiagnosticsEnablement(): DiagnosticsEnablement {
   if (import.meta.env.DEV) {
-    return true;
+    return { enabled: true, reason: 'dev' };
   }
 
   if (typeof window === 'undefined') {
-    return false;
+    return { enabled: false, reason: 'disabled' };
   }
 
   try {
     const search = new URLSearchParams(window.location.search);
     if (search.get('diag') === '1') {
-      return true;
+      return { enabled: true, reason: 'diag' };
     }
   } catch {}
 
   try {
-    return window.localStorage.getItem('rr_diag') === '1';
+    if (window.localStorage.getItem('rr_diag') === '1') {
+      return { enabled: true, reason: 'diag' };
+    }
   } catch {
-    return false;
+    // Ignore storage access errors.
   }
+
+  return getDebugState(window.location.search).enabled
+    ? { enabled: true, reason: 'debug' }
+    : { enabled: false, reason: 'disabled' };
 }
 
-const DIAGNOSTICS_ENABLED = resolveDiagnosticsEnabled();
+const DIAGNOSTICS_ENABLEMENT = resolveDiagnosticsEnablement();
+const DIAGNOSTICS_ENABLED = DIAGNOSTICS_ENABLEMENT.enabled;
 
 
 function notify(): void {
@@ -193,3 +207,10 @@ export const diagnosticsStore = {
     return () => listeners.delete(listener);
   },
 };
+
+if (DIAGNOSTICS_ENABLED) {
+  diagnosticsStore.log('UI', 'INFO', 'diagnostics_enabled', {
+    enabled: true,
+    reason: DIAGNOSTICS_ENABLEMENT.reason,
+  });
+}
