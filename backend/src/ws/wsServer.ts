@@ -717,6 +717,12 @@ function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState)
   const createdAtMs = Date.now();
 
   send(ctx.socket, {
+    type: 'match:started',
+    roomCode: roomId,
+    matchId: match.matchId,
+  });
+
+  send(ctx.socket, {
     type: 'mp:rejoin_ack',
     roomCode: roomId,
     matchId: match.matchId,
@@ -812,12 +818,6 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
     tgUserId: ctx.tgUserId,
     roomId,
     reason: 'handshake_started',
-    matchId: activeMatch.matchId,
-  });
-
-  send(ctx.socket, {
-    type: 'match:started',
-    roomCode: roomId,
     matchId: activeMatch.matchId,
   });
 
