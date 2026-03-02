@@ -1901,8 +1901,25 @@ export default function GameView(): JSX.Element {
       setRejoinPhase('rejoin_applying');
     }
 
-    pendingWorldInitRef.current = null;
-    scene.applyMatchWorldInit(lastWorldInit);
+    try {
+      scene.applyMatchWorldInit(lastWorldInit);
+      pendingWorldInitRef.current = null;
+    } catch (error) {
+      worldReadyRef.current = false;
+      pendingWorldInitRef.current = lastWorldInit;
+      scene.triggerNetResync('world_init_apply_failed');
+      diagnosticsStore.log('ROOM', 'ERROR', 'world_init:apply_failed', {
+        roomCode: gotRoomCode,
+        matchId: activeExpectedMatchId,
+        source: 'match_world_init_effect',
+        rejoinPhase,
+        resumeJoinInProgress,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack ?? null : null,
+      });
+      return;
+    }
+
     const { gridW, gridH } = lastWorldInit.world;
     worldReadyRef.current = true;
     if (resumeLifecycleActiveRef.current && !resumeWorldReadyLoggedRef.current) {
@@ -1964,8 +1981,25 @@ export default function GameView(): JSX.Element {
       setRejoinPhase('rejoin_applying');
     }
 
-    pendingWorldInitRef.current = null;
-    scene.applyMatchWorldInit(pendingWorldInit);
+    try {
+      scene.applyMatchWorldInit(pendingWorldInit);
+      pendingWorldInitRef.current = null;
+    } catch (error) {
+      worldReadyRef.current = false;
+      pendingWorldInitRef.current = pendingWorldInit;
+      scene.triggerNetResync('world_init_apply_failed');
+      diagnosticsStore.log('ROOM', 'ERROR', 'world_init:apply_failed', {
+        roomCode: gotRoomCode,
+        matchId: expectedMatchId,
+        source: 'rejoin_flush_buffered_world_init',
+        rejoinPhase,
+        resumeJoinInProgress,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack ?? null : null,
+      });
+      return;
+    }
+
     worldReadyRef.current = true;
     if (resumeLifecycleActiveRef.current && !resumeWorldReadyLoggedRef.current) {
       resumeWorldReadyLoggedRef.current = true;
