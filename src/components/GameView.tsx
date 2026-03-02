@@ -394,6 +394,7 @@ export default function GameView(): JSX.Element {
   const rejoinCompletionSentRef = useRef(false);
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
+  const [sceneEpoch, setSceneEpoch] = useState(0);
   const [resumeModal, setResumeModal] = useState<{ open: boolean; roomCode: string; matchId: string | null } | null>(null);
   const [mpResumeCountdownActive, setMpResumeCountdownActive] = useState(false);
   const [mpResumeCountdownValue, setMpResumeCountdownValue] = useState(0);
@@ -1386,6 +1387,7 @@ export default function GameView(): JSX.Element {
 
     const scene = new GameScene(controlsRef.current, initialSoloResumeSnapshotRef.current);
     sceneRef.current = scene;
+    setSceneEpoch((v) => v + 1);
 
     const game = new Phaser.Game({
       type: Phaser.AUTO,
@@ -1409,6 +1411,7 @@ export default function GameView(): JSX.Element {
       game.destroy(true);
       gameRef.current = null;
       sceneRef.current = null;
+      setSceneEpoch((v) => v + 1);
     };
   }, [soloStartReady]);
 
@@ -1872,15 +1875,24 @@ export default function GameView(): JSX.Element {
       return;
     }
 
-    const scene = sceneRef.current;
-    if (!scene) return;
-
     if (resumeJoinInProgress && !(rejoinPhase === 'rejoin_ready' || rejoinPhase === 'rejoin_applying')) {
       pendingWorldInitRef.current = lastWorldInit;
       diagnosticsStore.log('ROOM', 'INFO', 'rejoin:buffer_world_init_not_ready', {
         roomCode: gotRoomCode,
         matchId: gotMatchId,
         rejoinPhase,
+      });
+      return;
+    }
+
+    const scene = sceneRef.current;
+    if (!scene) {
+      pendingWorldInitRef.current = lastWorldInit;
+      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:buffer_world_init_scene_not_ready', {
+        roomCode: gotRoomCode,
+        matchId: gotMatchId,
+        rejoinPhase,
+        resumeJoinInProgress,
       });
       return;
     }
@@ -1928,8 +1940,6 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     const pendingWorldInit = pendingWorldInitRef.current;
     if (!pendingWorldInit) return;
-    if (!resumeJoinInProgress) return;
-    if (!(rejoinPhase === 'rejoin_ready' || rejoinPhase === 'rejoin_applying')) return;
 
     const expectedRoomCode = expectedRoomCodeRef.current;
     const expectedMatchId = expectedMatchIdRef.current;
@@ -1943,7 +1953,17 @@ export default function GameView(): JSX.Element {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    setRejoinPhase('rejoin_applying');
+    diagnosticsStore.log('ROOM', 'INFO', 'rejoin:flush_buffered_world_init', {
+      roomCode: gotRoomCode,
+      matchId: gotMatchId,
+      rejoinPhase,
+      resumeJoinInProgress,
+    });
+
+    if (resumeJoinInProgress) {
+      setRejoinPhase('rejoin_applying');
+    }
+
     pendingWorldInitRef.current = null;
     scene.applyMatchWorldInit(pendingWorldInit);
     worldReadyRef.current = true;
@@ -1971,7 +1991,7 @@ export default function GameView(): JSX.Element {
     lastAppliedSnapshotTickRef.current = pendingSnapshot.tick;
     pendingSnapshotRef.current = null;
     maybeCompleteRejoinFromAppliedSnapshot(pendingSnapshot);
-  }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress]);
+  }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, sceneEpoch, soloStartReady]);
 
 
   useEffect(() => {
