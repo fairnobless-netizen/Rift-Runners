@@ -1802,37 +1802,64 @@ export default function GameView(): JSX.Element {
     const lastWorldInit = [...ws.messages].reverse().find(isMatchWorldInit);
     if (!lastWorldInit) return;
 
-    const gotRoomCode = lastWorldInit.roomCode ?? null;
-    const gotMatchId = lastWorldInit.matchId ?? null;
     const expectedRoomCode = expectedRoomCodeRef.current;
-    const expectedMatchId = expectedMatchIdRef.current;
-
-    if (!expectedRoomCode || !expectedMatchId) {
-      pendingWorldInitRef.current = lastWorldInit;
-      diagnosticsStore.log('ROOM', 'INFO', 'rejoin:buffer_world_init_expected_not_ready', {
-        gotRoomCode,
-        gotMatchId,
+    if (!expectedRoomCode) {
+      diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_world_init_no_expected_room', {
         expectedRoomCode,
-        expectedMatchId,
-        rejoinPhase,
-        resumeJoinInProgress,
+        gotRoomCode: lastWorldInit.roomCode ?? null,
+        gotMatchId: lastWorldInit.matchId ?? null,
       });
       return;
     }
 
     setLastWorldInitAt(Date.now());
+    const gotRoomCode = lastWorldInit.roomCode ?? null;
+    const gotMatchId = lastWorldInit.matchId ?? null;
 
     if (gotRoomCode !== expectedRoomCode) {
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_world_init', {
         expectedRoomCode,
-        expectedMatchId,
+        expectedMatchId: expectedMatchIdRef.current,
         gotRoomCode,
         gotMatchId,
       });
       return;
     }
 
-    if (gotMatchId !== expectedMatchId) {
+    let currentExpectedMatchId = expectedMatchIdRef.current;
+    if (!currentExpectedMatchId) {
+      const roomIsActiveMultiplayer = isMultiplayerMode
+        && currentRoom?.phase === 'STARTED'
+        && currentRoom.roomCode === expectedRoomCode;
+      if (roomIsActiveMultiplayer && gotMatchId) {
+        diagnosticsStore.log('ROOM', 'INFO', 'world_init_adopted_match_id', {
+          roomCode: expectedRoomCode,
+          matchId: gotMatchId,
+          expectedMatchIdWasNull: true,
+        });
+        switchToNextMatch(gotMatchId);
+        currentExpectedMatchId = gotMatchId;
+      }
+    }
+
+    if (gotMatchId && currentExpectedMatchId && gotMatchId !== currentExpectedMatchId) {
+      diagnosticsStore.log('ROOM', 'INFO', 'match_switch:from_world_init', {
+        roomCode: expectedRoomCode,
+        oldMatchId: currentExpectedMatchId,
+        newMatchId: gotMatchId,
+      });
+      switchToNextMatch(gotMatchId);
+    }
+
+    if (!currentExpectedMatchId && gotMatchId) {
+      diagnosticsStore.log('ROOM', 'INFO', 'firewall:bind_expected_match_from_world_init', {
+        expectedRoomCode,
+        gotMatchId,
+      });
+    }
+
+    const activeExpectedMatchId = expectedMatchIdRef.current;
+    if (!activeExpectedMatchId || gotMatchId !== activeExpectedMatchId) {
       setWrongMatchDrops((v) => v + 1);
       worldReadyRef.current = false;
       firstSnapshotReadyRef.current = false;
@@ -1841,7 +1868,7 @@ export default function GameView(): JSX.Element {
       sceneRef.current?.triggerNetResync('wrong_match_world_init');
       diagnosticsStore.log('ROOM', 'WARN', 'firewall:drop_world_init_match_mismatch', {
         expectedRoomCode,
-        expectedMatchId,
+        expectedMatchId: activeExpectedMatchId,
         gotRoomCode,
         gotMatchId,
       });
@@ -1883,7 +1910,7 @@ export default function GameView(): JSX.Element {
       scene.triggerNetResync('world_init_apply_failed');
       diagnosticsStore.log('ROOM', 'ERROR', 'world_init:apply_failed', {
         roomCode: gotRoomCode,
-        matchId: expectedMatchId,
+        matchId: activeExpectedMatchId,
         source: 'match_world_init_effect',
         rejoinPhase,
         resumeJoinInProgress,
@@ -1899,7 +1926,7 @@ export default function GameView(): JSX.Element {
       resumeWorldReadyLoggedRef.current = true;
       diagnosticsStore.log('ROOM', 'INFO', 'resume_world_ready', {
         roomCode: gotRoomCode,
-        matchId: expectedMatchId,
+        matchId: activeExpectedMatchId,
       });
     }
     if (resumeJoinInProgress) {
@@ -1907,7 +1934,7 @@ export default function GameView(): JSX.Element {
     }
     diagnosticsStore.log('ROOM', 'INFO', 'world_init:accepted', {
       roomCode: gotRoomCode,
-      matchId: expectedMatchId,
+      matchId: activeExpectedMatchId,
       gridW,
       gridH,
     });
@@ -1925,7 +1952,7 @@ export default function GameView(): JSX.Element {
         snapTick: pendingSnapshot.tick ?? null,
       });
     }
-  }, [localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, ws.messages]);
+  }, [currentRoom?.phase, currentRoom?.roomCode, isMultiplayerMode, localTgUserId, maybeCompleteRejoinFromAppliedSnapshot, rejoinPhase, resumeJoinInProgress, switchToNextMatch, ws.messages]);
 
   useEffect(() => {
     const pendingWorldInit = pendingWorldInitRef.current;
@@ -1935,21 +1962,8 @@ export default function GameView(): JSX.Element {
     const expectedMatchId = expectedMatchIdRef.current;
     const gotRoomCode = pendingWorldInit.roomCode ?? null;
     const gotMatchId = pendingWorldInit.matchId ?? null;
-
-    if (!expectedRoomCode || !expectedMatchId) {
-      return;
-    }
-
-    if (gotRoomCode !== expectedRoomCode || gotMatchId !== expectedMatchId) {
+    if (!expectedRoomCode || gotRoomCode !== expectedRoomCode || !expectedMatchId || gotMatchId !== expectedMatchId) {
       pendingWorldInitRef.current = null;
-      diagnosticsStore.log('ROOM', 'WARN', 'rejoin:drop_buffered_world_init_expected_mismatch', {
-        gotRoomCode,
-        gotMatchId,
-        expectedRoomCode,
-        expectedMatchId,
-        rejoinPhase,
-        resumeJoinInProgress,
-      });
       return;
     }
 
