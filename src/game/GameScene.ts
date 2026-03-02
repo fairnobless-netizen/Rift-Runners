@@ -3501,33 +3501,6 @@ export class GameScene extends Phaser.Scene {
     this.worldHashClient = null;
   }
 
-  public hardResetMultiplayerRejoinRuntime(_reason: string): void {
-    this.snapshotBuffer = [];
-    this.lastSnapshotTick = -1;
-    this.lastAppliedSnapshotTick = -1;
-
-    this.prediction.reset?.();
-    this.mpLocalInputQueue = [];
-    this.mpLastAppliedSeq = 0;
-    this.localInputQueue = [];
-    this.inputSeq = 0;
-
-    this.hasServerTimeOffset = false;
-    this.serverTimeOffsetMs = 0;
-    this.needsNetResync = false;
-    this.netResyncReason = null;
-
-    this.localRenderPos = null;
-    this.localRenderSnapCount = 0;
-    this.resetLocalRenderSegmentTracking(
-      this.player.gridX,
-      this.player.gridY,
-      this.lastAppliedSnapshotTick >= 0 ? this.lastAppliedSnapshotTick : this.simulationTick,
-    );
-
-    this.remotePlayers?.resetNetState?.();
-  }
-
   public forceEnterMatchStarted(): void {
     const prevState = {
       awaitingSoloContinue: this.awaitingSoloContinue,
