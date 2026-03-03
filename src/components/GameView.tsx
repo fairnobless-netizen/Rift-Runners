@@ -2755,6 +2755,23 @@ export default function GameView(): JSX.Element {
     }
   }, [currentRoom?.roomCode, gameFlowPhase, isMultiplayerDebugEnabled, pendingResumePrompt, showBootSplash]);
 
+  useEffect(() => {
+    const roomCode = currentRoom?.roomCode;
+    if (!pendingResumePrompt || !roomCode || resumePromptShownRef.current || resumePromptSuppressedRef.current) {
+      return;
+    }
+
+    setPendingResumePrompt(null);
+    resumePromptSuppressedRef.current = true;
+
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('ROOM', 'INFO', 'resume:pending_prompt_cleared_on_room_join', {
+        roomCode,
+        promptShown: resumePromptShownRef.current,
+      });
+    }
+  }, [currentRoom?.roomCode, isMultiplayerDebugEnabled, pendingResumePrompt]);
+
   const onCancelResumePrompt = useCallback((): void => {
     if (!resumeModal?.open) return;
 
