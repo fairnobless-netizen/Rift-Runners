@@ -286,7 +286,7 @@ export function MultiplayerModal({
               {friendsLoading ? <p className="rr-mp-empty">Loading friends...</p> : null}
 
               <section className="rr-mp-section rr-friends-panel">
-                <h4 className="rr-mp-section-title">Incoming requests</h4>
+                <h4 className="rr-mp-section-title">INCOMING REQUESTS</h4>
                 {incomingRequests.length === 0 ? <p className="rr-mp-empty">No incoming requests.</p> : null}
                 {incomingRequests.map((request) => (
                   <div key={request.fromTgUserId} className="rr-mp-card">
@@ -299,7 +299,7 @@ export function MultiplayerModal({
               </section>
 
               <section className="rr-mp-section rr-friends-panel">
-                <h4 className="rr-mp-section-title">Outgoing requests</h4>
+                <h4 className="rr-mp-section-title">OUTGOING REQUESTS</h4>
                 {outgoingRequests.length === 0 ? <p className="rr-mp-empty">No outgoing requests.</p> : null}
                 {outgoingRequests.map((request) => (
                   <div key={request.toTgUserId} className="rr-mp-card">
@@ -311,7 +311,7 @@ export function MultiplayerModal({
               </section>
 
               <section className="rr-mp-section rr-friends-panel">
-                <h4 className="rr-mp-section-title">Friends</h4>
+                <h4 className="rr-mp-section-title">FRIENDS</h4>
                 {friendsList.length === 0 ? <p className="rr-mp-empty">No friends yet.</p> : null}
                 {friendsList.map((friend) => (
                   <div key={friend.tgUserId} className="rr-mp-card">
@@ -329,13 +329,13 @@ export function MultiplayerModal({
             <section className="rr-mp-section rr-room-shell">
               {roomScreen === 'home' ? (
                 <div className="rr-room-home">
-                  <button type="button" onClick={() => setRoomScreen('create')}>Create</button>
-                  <button type="button" onClick={() => setRoomScreen('join')}>Join</button>
+                  <button type="button" className="rr-room-home-action rr-room-home-action--create" onClick={() => setRoomScreen('create')}>Create</button>
+                  <button type="button" className="rr-room-home-action rr-room-home-action--join" onClick={() => setRoomScreen('join')}>Join</button>
                 </div>
               ) : null}
 
               {roomScreen === 'create' ? (
-                <div className="rr-room-flow">
+                <div className="rr-room-flow rr-room-flow--create">
                   <div className="rr-room-flow-head">
                     <button type="button" className="ghost rr-room-back-button" onClick={() => setRoomScreen('home')}>Back</button>
                   </div>

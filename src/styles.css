@@ -1664,7 +1664,7 @@ html[data-orient="landscape"] .right-panel {
 .rr-mp-tabs {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.28rem;
+  gap: 0.35rem;
 }
 
 .rr-mp-tabs button,
@@ -1672,8 +1672,8 @@ html[data-orient="landscape"] .right-panel {
   border: 1px solid #334b86;
   background: rgba(11, 22, 49, 0.72);
   color: #dbe7ff;
-  border-radius: 9px;
-  padding: 0.38rem 0.22rem;
+  border-radius: 999px;
+  padding: 0.42rem 0.3rem;
   text-transform: uppercase;
   font-size: 0.64rem;
   letter-spacing: 0.06em;
@@ -1692,6 +1692,7 @@ html[data-orient="landscape"] .right-panel {
 .rr-mp-tabs .rr-mp-tab.active {
   border-color: var(--rr-mp-accent, #77a7ff);
   color: #ffffff;
+  background: color-mix(in srgb, var(--rr-mp-accent, #77a7ff) 18%, rgba(10, 20, 43, 0.85));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--rr-mp-accent, #77a7ff) 50%, transparent), 0 0 14px color-mix(in srgb, var(--rr-mp-accent, #77a7ff) 48%, transparent), inset 0 0 14px color-mix(in srgb, var(--rr-mp-accent, #77a7ff) 28%, transparent);
 }
 
@@ -1702,7 +1703,7 @@ html[data-orient="landscape"] .right-panel {
 }
 
 .rr-mp-panel {
-  gap: 0.5rem;
+  gap: 0.62rem;
 }
 
 @keyframes rr-mp-shimmer {
@@ -2000,6 +2001,11 @@ html[data-orient="landscape"] .right-panel {
   gap: 0.26rem;
 }
 
+.rr-friends-panel {
+  border-color: rgba(88, 119, 184, 0.84);
+  background: linear-gradient(165deg, rgba(14, 28, 58, 0.88), rgba(9, 18, 40, 0.88));
+}
+
 .rr-friends-panel .rr-mp-section-title,
 .rr-friends-panel h4 {
   font-size: 0.62rem;
@@ -2151,11 +2157,42 @@ html[data-orient="landscape"] .right-panel {
   min-height: 42px;
 }
 
+.rr-room-home-action {
+  min-height: 68px !important;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-radius: 14px;
+}
+
+.rr-room-home-action--create {
+  border-color: rgba(106, 237, 182, 0.95) !important;
+  background: linear-gradient(145deg, rgba(19, 64, 49, 0.95), rgba(27, 100, 74, 0.94)) !important;
+  box-shadow: 0 0 0 1px rgba(126, 246, 196, 0.28), 0 0 18px rgba(69, 211, 145, 0.3) !important;
+}
+
+.rr-room-home-action--join {
+  border-color: rgba(110, 203, 255, 0.95) !important;
+  background: linear-gradient(145deg, rgba(26, 66, 123, 0.95), rgba(36, 104, 173, 0.92)) !important;
+  box-shadow: 0 0 0 1px rgba(126, 210, 255, 0.32), 0 0 18px rgba(76, 173, 255, 0.32) !important;
+}
+
 .rr-room-flow {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.42rem;
+}
+
+.rr-room-flow--create {
+  align-items: center;
+}
+
+.rr-room-flow--create .rr-room-flow-head,
+.rr-room-flow--create .rr-room-fields-row,
+.rr-room-flow--create .rr-room-corner-board,
+.rr-room-flow--create .rr-mp-error {
+  width: min(100%, 500px);
 }
 
 .rr-room-flow-head {
@@ -2510,4 +2547,55 @@ html[data-orient="landscape"] .right-panel {
   font-size: 0.62rem;
   font-weight: 800;
   letter-spacing: 0.06em;
+}
+
+
+.rr-resume-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(3, 8, 18, 0.66);
+  z-index: 2500;
+}
+
+.rr-resume-modal {
+  width: min(430px, calc(100vw - 2rem));
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  border: 1px solid rgba(97, 134, 206, 0.9);
+  background: linear-gradient(165deg, rgba(9, 20, 46, 0.95), rgba(8, 16, 37, 0.95));
+}
+
+.rr-resume-title {
+  margin: 0;
+  text-align: center;
+  color: #eaf1ff;
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+}
+
+.rr-resume-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.rr-resume-btn {
+  min-height: 38px;
+  font-weight: 700;
+}
+
+.rr-resume-btn--accept {
+  border-color: rgba(93, 210, 144, 0.95) !important;
+  background: linear-gradient(145deg, rgba(28, 88, 55, 0.98), rgba(36, 126, 76, 0.95)) !important;
+  box-shadow: 0 0 0 1px rgba(108, 220, 157, 0.4), 0 0 16px rgba(69, 194, 118, 0.34) !important;
+}
+
+.rr-resume-btn--cancel {
+  border-color: rgba(255, 170, 87, 0.95) !important;
+  background: linear-gradient(145deg, rgba(119, 72, 27, 0.98), rgba(166, 99, 37, 0.95)) !important;
+  box-shadow: 0 0 0 1px rgba(255, 183, 116, 0.4), 0 0 16px rgba(236, 150, 65, 0.32) !important;
 }
