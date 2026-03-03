@@ -18,17 +18,9 @@ const MOVE_DURATION_TICKS = 6;
 const ENEMY_HIT_COOLDOWN_TICKS = 12;
 const LOG_MOVEMENT_STATE = false;
 const LOG_EXPLOSION_DAMAGE = false;
-const LOG_SCORE_DEBUG = process.env.RR_MP_SCORE_DEBUG === '1';
-
-const SCORE_ENEMY_KILL = 75;
-const SCORE_TILE_BREAK = 10;
 export const REJOIN_GRACE_MS = 60_000;
 
 type MatchEvent = MatchBombSpawned | MatchBombExploded | MatchTilesDestroyed | MatchPlayerDamaged | MatchPlayerRespawned | MatchPlayerEliminated | MatchEnd;
-
-function getTeamScore(match: MatchState): number {
-  return Array.from(match.playerScores.values()).reduce((sum, value) => sum + Math.max(0, Number(value ?? 0)), 0);
-}
 
 export type BombPlacementRejectReason =
   | 'player_missing'
@@ -99,7 +91,6 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
         explodeAtTick: bomb.explodeAtTick,
       })),
     },
-    score: getTeamScore(match),
     players: Array.from(match.players.values()).map((p) => ({
       tgUserId: p.tgUserId,
       displayName: p.displayName,
@@ -118,7 +109,6 @@ function tick(match: MatchState, broadcast: (snapshot: MatchSnapshot, events: Ma
       moveStartServerTimeMs: p.isMoving ? p.moveStartServerTimeMs : now,
       moveDurationMs: p.isMoving ? p.moveDurationTicks * TICK_RATE_MS : 0,
       lives: match.playerLives.get(p.tgUserId) ?? 0,
-      score: match.playerScores.get(p.tgUserId) ?? 0,
       eliminated: match.eliminatedPlayers.has(p.tgUserId) || match.disconnectedPlayers.has(p.tgUserId),
       disconnected: match.disconnectedPlayers.has(p.tgUserId),
     })),
@@ -286,28 +276,6 @@ function processRespawns(match: MatchState, events: MatchEvent[]): void {
   }
 }
 
-
-function awardScore(match: MatchState, tgUserId: string, delta: number, reason: 'enemy_kill' | 'tile_break'): void {
-  if (!Number.isFinite(delta) || delta <= 0) return;
-
-  const current = match.playerScores.get(tgUserId) ?? 0;
-  const next = current + Math.floor(delta);
-  match.playerScores.set(tgUserId, next);
-
-  if (LOG_SCORE_DEBUG) {
-    console.log(JSON.stringify({
-      evt: 'mp_score_update',
-      roomId: match.roomId,
-      matchId: match.matchId,
-      tick: match.tick,
-      tgUserId,
-      reason,
-      delta,
-      score: next,
-    }));
-  }
-}
-
 function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
   const damagedPlayersThisTick = new Set<string>();
 
@@ -321,7 +289,6 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
     match.bombs.delete(dueBomb.id);
 
     const impacts = collectExplosionImpacts(match, dueBomb.x, dueBomb.y, dueBomb.range);
-    const bombOwnerId = dueBomb.ownerId;
     const destroyedTiles: Array<{ x: number; y: number }> = [];
 
     for (const impact of impacts) {
@@ -347,9 +314,6 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
     });
 
     if (destroyedTiles.length > 0) {
-      if (bombOwnerId) {
-        awardScore(match, bombOwnerId, destroyedTiles.length * SCORE_TILE_BREAK, 'tile_break');
-      }
       events.push({
         type: 'match:tiles_destroyed',
         roomCode: match.roomId,
@@ -366,9 +330,6 @@ function processBombExplosions(match: MatchState, events: MatchEvent[]): void {
       const hitEnemy = impacts.some((impact) => impact.x === enemy.x && impact.y === enemy.y);
       if (!hitEnemy) continue;
       enemy.alive = false;
-      if (bombOwnerId) {
-        awardScore(match, bombOwnerId, SCORE_ENEMY_KILL, 'enemy_kill');
-      }
     }
 
     for (const player of match.players.values()) {

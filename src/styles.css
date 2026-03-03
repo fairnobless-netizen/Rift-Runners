@@ -6,13 +6,6 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
-  --android-overlay-top: 0px;
-  --android-overlay-right: 0px;
-  --android-overlay-bottom: 0px;
-  --android-min-pad-top: 60px;
-  --android-min-pad-left: 36px;
-  --android-min-pad-right: 56px;
-  --android-inset-breathing: 20px;
   --header-h: clamp(34px, calc(46px * var(--ui-scale)), 46px);
   --shell-gap: clamp(0.35rem, 1.5vw, 0.7rem);
   --side-w: clamp(72px, calc(180px * var(--ui-scale)), 132px);
@@ -50,20 +43,10 @@ body {
   touch-action: none;
   background: radial-gradient(circle at top, #13192c, #070a12 60%);
 }
-html.is-android body {
-  height: calc(var(--app-vh, 1vh) * 100);
-  min-height: calc(var(--app-vh, 1vh) * 100);
-}
 
 #root {
   height: var(--tg-viewport-stable-h);
   min-height: var(--tg-viewport-stable-h);
-}
-
-html.is-android #root {
-  height: calc(var(--app-vh, 1vh) * 100);
-  min-height: calc(var(--app-vh, 1vh) * 100);
-  padding: 0;
 }
 
 .page {
@@ -86,35 +69,6 @@ html.is-android #root {
   padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom));
   padding-left: calc(var(--tg-content-left, 0px) + var(--safe-left));
   overflow: hidden;
-}
-
-html.is-android .page {
-  height: calc(var(--app-vh, 1vh) * 100);
-  min-height: calc(var(--app-vh, 1vh) * 100);
-  padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top) + var(--android-overlay-top, 0px));
-  padding-right: calc(var(--tg-content-right, 0px) + var(--safe-right) + var(--android-overlay-right, 0px) + var(--android-inset-breathing, 20px));
-  padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom) + var(--android-overlay-bottom, 0px));
-  padding-left: calc(var(--tg-content-left, 0px) + var(--safe-left) + var(--android-inset-breathing, 20px));
-}
-
-html.is-android[data-orient="landscape"][data-device="phone"] .page,
-html.is-android[data-orient="landscape"][data-device="tablet"] .page {
-  padding-top: max(
-    calc(var(--tg-content-top, 0px) + var(--safe-top) + var(--android-overlay-top, 0px)),
-    var(--android-min-pad-top)
-  );
-  padding-right: calc(
-    max(
-      calc(var(--tg-content-right, 0px) + var(--safe-right) + var(--android-overlay-right, 0px)),
-      var(--android-min-pad-right)
-    ) + var(--android-inset-breathing, 20px)
-  );
-  padding-left: calc(
-    max(
-      calc(var(--tg-content-left, 0px) + var(--safe-left)),
-      var(--android-min-pad-left)
-    ) + var(--android-inset-breathing, 20px)
-  );
 }
 
 .hud {
@@ -587,24 +541,6 @@ html.is-android[data-orient="landscape"][data-device="tablet"] .page {
   height: 100%;
   flex: 1 1 auto;
   overflow: hidden;
-}
-
-
-html.is-android .hud {
-  width: min(92vw, calc(100% - var(--safe-left) - var(--safe-right) - 16px));
-  margin-left: auto;
-  margin-right: auto;
-}
-
-html.is-android .playfield-shell {
-  gap: clamp(0.18rem, 1vw, 0.42rem);
-  padding-left: clamp(2px, 0.45vw, 8px);
-  padding-right: clamp(2px, 0.45vw, 8px);
-}
-
-html.is-android .control-column {
-  padding-left: clamp(0.28rem, 1.05vw, 0.42rem);
-  padding-right: clamp(0.28rem, 1.05vw, 0.42rem);
 }
 
 .game-canvas {
@@ -1655,118 +1591,6 @@ html[data-orient="landscape"] .right-panel {
   letter-spacing: 0.06em;
 }
 
-.rr-overlay[aria-label="Do you want to resume the run?"] {
-  place-items: center;
-  padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top) + 10px);
-  padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom) + 10px);
-}
-
-.rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-modal {
-  width: min(90vw, 480px);
-  max-height: min(72vh, calc(var(--tg-viewport-stable-h) - var(--safe-top) - var(--safe-bottom) - 20px));
-  padding: 0.75rem;
-}
-
-.rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-header {
-  justify-content: center;
-}
-
-.rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-close,
-.rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-tabs {
-  display: none;
-}
-
-
-.rr-overlay[aria-label="Do you want to resume the match?"] {
-  place-items: center;
-  padding-top: calc(var(--tg-content-top, 0px) + var(--safe-top) + 10px);
-  padding-bottom: calc(var(--tg-content-bottom, 0px) + var(--safe-bottom) + 10px);
-}
-
-.rr-overlay[aria-label="Do you want to resume the match?"] .rr-overlay-modal {
-  width: min(90vw, 480px);
-  max-height: min(72vh, calc(var(--tg-viewport-stable-h) - var(--safe-top) - var(--safe-bottom) - 20px));
-  padding: 0.75rem;
-}
-
-.rr-overlay[aria-label="Do you want to resume the match?"] .rr-overlay-header {
-  justify-content: center;
-}
-
-.rr-overlay[aria-label="Do you want to resume the match?"] .rr-overlay-close,
-.rr-overlay[aria-label="Do you want to resume the match?"] .rr-overlay-tabs {
-  display: none;
-}
-
-.solo-resume-modal-content {
-  display: flex;
-  justify-content: center;
-}
-
-.solo-resume-modal-actions {
-  display: flex;
-  gap: 0.85rem;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.rr-btn-neon-green,
-.rr-btn-neon-orange {
-  min-width: 148px;
-  padding: 0.5rem 0.9rem;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  font-weight: 700;
-}
-
-.rr-btn-neon-green {
-  border-color: #3cff8f;
-  background: linear-gradient(160deg, #12301f, #0e2318);
-  color: #deffe8;
-  box-shadow: 0 0 10px rgba(60, 255, 143, 0.38), inset 0 0 10px rgba(64, 255, 148, 0.14);
-}
-
-.rr-btn-neon-green:hover:not(:disabled) {
-  box-shadow: 0 0 14px rgba(60, 255, 143, 0.54), inset 0 0 12px rgba(64, 255, 148, 0.2);
-}
-
-.rr-btn-neon-green:active:not(:disabled) {
-  box-shadow: 0 0 9px rgba(60, 255, 143, 0.45), inset 0 0 14px rgba(64, 255, 148, 0.28);
-}
-
-.rr-btn-neon-orange {
-  border-color: #ff9a3c;
-  background: linear-gradient(160deg, #352213, #25170d);
-  color: #ffe9d5;
-  box-shadow: 0 0 10px rgba(255, 154, 60, 0.38), inset 0 0 10px rgba(255, 166, 82, 0.14);
-}
-
-.rr-btn-neon-orange:hover:not(:disabled) {
-  box-shadow: 0 0 14px rgba(255, 154, 60, 0.54), inset 0 0 12px rgba(255, 166, 82, 0.2);
-}
-
-.rr-btn-neon-orange:active:not(:disabled) {
-  box-shadow: 0 0 9px rgba(255, 154, 60, 0.45), inset 0 0 14px rgba(255, 166, 82, 0.28);
-}
-
-@media (max-width: 560px) {
-  .rr-overlay[aria-label="Do you want to resume the run?"] .rr-overlay-modal {
-    width: min(94vw, 420px);
-    padding: 0.68rem;
-  }
-
-
-  .rr-overlay[aria-label="Do you want to resume the match?"] .rr-overlay-modal {
-    width: min(94vw, 420px);
-    padding: 0.68rem;
-  }
-
-  .rr-btn-neon-green,
-  .rr-btn-neon-orange {
-    min-width: 136px;
-  }
-}
-
 .rr-overlay-content {
   display: flex;
   flex-direction: column;
@@ -2341,49 +2165,21 @@ html[data-orient="landscape"] .right-panel {
 }
 
 .rr-room-back-button {
-  position: relative;
-  overflow: hidden;
-  min-height: 30px;
-  min-width: 32px;
-  width: 32px;
-  padding: 0.24rem;
+  min-height: 32px;
+  padding: 0.32rem 0.8rem;
   border-color: rgba(116, 195, 255, 0.9);
-  box-shadow: 0 0 8px rgba(111, 222, 255, 0.2), inset 0 0 8px rgba(111, 222, 255, 0.1);
+  box-shadow: 0 0 10px rgba(111, 222, 255, 0.22), inset 0 0 10px rgba(111, 222, 255, 0.12);
   background: linear-gradient(120deg, rgba(23, 47, 90, 0.94), rgba(13, 32, 66, 0.94));
-}
-
-.rr-room-back-button span {
-  position: relative;
-  z-index: 1;
-  font-size: 0.84rem;
-  line-height: 1;
-}
-
-.rr-room-back-button::after {
-  content: '';
-  position: absolute;
-  inset: -30% auto -30% -90%;
-  width: 55%;
-  background: linear-gradient(110deg, transparent 0%, rgba(181, 237, 255, 0.5) 48%, transparent 100%);
-  transform: skewX(-20deg);
-  animation: rr-room-back-shine 2.8s ease-in-out infinite;
-  pointer-events: none;
-}
-
-@keyframes rr-room-back-shine {
-  0% { left: -90%; }
-  70% { left: 135%; }
-  100% { left: 135%; }
 }
 
 .rr-room-back-button:hover:not(:disabled) {
   border-color: rgba(129, 224, 255, 0.96);
-  box-shadow: 0 0 12px rgba(111, 222, 255, 0.3), inset 0 0 12px rgba(111, 222, 255, 0.18);
+  box-shadow: 0 0 14px rgba(111, 222, 255, 0.32), inset 0 0 14px rgba(111, 222, 255, 0.2);
 }
 
 .rr-room-back-button:active:not(:disabled) {
   transform: translateY(1px);
-  box-shadow: 0 0 7px rgba(111, 222, 255, 0.2), inset 0 0 10px rgba(111, 222, 255, 0.14);
+  box-shadow: 0 0 8px rgba(111, 222, 255, 0.2), inset 0 0 12px rgba(111, 222, 255, 0.16);
 }
 
 .rr-room-fields-row {
@@ -2403,14 +2199,11 @@ html[data-orient="landscape"] .right-panel {
   max-width: 260px;
 }
 
-.rr-room-field--name input {
-  border-color: rgba(104, 206, 255, 0.78);
-  box-shadow: inset 0 0 0 1px rgba(104, 206, 255, 0.14), 0 0 10px rgba(76, 180, 255, 0.2);
-}
-
-.rr-room-field--password input {
-  border-color: rgba(190, 148, 255, 0.78);
-  box-shadow: inset 0 0 0 1px rgba(190, 148, 255, 0.14), 0 0 10px rgba(173, 121, 255, 0.18);
+.rr-room-field span {
+  font-size: 0.62rem;
+  letter-spacing: 0.07em;
+  color: #9eb3de;
+  text-transform: uppercase;
 }
 
 .rr-room-corner-board {
@@ -2498,9 +2291,6 @@ html[data-orient="landscape"] .right-panel {
 }
 
 .rr-room-create-cta {
-  width: auto !important;
-  min-width: 100px;
-  padding: 0.36rem 0.8rem;
   border-color: #74e6ff;
   background: linear-gradient(140deg, rgba(19, 53, 104, 0.95), rgba(33, 116, 132, 0.9));
   box-shadow: 0 0 0 1px rgba(116, 230, 255, 0.35), 0 0 18px rgba(58, 205, 255, 0.36), inset 0 0 14px rgba(156, 245, 255, 0.2);
@@ -2623,13 +2413,7 @@ html[data-orient="landscape"] .right-panel {
   height: 18px;
   padding: 0;
   border-radius: 50%;
-  opacity: 0.75;
-}
-
-.rr-room-ready-waiting {
-  font-size: 0.58rem;
-  line-height: 1.2;
-  color: #9ac9ff;
+  opacity: 0.65;
 }
 
 .rr-diag-overlay-root {
@@ -2726,58 +2510,4 @@ html[data-orient="landscape"] .right-panel {
   font-size: 0.62rem;
   font-weight: 800;
   letter-spacing: 0.06em;
-}
-
-.mp-resume-countdown-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 88;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 0.7rem;
-  pointer-events: auto;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  background:
-    radial-gradient(circle at 50% 34%, rgba(96, 150, 255, 0.22), transparent 48%),
-    linear-gradient(160deg, rgba(4, 10, 22, 0.8), rgba(5, 8, 18, 0.9));
-}
-
-.mp-resume-countdown-overlay__title {
-  font-size: clamp(1rem, 2.8vw, 1.55rem);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #d6e8ff;
-  text-shadow: 0 0 10px rgba(111, 210, 255, 0.9), 0 0 28px rgba(132, 152, 255, 0.55);
-}
-
-.mp-resume-countdown-overlay__value {
-  min-width: 1.4em;
-  text-align: center;
-  font-size: clamp(4.2rem, 16vw, 10rem);
-  font-weight: 900;
-  line-height: 0.85;
-  color: #f4f8ff;
-  text-shadow: 0 0 15px rgba(146, 221, 255, 0.95), 0 0 52px rgba(140, 163, 255, 0.75);
-  animation: rr-countdown-popfade 1s ease-out both;
-}
-
-@keyframes rr-countdown-popfade {
-  0% {
-    opacity: 0;
-    transform: translateY(6px) scale(1.12);
-    filter: blur(0px);
-  }
-
-  15% {
-    opacity: 1;
-    transform: translateY(0px) scale(1);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translateY(-8px) scale(0.82);
-    filter: blur(0.6px);
-  }
 }

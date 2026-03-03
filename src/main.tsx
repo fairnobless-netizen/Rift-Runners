@@ -4,53 +4,6 @@ import App from './App';
 import { getDebugState } from './debug/debugFlags';
 import './styles.css';
 
-function isAndroidRuntime(): boolean {
-  return /Android/i.test(window.navigator.userAgent);
-}
-
-function bootstrapAndroidViewportFix() {
-  if (!isAndroidRuntime()) {
-    return;
-  }
-
-  const root = document.documentElement;
-  root.classList.add('is-android');
-
-  const clampInset = (value: number): number => Math.min(80, Math.max(0, value));
-
-  const syncSafeInsets = (): void => {
-    const vv = window.visualViewport;
-    if (!vv) {
-      root.style.setProperty('--safe-top', '0px');
-      root.style.setProperty('--safe-bottom', '0px');
-      root.style.setProperty('--safe-left', '0px');
-      root.style.setProperty('--safe-right', '0px');
-      return;
-    }
-
-    const safeTop = clampInset(vv.offsetTop);
-    const safeBottom = clampInset(window.innerHeight - (vv.offsetTop + vv.height));
-    const safeLeft = clampInset(vv.offsetLeft);
-    const safeRight = clampInset(window.innerWidth - (vv.offsetLeft + vv.width));
-
-    root.style.setProperty('--safe-top', `${safeTop}px`);
-    root.style.setProperty('--safe-bottom', `${safeBottom}px`);
-    root.style.setProperty('--safe-left', `${safeLeft}px`);
-    root.style.setProperty('--safe-right', `${safeRight}px`);
-  };
-
-  const syncViewportHeight = (): void => {
-    root.style.setProperty('--app-vh', `${window.innerHeight * 0.01}px`);
-    syncSafeInsets();
-  };
-
-  syncViewportHeight();
-  window.addEventListener('resize', syncViewportHeight);
-  window.addEventListener('orientationchange', syncViewportHeight);
-  window.visualViewport?.addEventListener('resize', syncViewportHeight);
-  window.visualViewport?.addEventListener('scroll', syncViewportHeight);
-}
-
 function bootstrapDebugFlags() {
   const debugState = getDebugState(window.location.search);
   if (!debugState.enabled) return;
@@ -69,7 +22,6 @@ if ((window as any).Telegram?.WebApp) {
 }
 
 bootstrapDebugFlags();
-bootstrapAndroidViewportFix();
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {

@@ -38,17 +38,10 @@ import {
 import {
   campaignStateToLevelIndex,
   computeNextCampaignState,
-  createInitialCampaignState,
   loadCampaignState,
   saveCampaignState,
-  SOLO_RESUME_WINDOW_MS,
   type CampaignState,
 } from './campaign';
-import {
-  clearSoloResumeSnapshot,
-  saveSoloResumeSnapshot,
-  type SoloResumeSnapshotV1,
-} from './soloResume';
 import {
   DOOR_REVEALED,
   PREBOSS_DOOR_REVEALED,
@@ -112,43 +105,6 @@ const EXTRA_LIFE_STEP_SCORE = 1000;
 const MP_MOVE_TICKS_CONST = Math.max(1, Math.round(scaleMovementDurationMs(GAME_CONFIG.moveDurationMs) / (1000 / 20)));
 // Enemy MP smoothing: local constant to avoid touching player movement pipeline.
 const MP_MOVE_TICK_MS_ENEMY = 1000 / 20;
-const PLAYER_SILHOUETTE_TEXTURE_KEYS = ['rr_player_a', 'rr_player_b', 'rr_player_c', 'rr_player_d'] as const;
-const ENEMY_HIT_SHAKE_COOLDOWN_MS = 80;
-const PLAYER_HIT_FEEDBACK_COOLDOWN_MS = 240;
-const TILE_TO_CODE: Record<TileType, number> = {
-  Floor: 0,
-  HardWall: 1,
-  BreakableBlock: 2,
-  ANOMALOUS_STONE: 3,
-};
-const CODE_TO_TILE: Record<number, TileType> = {
-  0: 'Floor',
-  1: 'HardWall',
-  2: 'BreakableBlock',
-  3: 'ANOMALOUS_STONE',
-};
-type PlayerSilhouetteTextureKey = typeof PLAYER_SILHOUETTE_TEXTURE_KEYS[number];
-
-function hashStringFNV1a(value: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
-}
-
-function getSilhouetteIndexFromId(id: string): 0 | 1 | 2 | 3 {
-  return (hashStringFNV1a(id) % PLAYER_SILHOUETTE_TEXTURE_KEYS.length) as 0 | 1 | 2 | 3;
-}
-
-function getPlayerSilhouetteTextureKeyFromId(id: string): PlayerSilhouetteTextureKey {
-  return PLAYER_SILHOUETTE_TEXTURE_KEYS[getSilhouetteIndexFromId(id)] ?? PLAYER_SILHOUETTE_TEXTURE_KEYS[0];
-}
-
-function getBobPhaseFromId(id: string): number {
-  return (hashStringFNV1a(id) % 6283) / 1000;
-}
 
 interface TileTweenSegment {
   fromX: number;
@@ -192,10 +148,7 @@ export class GameScene extends Phaser.Scene {
   private multiplayerEliminated = false;
   private multiplayerRespawning = false;
   private readonly baseSeed = 0x52494654;
-  private runSeed = 1;
-  private pendingSoloResumeSnapshot: SoloResumeSnapshotV1 | null = null;
-  private soloSnapshotSaveTimer: number | null = null;
-  private lastSoloSnapshotPersistAtMs = 0;
+  private readonly runId = 1;
   private rng: DeterministicRng = createDeterministicRng(this.baseSeed);
   private simulationTick = 0;
   private lastSnapshotTick = -1;
@@ -235,7 +188,6 @@ export class GameScene extends Phaser.Scene {
     trophies: [],
   };
 
-  private hiddenDoorCell?: { x: number; y: number };
   private doorRevealed = false;
   private doorEntered = false;
   private isLevelCleared = false;
@@ -302,8 +254,6 @@ export class GameScene extends Phaser.Scene {
   private enemyNextMoveAt = new Map<string, number>();
 
   private playerSprite?: Phaser.GameObjects.Image;
-  private localPlayerSilhouetteTextureKey: PlayerSilhouetteTextureKey = PLAYER_SILHOUETTE_TEXTURE_KEYS[0];
-  private localPlayerBobPhase = 0;
   private bombSprites = new Map<string, Phaser.GameObjects.Image>();
   private itemSprites = new Map<string, Phaser.GameObjects.Image>();
   private flameSprites = new Map<string, Phaser.GameObjects.Image>();
@@ -321,8 +271,6 @@ export class GameScene extends Phaser.Scene {
   private queuedDirectionUntilMs = 0;
   private placeBombUntil = 0;
   private audioSettings: SceneAudioSettings = { musicEnabled: true, sfxEnabled: true };
-  private lastEnemyHitShakeAt = -Infinity;
-  private lastPlayerHitFeedbackAt = -Infinity;
   private minZoom: number = GAME_CONFIG.minZoom;
   private maxZoom: number = GAME_CONFIG.maxZoom;
   private pinchStartDistance: number | null = null;
@@ -330,10 +278,9 @@ export class GameScene extends Phaser.Scene {
   private cameraFollowThresholdZoom: number = GAME_CONFIG.minZoom;
   private isCameraFollowingPlayer = false;
 
-  constructor(controls: ControlsState, soloResumeSnapshot?: SoloResumeSnapshotV1 | null) {
+  constructor(controls: ControlsState) {
     super('GameScene');
     this.controls = controls;
-    this.pendingSoloResumeSnapshot = soloResumeSnapshot ?? null;
   }
 
   preload(): void {
@@ -378,14 +325,8 @@ export class GameScene extends Phaser.Scene {
     this.setupCamera();
     this.remotePlayers = new RemotePlayersRenderer(this);
     this.remotePlayers.setTransform({ tileSize: GAME_CONFIG.tileSize, offsetX: 0, offsetY: 0 });
-    this.setupSoloResumeLifecycleHooks();
-    const restored = this.tryRestoreFromPendingSoloSnapshot();
-    if (!restored) {
-      const { loaded, initialLevelIndex } = this.loadProgress();
-      this.runSeed = this.generateRunSeed();
-      this.startLevel(initialLevelIndex, loaded);
-      this.persistSoloResumeSnapshot('fresh_start');
-    }
+    const initialLevelIndex = this.loadProgress();
+    this.startLevel(initialLevelIndex, true);
   }
 
   private ensurePolishedTextures(): void {
@@ -399,237 +340,13 @@ export class GameScene extends Phaser.Scene {
         glowColor: number;
         markerColor: number;
         eyeColor: number;
-        silhouetteKind?: EnemyKind;
         hasOuterHalo?: boolean;
-        shapeVariant?: 'round' | 'diamond' | 'hex';
-        extraMark?: 'none' | 'fins' | 'plate' | 'crest';
-        bodyScaleX?: number;
-        bodyScaleY?: number;
-        strokeWidth?: number;
       },
     ): void => {
       if (this.textures.exists(key)) return;
 
       const center = textureSize / 2;
       const g = this.add.graphics().setVisible(false);
-      const shape = options.shapeVariant ?? 'round';
-      const extraMark = options.extraMark ?? 'none';
-      const bodyScaleX = options.bodyScaleX ?? 1;
-      const bodyScaleY = options.bodyScaleY ?? 1;
-      const strokeWidth = options.strokeWidth ?? 4;
-
-      if (options.silhouetteKind) {
-        const drawClosedPath = (
-          points: ReadonlyArray<readonly [number, number]>,
-          fillColor: number,
-          fillAlpha: number,
-          lineColor?: number,
-          lineAlpha = 0.9,
-          lineWidth = 2,
-        ): void => {
-          if (points.length < 3) return;
-          const pathPoints = points.map(([x, y]) => new Phaser.Geom.Point(center + x, center + y));
-          g.fillStyle(fillColor, fillAlpha);
-          g.fillPoints(pathPoints, true);
-          if (lineColor !== undefined) {
-            g.lineStyle(lineWidth, lineColor, lineAlpha);
-            g.strokePoints(pathPoints, true, true);
-          }
-        };
-
-        if (options.silhouetteKind === 'normal') {
-          for (const layer of [
-            { radius: 30, alpha: 0.12 },
-            { radius: 26, alpha: 0.2 },
-          ]) {
-            g.fillStyle(options.glowColor, layer.alpha);
-            g.fillEllipse(center + 2, center, layer.radius * 2.1, layer.radius * 1.9);
-          }
-
-          drawClosedPath(
-            [
-              [-14, -22],
-              [0, -26],
-              [16, -18],
-              [24, -3],
-              [20, 15],
-              [6, 24],
-              [-13, 22],
-              [-24, 7],
-              [-22, -10],
-            ],
-            options.fillColor,
-            1,
-            options.strokeColor,
-          );
-          g.fillStyle(options.markerColor, 0.4);
-          g.fillEllipse(center - 5, center - 11, 17, 10);
-          g.fillStyle(options.markerColor, 0.95);
-          g.fillCircle(center + 1, center + 1, 9);
-          g.fillStyle(options.eyeColor, 0.88);
-          g.fillCircle(center + 1, center + 1, 4);
-        } else if (options.silhouetteKind === 'fast') {
-          g.fillStyle(options.glowColor, 0.2);
-          g.fillTriangle(center - 32, center + 7, center + 27, center - 3, center - 28, center - 9);
-
-          drawClosedPath(
-            [
-              [-28, 2],
-              [-7, -10],
-              [26, -2],
-              [10, 5],
-              [-6, 13],
-            ],
-            options.fillColor,
-            1,
-            options.strokeColor,
-          );
-          drawClosedPath(
-            [
-              [-27, 4],
-              [-39, 11],
-              [-26, 12],
-              [-17, 16],
-            ],
-            options.markerColor,
-            0.82,
-          );
-          drawClosedPath(
-            [
-              [-30, -3],
-              [-42, -10],
-              [-25, -12],
-              [-15, -16],
-            ],
-            options.markerColor,
-            0.72,
-          );
-          g.fillStyle(options.eyeColor, 0.8);
-          g.fillTriangle(center + 2, center - 2, center + 11, center - 1, center + 1, center + 3);
-        } else if (options.silhouetteKind === 'tank') {
-          for (const layer of [
-            { radius: 31, alpha: 0.12 },
-            { radius: 27, alpha: 0.17 },
-          ]) {
-            g.fillStyle(options.glowColor, layer.alpha);
-            g.fillEllipse(center, center + 1, layer.radius * 2.2, layer.radius * 1.9);
-          }
-          drawClosedPath(
-            [
-              [-25, -17],
-              [-11, -24],
-              [10, -24],
-              [25, -12],
-              [25, 13],
-              [8, 25],
-              [-15, 24],
-              [-27, 10],
-            ],
-            options.fillColor,
-            1,
-            options.strokeColor,
-            0.95,
-            3,
-          );
-          g.fillStyle(options.markerColor, 0.55);
-          g.fillRoundedRect(center - 16, center - 15, 32, 10, 3);
-          g.fillRoundedRect(center - 13, center - 2, 26, 9, 3);
-          g.fillRoundedRect(center - 10, center + 9, 20, 8, 3);
-          g.lineStyle(2, options.strokeColor, 0.45);
-          g.strokeRoundedRect(center - 17, center - 16, 34, 34, 4);
-        } else if (options.silhouetteKind === 'elite') {
-          g.lineStyle(3, options.glowColor, 0.72);
-          g.strokeCircle(center, center, 30);
-          g.lineStyle(2, options.markerColor, 0.56);
-          g.strokeCircle(center, center, 34);
-
-          g.fillStyle(options.glowColor, 0.17);
-          g.fillEllipse(center, center, 56, 54);
-
-          for (const radius of [23, 17, 11]) {
-            g.fillStyle(options.fillColor, 0.38 + radius / 70);
-            g.fillEllipse(center + (radius === 17 ? 2 : 0), center - (radius === 11 ? 1 : 0), radius * 2, radius * 1.82);
-          }
-
-          g.fillStyle(options.eyeColor, 0.9);
-          g.fillCircle(center, center, 5);
-
-          const orbitingFragments: ReadonlyArray<readonly [number, number, number]> = [
-            [-30, -6, 5],
-            [-14, -29, 4],
-            [18, -27, 5],
-            [31, -2, 4],
-            [22, 24, 5],
-            [-19, 26, 4],
-          ];
-          for (const [x, y, size] of orbitingFragments) {
-            g.fillStyle(options.markerColor, 0.84);
-            g.fillTriangle(
-              center + x,
-              center + y - size,
-              center + x + size,
-              center + y + size,
-              center + x - size,
-              center + y + size,
-            );
-          }
-        }
-
-        g.generateTexture(key, textureSize, textureSize);
-        g.destroy();
-        return;
-      }
-
-      const drawBody = (radius: number, fillAlpha: number, strokeAlpha?: number): void => {
-        const scaledHalfW = radius * bodyScaleX;
-        const scaledHalfH = radius * bodyScaleY;
-
-        if (shape === 'diamond') {
-          const diamondPoints = [
-            new Phaser.Geom.Point(center, center - scaledHalfH),
-            new Phaser.Geom.Point(center + scaledHalfW, center),
-            new Phaser.Geom.Point(center, center + scaledHalfH),
-            new Phaser.Geom.Point(center - scaledHalfW, center),
-          ];
-          g.fillStyle(options.fillColor, fillAlpha);
-          g.fillPoints(diamondPoints, true);
-          if (strokeAlpha !== undefined) {
-            g.lineStyle(strokeWidth, options.strokeColor, strokeAlpha);
-            g.strokePoints(diamondPoints, true, true);
-          }
-          return;
-        }
-
-        if (shape === 'hex') {
-          const left = center - scaledHalfW;
-          const right = center + scaledHalfW;
-          const top = center - scaledHalfH;
-          const bottom = center + scaledHalfH;
-          const neck = scaledHalfW * 0.62;
-          const hexPoints = [
-            new Phaser.Geom.Point(center - neck, top),
-            new Phaser.Geom.Point(center + neck, top),
-            new Phaser.Geom.Point(right, center),
-            new Phaser.Geom.Point(center + neck, bottom),
-            new Phaser.Geom.Point(center - neck, bottom),
-            new Phaser.Geom.Point(left, center),
-          ];
-          g.fillStyle(options.fillColor, fillAlpha);
-          g.fillPoints(hexPoints, true);
-          if (strokeAlpha !== undefined) {
-            g.lineStyle(strokeWidth, options.strokeColor, strokeAlpha);
-            g.strokePoints(hexPoints, true, true);
-          }
-          return;
-        }
-
-        g.fillStyle(options.fillColor, fillAlpha);
-        g.fillEllipse(center, center, scaledHalfW * 2, scaledHalfH * 2);
-        if (strokeAlpha !== undefined) {
-          g.lineStyle(strokeWidth, options.strokeColor, strokeAlpha);
-          g.strokeEllipse(center, center, scaledHalfW * 2, scaledHalfH * 2);
-        }
-      };
 
       if (options.hasOuterHalo) {
         g.lineStyle(4, options.glowColor, 0.65);
@@ -642,102 +359,26 @@ export class GameScene extends Phaser.Scene {
         { radius: 27, alpha: 0.24 },
       ];
       for (const layer of glowLayers) {
-        g.fillStyle(options.glowColor, layer.alpha * (shape === 'round' ? 1 : 0.92));
-        g.fillEllipse(center, center, layer.radius * 2 * bodyScaleX, layer.radius * 2 * bodyScaleY);
+        g.fillStyle(options.glowColor, layer.alpha);
+        g.fillCircle(center, center, layer.radius);
       }
 
-      drawBody(24, 1, 1);
+      g.fillStyle(options.fillColor, 1);
+      g.fillCircle(center, center, 24);
+      g.lineStyle(4, options.strokeColor, 1);
+      g.strokeCircle(center, center, 24);
 
-      g.fillStyle(options.markerColor, 0.92);
-      if (extraMark === 'plate') {
-        g.fillRoundedRect(center - 15, center - 20, 30, 10, 4);
-        g.fillRoundedRect(center - 13, center - 6, 26, 8, 3);
-      } else if (extraMark === 'fins') {
-        g.fillTriangle(center - 20, center + 3, center - 30, center - 1, center - 20, center - 6);
-        g.fillTriangle(center + 20, center + 3, center + 30, center - 1, center + 20, center - 6);
-        g.fillTriangle(center - 6, center - 16, center + 6, center - 16, center, center - 30);
-      } else if (extraMark === 'crest') {
-        g.fillTriangle(center - 10, center - 16, center + 10, center - 16, center, center - 31);
-        g.fillTriangle(center - 20, center - 10, center - 10, center - 10, center - 15, center - 23);
-        g.fillTriangle(center + 10, center - 10, center + 20, center - 10, center + 15, center - 23);
-      } else {
-        g.fillTriangle(center - 7, center - 16, center + 7, center - 16, center, center - 28);
-      }
+      g.fillStyle(options.markerColor, 0.95);
+      g.fillTriangle(center - 7, center - 16, center + 7, center - 16, center, center - 28);
 
       g.fillStyle(options.eyeColor, 0.95);
-      if (shape === 'diamond') {
-        g.fillEllipse(center - 8, center - 5, 7, 5);
-        g.fillEllipse(center + 8, center - 5, 7, 5);
-      } else {
-        g.fillCircle(center - 8, center - 4, 4);
-        g.fillCircle(center + 8, center - 4, 4);
-      }
+      g.fillCircle(center - 8, center - 4, 4);
+      g.fillCircle(center + 8, center - 4, 4);
 
       g.generateTexture(key, textureSize, textureSize);
       g.destroy();
     };
 
-
-
-    const createPlayerSilhouetteTexture = (
-      key: string,
-      variant: 'a' | 'b' | 'c' | 'd',
-    ): void => {
-      if (this.textures.exists(key)) return;
-
-      const center = textureSize / 2;
-      const g = this.add.graphics().setVisible(false);
-      const profile = {
-        a: { headRadius: 10, shoulderWidth: 36, hipWidth: 26, torsoTopY: 36, torsoBottomY: 63, legWidth: 8, hair: 'none' },
-        b: { headRadius: 9, shoulderWidth: 30, hipWidth: 22, torsoTopY: 38, torsoBottomY: 62, legWidth: 7, hair: 'none' },
-        c: { headRadius: 10, shoulderWidth: 31, hipWidth: 28, torsoTopY: 36, torsoBottomY: 64, legWidth: 7, hair: 'bob' },
-        d: { headRadius: 9, shoulderWidth: 28, hipWidth: 24, torsoTopY: 37, torsoBottomY: 61, legWidth: 6, hair: 'crest' },
-      }[variant];
-
-      g.fillStyle(0xffffff, 0.13);
-      g.fillCircle(center, center + 1, 29);
-      g.fillStyle(0xffffff, 0.18);
-      g.fillCircle(center, center + 1, 24);
-
-      const legTop = profile.torsoBottomY - 3;
-      g.fillStyle(0xffffff, 1);
-      g.fillRoundedRect(center - profile.legWidth - 2, legTop, profile.legWidth, 18, 3);
-      g.fillRoundedRect(center + 2, legTop, profile.legWidth, 18, 3);
-
-      g.fillPoints([
-        new Phaser.Geom.Point(center - profile.shoulderWidth / 2, profile.torsoTopY),
-        new Phaser.Geom.Point(center + profile.shoulderWidth / 2, profile.torsoTopY),
-        new Phaser.Geom.Point(center + profile.hipWidth / 2, profile.torsoBottomY),
-        new Phaser.Geom.Point(center - profile.hipWidth / 2, profile.torsoBottomY),
-      ], true);
-
-      g.lineStyle(3, 0x202020, 0.75);
-      g.strokeCircle(center, 26, profile.headRadius);
-      g.fillStyle(0xffffff, 1);
-      g.fillCircle(center, 26, profile.headRadius);
-
-      g.lineStyle(2, 0x202020, 0.75);
-      g.strokePoints([
-        new Phaser.Geom.Point(center - profile.shoulderWidth / 2, profile.torsoTopY),
-        new Phaser.Geom.Point(center + profile.shoulderWidth / 2, profile.torsoTopY),
-        new Phaser.Geom.Point(center + profile.hipWidth / 2, profile.torsoBottomY),
-        new Phaser.Geom.Point(center - profile.hipWidth / 2, profile.torsoBottomY),
-      ], true, true);
-
-      g.fillStyle(0x222222, 0.8);
-      if (profile.hair === 'bob') {
-        g.fillRoundedRect(center - 11, 16, 22, 8, 4);
-      } else if (profile.hair === 'crest') {
-        g.fillTriangle(center, 11, center - 8, 21, center + 8, 21);
-      }
-
-      g.fillStyle(0x202020, 0.58);
-      g.fillCircle(center - 4, 25, 1.5);
-      g.fillCircle(center + 4, 25, 1.5);
-
-      g.generateTexture(key, textureSize, textureSize);
-      g.destroy();
-    };
 
     const createExplosionTexture = (key: string, axis: 'core' | 'horizontal' | 'vertical'): void => {
       if (this.textures.exists(key)) return;
@@ -798,55 +439,29 @@ export class GameScene extends Phaser.Scene {
       g.destroy();
     };
 
-    createPlayerSilhouetteTexture('rr_player_a', 'a');
-    createPlayerSilhouetteTexture('rr_player_b', 'b');
-    createPlayerSilhouetteTexture('rr_player_c', 'c');
-    createPlayerSilhouetteTexture('rr_player_d', 'd');
-
-    createUnitTexture('rr_enemy_normal', {
-      fillColor: 0xa4a9bf,
-      strokeColor: 0xf4f6ff,
-      glowColor: 0x5b6488,
-      markerColor: 0xdde3ff,
-      eyeColor: 0x20253f,
-      silhouetteKind: 'normal',
+    createUnitTexture('rr_player', {
+      fillColor: 0x4ab3ff,
+      strokeColor: 0xd8f1ff,
+      glowColor: 0x2b6fbf,
+      markerColor: 0xe9fbff,
+      eyeColor: 0x0f2442,
     });
 
     createUnitTexture('rr_enemy_basic', {
-      fillColor: 0xa4a9bf,
-      strokeColor: 0xf4f6ff,
-      glowColor: 0x5b6488,
-      markerColor: 0xdde3ff,
-      eyeColor: 0x20253f,
-      shapeVariant: 'round',
-      extraMark: 'none',
-    });
-
-    createUnitTexture('rr_enemy_fast', {
-      fillColor: 0x4ecbff,
-      strokeColor: 0xe7f8ff,
-      glowColor: 0x2f8fcb,
-      markerColor: 0xcaf2ff,
-      eyeColor: 0x0e2c44,
-      silhouetteKind: 'fast',
-    });
-
-    createUnitTexture('rr_enemy_tank', {
-      fillColor: 0x59606d,
-      strokeColor: 0xdde4f2,
-      glowColor: 0x323946,
-      markerColor: 0xaab8ca,
-      eyeColor: 0x0f1622,
-      silhouetteKind: 'tank',
+      fillColor: 0xff6b6b,
+      strokeColor: 0xfff1f1,
+      glowColor: 0xbf3f57,
+      markerColor: 0xffe3a6,
+      eyeColor: 0x351423,
     });
 
     createUnitTexture('rr_enemy_elite', {
-      fillColor: 0xba67ff,
-      strokeColor: 0xffefff,
-      glowColor: 0x7c30d6,
-      markerColor: 0xffde7a,
-      eyeColor: 0x280f48,
-      silhouetteKind: 'elite',
+      fillColor: 0xb37cff,
+      strokeColor: 0xf4e9ff,
+      glowColor: 0x8a4ce3,
+      markerColor: 0xfff6bc,
+      eyeColor: 0x2c114b,
+      hasOuterHalo: true,
     });
 
     createExplosionTexture('fx_explosion_core', 'core');
@@ -916,7 +531,6 @@ export class GameScene extends Phaser.Scene {
       this.doorController.update(time, this.isLevelCleared);
     }
     this.updateDoorVisual(time);
-    this.persistSoloResumeSnapshot('tick');
   }
 
   private fixedUpdate(): void {
@@ -1003,14 +617,6 @@ export class GameScene extends Phaser.Scene {
 
   private onSceneShutdown(): void {
     this.scale.off('resize', this.onScaleResize, this);
-    if (this.soloSnapshotSaveTimer !== null) {
-      window.clearTimeout(this.soloSnapshotSaveTimer);
-      this.soloSnapshotSaveTimer = null;
-    }
-    document.removeEventListener('visibilitychange', this.onDocumentVisibilityChange);
-    window.removeEventListener('pagehide', this.onPageHide);
-    window.removeEventListener('beforeunload', this.onBeforeUnload);
-    this.persistSoloResumeSnapshot('scene_shutdown', true);
   }
 
   private getLevelProgressModel(): LevelProgressModel {
@@ -1054,273 +660,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   private mixLevelSeed(levelIndex: number): number {
-    const mixed = (this.baseSeed ^ Math.imul(levelIndex + 1, 0x9e3779b1) ^ Math.imul(this.runSeed, 0x85ebca6b)) >>> 0;
+    const mixed = (this.baseSeed ^ Math.imul(levelIndex + 1, 0x9e3779b1) ^ Math.imul(this.runId, 0x85ebca6b)) >>> 0;
     return mixed === 0 ? 0x6d2b79f5 : mixed;
   }
 
-  private generateRunSeed(): number {
-    try {
-      const randomSeed = window.crypto?.getRandomValues?.(new Uint32Array(1))[0] ?? 0;
-      if (randomSeed !== 0) return randomSeed >>> 0;
-    } catch {
-      // fallback below
-    }
-    const randomPart = Math.floor(Math.random() * 0xffffffff) >>> 0;
-    const mixed = ((Date.now() >>> 0) ^ randomPart ^ 0xa5a5a5a5) >>> 0;
-    return mixed === 0 ? 0x6d2b79f5 : mixed;
-  }
-
-
-  private setupSoloResumeLifecycleHooks(): void {
-    document.addEventListener('visibilitychange', this.onDocumentVisibilityChange);
-    window.addEventListener('pagehide', this.onPageHide);
-    window.addEventListener('beforeunload', this.onBeforeUnload);
-  }
-
-  private onDocumentVisibilityChange = (): void => {
-    if (document.visibilityState === 'hidden') {
-      this.persistSoloResumeSnapshot('visibility_hidden', true);
-    }
-  };
-
-  private onPageHide = (): void => {
-    this.persistSoloResumeSnapshot('pagehide', true);
-  };
-
-  private onBeforeUnload = (): void => {
-    this.persistSoloResumeSnapshot('beforeunload', true);
-  };
-
-  private buildSoloResumeSnapshot(): SoloResumeSnapshotV1 | null {
-    if (this.gameMode !== 'solo' || this.soloGameOver) return null;
-    const tiles: number[] = [];
-    for (let y = 0; y < this.arena.height; y += 1) {
-      for (let x = 0; x < this.arena.width; x += 1) {
-        const code = TILE_TO_CODE[this.arena.tiles[y]?.[x] ?? 'Floor'];
-        tiles.push(code ?? 0);
-      }
-    }
-
-    const enemies = [...this.enemies.values()].map((enemy) => ({
-      kind: enemy.kind,
-      x: enemy.gridX,
-      y: enemy.gridY,
-      hp: enemy.hp,
-    }));
-
-    return {
-      version: 1,
-      savedAtMs: Date.now(),
-      levelIndex: this.levelIndex,
-      runSeed: this.runSeed >>> 0,
-      lives: this.lives,
-      stats: {
-        score: Math.max(0, Math.floor(this.stats.score)),
-        capacity: this.stats.capacity,
-        range: this.stats.range,
-        remoteDetonateUnlocked: this.stats.remoteDetonateUnlocked,
-      },
-      player: { x: this.player.gridX, y: this.player.gridY },
-      arena: { width: this.arena.width, height: this.arena.height, tiles },
-      enemies,
-      door: { revealed: this.doorRevealed, entered: this.doorEntered, cell: this.hiddenDoorCell ?? null },
-      campaignState: {
-        stage: this.campaignState.stage,
-        zone: this.campaignState.zone,
-        trophies: [...this.campaignState.trophies],
-        score: Math.max(0, Math.floor(this.stats.score)),
-        soloGameOver: this.soloGameOver,
-        lastActiveAtMs: Date.now(),
-      },
-    };
-  }
-
-  private persistSoloResumeSnapshot(_reason: string, force = false): void {
-    if (this.gameMode !== 'solo') return;
-    const now = Date.now();
-    const delayMs = 700;
-    if (!force && now - this.lastSoloSnapshotPersistAtMs < delayMs) {
-      if (this.soloSnapshotSaveTimer !== null) return;
-      this.soloSnapshotSaveTimer = window.setTimeout(() => {
-        this.soloSnapshotSaveTimer = null;
-        this.persistSoloResumeSnapshot('debounced_flush', true);
-      }, delayMs);
-      return;
-    }
-
-    const snapshot = this.buildSoloResumeSnapshot();
-    if (!snapshot) {
-      clearSoloResumeSnapshot();
-      return;
-    }
-    this.lastSoloSnapshotPersistAtMs = now;
-    saveSoloResumeSnapshot(snapshot);
-  }
-
-  private tryRestoreFromPendingSoloSnapshot(): boolean {
-    const snapshot = this.pendingSoloResumeSnapshot;
-    this.pendingSoloResumeSnapshot = null;
-    if (!snapshot) return false;
-    if (snapshot.campaignState.soloGameOver === true) {
-      clearSoloResumeSnapshot();
-      return false;
-    }
-    if (Date.now() - snapshot.savedAtMs > SOLO_RESUME_WINDOW_MS) {
-      clearSoloResumeSnapshot();
-      return false;
-    }
-    try {
-      this.restoreFromSoloResumeSnapshot(snapshot);
-      this.persistSoloResumeSnapshot('restore');
-      return true;
-    } catch {
-      clearSoloResumeSnapshot();
-      return false;
-    }
-  }
-
-  private restoreFromSoloResumeSnapshot(snapshot: SoloResumeSnapshotV1): void {
-    this.gameMode = 'solo';
-    this.awaitingSoloContinue = false;
-    this.soloGameOver = false;
-    this.multiplayerEliminated = false;
-    this.multiplayerRespawning = false;
-    this.playerSprite?.setVisible(true);
-
-    this.runSeed = snapshot.runSeed >>> 0;
-    this.levelIndex = Math.max(0, Math.floor(snapshot.levelIndex));
-    this.zoneIndex = Math.floor(this.levelIndex / LEVELS_PER_ZONE);
-    this.levelInZone = this.levelIndex % LEVELS_PER_ZONE;
-    this.isBossLevel = this.bossController.isBossLevel(this.levelIndex);
-
-    const width = Math.max(1, Math.floor(snapshot.arena.width));
-    const height = Math.max(1, Math.floor(snapshot.arena.height));
-    const tiles2d: TileType[][] = [];
-    for (let y = 0; y < height; y += 1) {
-      const row: TileType[] = [];
-      for (let x = 0; x < width; x += 1) {
-        const idx = y * width + x;
-        row.push(CODE_TO_TILE[snapshot.arena.tiles[idx]] ?? 'Floor');
-      }
-      tiles2d.push(row);
-    }
-
-    this.rng = createDeterministicRng(this.mixLevelSeed(this.levelIndex));
-    this.arena = {
-      tiles: tiles2d,
-      bombs: new Map(),
-      items: new Map(),
-      hiddenDoorKey: snapshot.door.cell ? toKey(snapshot.door.cell.x, snapshot.door.cell.y) : toKey(1, 1),
-      isSpawnCell: (x: number, y: number) => new Set(['1,1', '1,2', '2,1', '2,2']).has(toKey(x, y)),
-      width,
-      height,
-    };
-
-    this.hiddenDoorCell = snapshot.door.cell ?? undefined;
-    this.doorRevealed = Boolean(snapshot.door.revealed);
-    this.doorEntered = Boolean(snapshot.door.entered);
-    this.isLevelCleared = this.doorEntered;
-    this.doorEnterStartedAt = null;
-    this.waveSequence = 0;
-    this.enemySequence = snapshot.enemies.length;
-    this.pickupsSpawnedThisLevel = 0;
-    this.bossAnchorKey = null;
-    this.doorController.reset();
-    this.clearDynamicSprites();
-
-    this.enemies.clear();
-    this.enemyNextMoveAt.clear();
-    for (let i = 0; i < snapshot.enemies.length; i += 1) {
-      const source = snapshot.enemies[i];
-      const key = `enemy-resume-${this.levelIndex}-${i}-${source.x}-${source.y}`;
-      const moveIntervalMs = this.getScaledEnemyMoveInterval(source.kind);
-      this.enemies.set(key, {
-        key,
-        gridX: source.x,
-        gridY: source.y,
-        moveFromX: source.x,
-        moveFromY: source.y,
-        targetX: source.x,
-        targetY: source.y,
-        moveStartedAtMs: 0,
-        moveDurationMs: moveIntervalMs,
-        isMoving: false,
-        facing: 'left',
-        state: 'idle',
-        kind: source.kind,
-        moveIntervalMs,
-        hp: Math.max(1, source.hp ?? (source.kind === 'tank' ? 2 : 1)),
-      });
-      this.enemyNextMoveAt.set(key, this.time.now);
-    }
-
-    this.lives = Math.max(0, Math.floor(snapshot.lives));
-    this.nextExtraLifeScore = Math.floor(Math.max(0, snapshot.stats.score) / EXTRA_LIFE_STEP_SCORE) * EXTRA_LIFE_STEP_SCORE + EXTRA_LIFE_STEP_SCORE;
-    this.stats = {
-      capacity: Math.max(1, Math.floor(snapshot.stats.capacity)),
-      placed: 0,
-      range: Math.max(1, Math.floor(snapshot.stats.range)),
-      score: Math.max(0, Math.floor(snapshot.stats.score)),
-      lives: this.lives,
-      remoteDetonateUnlocked: Boolean(snapshot.stats.remoteDetonateUnlocked),
-    };
-
-    this.campaignState = {
-      stage: snapshot.campaignState.stage,
-      zone: snapshot.campaignState.zone,
-      score: Math.max(0, Math.floor(snapshot.campaignState.score)),
-      trophies: [...snapshot.campaignState.trophies],
-      lastActiveAtMs: Date.now(),
-      soloGameOver: false,
-    };
-    saveCampaignState(this.campaignState);
-
-    this.simulationTick = 0;
-    this.accumulator = 0;
-    this.localInputQueue.length = 0;
-    this.activeFlames.clear();
-
-    this.rebuildArenaTiles();
-    this.syncCameraBoundsToArena();
-    this.spawnPlayer(snapshot.player.x, snapshot.player.y);
-    this.playerSprite?.setVisible(true);
-    this.bossController.reset({ arena: this.arena, isBossLevel: this.isBossLevel, playerCount: 1 });
-    emitStats(this.stats);
-    this.emitLifeState();
-    this.emitCampaignState();
-    this.updateCameraFollowMode();
-  }
-
-  private loadProgress(): { loaded: boolean; initialLevelIndex: number } {
+  private loadProgress(): number {
     const fallbackLevelIndex = 0;
     this.progressionUnlockedStages = new Set<number>([0]);
 
     try {
       const campaign = loadCampaignState();
       // TODO backend: merge initData campaign progress instead of localStorage
-      if (!campaign) {
-        this.campaignState = createInitialCampaignState();
-        this.stats.score = 0;
-        this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
-        this.emitCampaignState();
-        this.emitLifeState();
-        return { loaded: false, initialLevelIndex: fallbackLevelIndex };
-      }
-
       this.campaignState = campaign;
       this.stats.score = campaign.score;
       this.nextExtraLifeScore = Math.floor(this.stats.score / EXTRA_LIFE_STEP_SCORE) * EXTRA_LIFE_STEP_SCORE + EXTRA_LIFE_STEP_SCORE;
       this.progressionUnlockedStages = new Set<number>([...this.progressionUnlockedStages, campaign.stage - 1]);
       this.emitCampaignState();
       this.emitLifeState();
-      return { loaded: true, initialLevelIndex: campaignStateToLevelIndex(campaign) };
+      return campaignStateToLevelIndex(campaign);
     } catch {
-      this.campaignState = createInitialCampaignState();
-      this.stats.score = 0;
-      this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
-      this.emitCampaignState();
-      this.emitLifeState();
-      return { loaded: false, initialLevelIndex: fallbackLevelIndex };
+      return fallbackLevelIndex;
     }
   }
 
@@ -1328,12 +687,9 @@ export class GameScene extends Phaser.Scene {
     this.campaignState = {
       ...this.campaignState,
       score: Math.max(0, Math.floor(this.stats.score)),
-      lastActiveAtMs: Date.now(),
-      soloGameOver: this.soloGameOver,
     };
     saveCampaignState(this.campaignState);
     this.emitCampaignState();
-    this.persistSoloResumeSnapshot('campaign_sync');
   }
 
   private getShuffledEnemySpawnCells(levelIndex: number = this.levelIndex): Array<{ x: number; y: number }> {
@@ -1369,7 +725,6 @@ export class GameScene extends Phaser.Scene {
     this.rng = createDeterministicRng(this.mixLevelSeed(this.levelIndex));
     this.isLevelCleared = false;
     this.doorRevealed = false;
-    this.hiddenDoorCell = undefined;
     this.doorEntered = false;
     this.doorEnterStartedAt = null;
     this.waveSequence = 0;
@@ -1384,7 +739,6 @@ export class GameScene extends Phaser.Scene {
       const bossNode = generateBossNodeStones(this.arena, this.rng, BOSS_CONFIG.anomalousStoneCount);
       this.bossAnchorKey = bossNode.anchorKey || null;
     }
-    this.assignHiddenDoorCellForPvE();
     this.activeFlames.clear();
     this.enemies.clear();
     this.enemyNextMoveAt.clear();
@@ -1416,51 +770,12 @@ export class GameScene extends Phaser.Scene {
 
     this.emitSimulation(LEVEL_STARTED, this.time.now, {
       ...this.getLevelProgressModel(),
-      hiddenDoorKey: this.getHiddenDoorKey(),
+      hiddenDoorKey: this.arena.hiddenDoorKey,
     });
-    this.persistSoloResumeSnapshot('level_started');
-  }
-
-  private assignHiddenDoorCellForPvE(): void {
-    if (this.gameMode === 'multiplayer') return;
-
-    const spawnX = 1;
-    const spawnY = 1;
-    const destroyableCells: Array<{ x: number; y: number }> = [];
-    const eligibleCells: Array<{ x: number; y: number }> = [];
-
-    for (let y = 0; y < this.arena.tiles.length; y += 1) {
-      for (let x = 0; x < this.arena.tiles[y].length; x += 1) {
-        const tile = this.arena.tiles[y][x];
-        const isDestroyable = tile === 'BreakableBlock' || tile === 'ANOMALOUS_STONE';
-        if (!isDestroyable) continue;
-        const cell = { x, y };
-        destroyableCells.push(cell);
-        const distanceFromSpawn = Math.abs(x - spawnX) + Math.abs(y - spawnY);
-        if (distanceFromSpawn > 2) {
-          eligibleCells.push(cell);
-        }
-      }
-    }
-
-    const pool = eligibleCells.length > 0 ? eligibleCells : destroyableCells;
-    if (pool.length === 0) return;
-    this.hiddenDoorCell = pool[this.randomInt(pool.length)];
-  }
-
-  private getHiddenDoorKey(): string {
-    if (this.gameMode !== 'multiplayer' && this.hiddenDoorCell) {
-      return toKey(this.hiddenDoorCell.x, this.hiddenDoorCell.y);
-    }
-    return this.arena.hiddenDoorKey;
   }
 
   private handlePlayerDeath(reason: 'bomb' | 'enemy' = 'enemy'): void {
     if (this.awaitingSoloContinue || this.soloGameOver || this.multiplayerEliminated) return;
-
-    if (reason === 'enemy') {
-      this.playPlayerHitFeedback();
-    }
 
     this.stats.score = Math.max(0, this.stats.score - GAME_CONFIG.playerDeathPenalty);
     this.lives = Math.max(0, this.lives - 1);
@@ -1580,7 +895,6 @@ export class GameScene extends Phaser.Scene {
     this.spawnPlayer();
     this.playerSprite?.setVisible(true);
     this.emitLifeState();
-    this.persistSoloResumeSnapshot('continue_solo');
   }
 
   public restartSoloRun(): void {
@@ -1591,8 +905,6 @@ export class GameScene extends Phaser.Scene {
     this.multiplayerEliminated = false;
     this.multiplayerRespawning = false;
     this.playerSprite?.setVisible(true);
-    clearSoloResumeSnapshot();
-    this.runSeed = this.generateRunSeed();
     this.lives = INITIAL_LIVES;
     this.nextExtraLifeScore = EXTRA_LIFE_STEP_SCORE;
     this.stats = {
@@ -1604,14 +916,13 @@ export class GameScene extends Phaser.Scene {
       remoteDetonateUnlocked: false,
     };
     this.campaignState = {
-      ...createInitialCampaignState(),
+      stage: 1,
+      zone: 1,
+      score: 0,
       trophies: [...this.campaignState.trophies],
-      lastActiveAtMs: Date.now(),
-      soloGameOver: false,
     };
     saveCampaignState(this.campaignState);
     this.emitCampaignState();
-    this.persistSoloResumeSnapshot('campaign_sync');
     emitStats(this.stats);
     this.emitLifeState();
     this.startLevel(0, false);
@@ -1627,12 +938,9 @@ export class GameScene extends Phaser.Scene {
       ...nextCampaign,
       score: Math.max(0, Math.floor(this.stats.score)),
       trophies: [...this.campaignState.trophies],
-      lastActiveAtMs: Date.now(),
-      soloGameOver: this.soloGameOver,
     };
     saveCampaignState(this.campaignState);
     this.emitCampaignState();
-    this.persistSoloResumeSnapshot('campaign_sync');
     this.progressionUnlockedStages.add(this.campaignState.stage - 1);
 
     const nextLevelIndex = campaignStateToLevelIndex(this.campaignState);
@@ -1681,7 +989,7 @@ export class GameScene extends Phaser.Scene {
     this.bossController.clear();
     this.doorSprite?.destroy();
     this.doorIconSprite?.destroy();
-    const doorPos = fromKey(this.getHiddenDoorKey());
+    const doorPos = fromKey(this.arena.hiddenDoorKey);
     this.doorSprite = this.add
       .rectangle(doorPos.x * tileSize + tileSize / 2, doorPos.y * tileSize + tileSize / 2, tileSize - 8, tileSize - 8, 0x4a66cc)
       .setDepth(DEPTH_ITEM)
@@ -1720,7 +1028,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     const playerKey = toKey(this.player.gridX, this.player.gridY);
-    if (playerKey !== this.getHiddenDoorKey()) {
+    if (playerKey !== this.arena.hiddenDoorKey) {
       this.doorEnterStartedAt = null;
       return;
     }
@@ -1737,93 +1045,35 @@ export class GameScene extends Phaser.Scene {
 
 
   private getScaledEnemyMoveInterval(kind: EnemyKind): number {
-    const baseInterval = GAME_CONFIG.enemyMoveIntervalMs;
-    switch (kind) {
-      case 'fast':
-        return scaleMovementDurationMs(Math.max(GAME_CONFIG.enemyMoveIntervalMinMs, Math.floor(baseInterval * 0.75)));
-      case 'tank':
-        return scaleMovementDurationMs(Math.floor(baseInterval * 1.4));
-      case 'elite':
-        return scaleMovementDurationMs(Math.max(GAME_CONFIG.enemyMoveIntervalMinMs, Math.floor(baseInterval * 0.7)));
-      case 'normal':
-      default:
-        return scaleMovementDurationMs(baseInterval);
-    }
+    const baseInterval = kind === 'elite'
+      ? Math.max(GAME_CONFIG.enemyMoveIntervalMinMs, Math.floor(GAME_CONFIG.enemyMoveIntervalMs * 0.7))
+      : GAME_CONFIG.enemyMoveIntervalMs;
+    return scaleMovementDurationMs(baseInterval);
   }
-  private spawnPlayer(forcedX?: number, forcedY?: number): void {
-    const spawnX = forcedX ?? 1;
-    const spawnY = forcedY ?? 1;
-    this.player.gridX = spawnX;
-    this.player.gridY = spawnY;
+  private spawnPlayer(): void {
+    this.player.gridX = 1;
+    this.player.gridY = 1;
     this.player.targetX = null;
     this.player.targetY = null;
-    this.player.moveFromX = spawnX;
-    this.player.moveFromY = spawnY;
+    this.player.moveFromX = 1;
+    this.player.moveFromY = 1;
     this.player.moveStartedAtMs = 0;
     this.player.moveDurationMs = 0;
     this.player.isMoving = false;
     this.player.facing = 'down';
     this.player.state = 'idle';
     this.player.graceBombKey = null;
-    this.refreshLocalPlayerVisualIdentity();
 
     const style = this.getAssetStyle('player', this.player.state, this.player.facing);
     const { tileSize } = GAME_CONFIG;
     this.playerSprite?.destroy();
     this.playerSprite = this.add
-      .image(0, 0, this.localPlayerSilhouetteTextureKey)
+      .image(0, 0, this.getTextureKey(style))
       .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5)
       .setDepth(style.depth ?? DEPTH_PLAYER)
       .setDisplaySize(tileSize * (style.scale ?? 0.74), tileSize * (style.scale ?? 0.74));
     this.placeLocalPlayerSpriteAt(this.player.gridX, this.player.gridY);
     this.updateCameraFollowMode();
-  }
-
-  private pickEnemyKindForLevel(): EnemyKind {
-    const roll = this.randomFloat();
-
-    if (this.levelIndex <= 1) {
-      return roll < 0.8 ? 'normal' : 'fast';
-    }
-
-    if (this.levelIndex <= 4) {
-      if (roll < 0.6) return 'normal';
-      if (roll < 0.8) return 'fast';
-      return 'tank';
-    }
-
-    if (roll < 0.6) return 'normal';
-    if (roll < 0.8) return 'fast';
-    if (roll < 0.95) return 'tank';
-    return 'elite';
-  }
-
-  private getEnemyScore(kind: EnemyKind): number {
-    switch (kind) {
-      case 'fast':
-        return 150;
-      case 'tank':
-        return 250;
-      case 'elite':
-        return 400;
-      case 'normal':
-      default:
-        return 100;
-    }
-  }
-
-  private getEnemyTextureKey(kind: EnemyKind): string {
-    switch (kind) {
-      case 'fast':
-        return 'rr_enemy_fast';
-      case 'tank':
-        return 'rr_enemy_tank';
-      case 'elite':
-        return 'rr_enemy_elite';
-      case 'normal':
-      default:
-        return 'rr_enemy_normal';
-    }
   }
 
   private spawnEnemies(): void {
@@ -1834,7 +1084,6 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < targetCount; i += 1) {
       const cell = spawnCells[i];
       const key = `enemy-${this.levelIndex}-${i}-${cell.x}-${cell.y}`;
-      const kind = this.pickEnemyKindForLevel();
       this.enemies.set(key, {
         key,
         gridX: cell.x,
@@ -1844,13 +1093,12 @@ export class GameScene extends Phaser.Scene {
         targetX: cell.x,
         targetY: cell.y,
         moveStartedAtMs: 0,
-        moveDurationMs: this.getScaledEnemyMoveInterval(kind),
+        moveDurationMs: this.getScaledEnemyMoveInterval('normal'),
         isMoving: false,
         facing: 'left',
         state: 'idle',
-        kind,
-        moveIntervalMs: this.getScaledEnemyMoveInterval(kind),
-        hp: kind === 'tank' ? 2 : 1,
+        kind: 'normal',
+        moveIntervalMs: this.getScaledEnemyMoveInterval('normal'),
       });
       this.enemyNextMoveAt.set(key, 0);
     }
@@ -2198,7 +1446,7 @@ export class GameScene extends Phaser.Scene {
         if (this.isBossLevel && wasAnomalous && this.bossAnchorKey === blockKey) {
           this.bossController.revealBoss();
         }
-        if (toKey(block.x, block.y) === this.getHiddenDoorKey()) {
+        if (toKey(block.x, block.y) === this.arena.hiddenDoorKey) {
           this.revealDoor(time);
           doorRevealedThisWave = true;
         }
@@ -2212,7 +1460,7 @@ export class GameScene extends Phaser.Scene {
         const segment: FlameSegmentKind = impact.key === bomb.key ? 'center' : 'arm';
         const axis: FlameArmAxis | undefined = segment === 'arm' ? (impact.x === bomb.x ? 'vertical' : 'horizontal') : undefined;
         this.spawnFlame(impact.x, impact.y, time + GAME_CONFIG.flameLifetimeMs, segment, axis);
-        this.hitEntitiesAt(impact.x, impact.y, 'explosion');
+        this.hitEntitiesAt(impact.x, impact.y);
         this.tryRegisterDoorWaveHit(impact.x, impact.y, waveId, time, doorRevealedThisWave);
       }
 
@@ -2241,7 +1489,7 @@ export class GameScene extends Phaser.Scene {
   private tryRegisterDoorWaveHit(x: number, y: number, waveId: string, time: number, doorRevealedThisWave: boolean): void {
     if (this.isBossLevel) return;
     if (!this.doorRevealed) return;
-    if (toKey(x, y) !== this.getHiddenDoorKey()) return;
+    if (toKey(x, y) !== this.arena.hiddenDoorKey) return;
     if (doorRevealedThisWave) return;
     const accepted = this.doorController.handleExplosionWaveHit(waveId, time);
     if (!accepted) return;
@@ -2357,7 +1605,7 @@ export class GameScene extends Phaser.Scene {
 
 
   private getDoorSpawnCells(limit: number): Array<{ x: number; y: number }> {
-    const origin = fromKey(this.getHiddenDoorKey());
+    const origin = fromKey(this.arena.hiddenDoorKey);
     const visited = new Set<string>([toKey(origin.x, origin.y)]);
     const queue: Array<{ x: number; y: number }> = [{ x: origin.x, y: origin.y }];
     const result: Array<{ x: number; y: number }> = [];
@@ -2410,7 +1658,6 @@ export class GameScene extends Phaser.Scene {
       state: 'idle',
       kind,
       moveIntervalMs: this.getScaledEnemyMoveInterval(kind),
-      hp: kind === 'tank' ? 2 : 1,
     });
     this.enemyNextMoveAt.set(key, this.time.now);
   }
@@ -2423,10 +1670,7 @@ export class GameScene extends Phaser.Scene {
 
     if (valid.length === 0) return null;
 
-    const forwardBias = enemy.kind === 'fast'
-      ? Math.max(0.1, GAME_CONFIG.enemyForwardBias - 0.2)
-      : GAME_CONFIG.enemyForwardBias;
-    if (valid.includes(enemy.facing) && this.randomFloat() < forwardBias) {
+    if (valid.includes(enemy.facing) && this.randomFloat() < GAME_CONFIG.enemyForwardBias) {
       return enemy.facing;
     }
 
@@ -2442,24 +1686,17 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
-  private hitEntitiesAt(x: number, y: number, source: 'explosion' | 'other' = 'other'): void {
+  private hitEntitiesAt(x: number, y: number): void {
     this.hitPlayerAt(x, y);
     let scoreChanged = false;
     for (const enemy of [...this.enemies.values()]) {
       if (enemy.gridX !== x || enemy.gridY !== y) continue;
-      enemy.hp -= 1;
-      if (enemy.hp > 0) {
-        this.playEnemyHitFeedback(enemy, false, source);
-        this.emitSimulation('enemy.damaged', this.time.now, { key: enemy.key, x, y, hp: enemy.hp, kind: enemy.kind });
-        continue;
-      }
-      this.playEnemyHitFeedback(enemy, true, source);
       this.enemies.delete(enemy.key);
       this.enemyNextMoveAt.delete(enemy.key);
       this.enemySprites.get(enemy.key)?.destroy();
       this.enemySprites.delete(enemy.key);
-      this.stats.score += this.getEnemyScore(enemy.kind);
-      this.emitSimulation('enemy.defeated', this.time.now, { key: enemy.key, x, y, kind: enemy.kind });
+      this.stats.score += GAME_CONFIG.enemyScore;
+      this.emitSimulation('enemy.defeated', this.time.now, { key: enemy.key, x, y });
       scoreChanged = true;
     }
     if (scoreChanged) {
@@ -2467,110 +1704,6 @@ export class GameScene extends Phaser.Scene {
       emitStats(this.stats);
       this.syncCampaignAndPersist();
     }
-  }
-
-  private playEnemyHitFeedback(enemy: EnemyModel, isDeath: boolean, source: 'explosion' | 'other'): void {
-    const sprite = this.enemySprites.get(enemy.key);
-    if (!sprite) {
-      this.playEnemyFeedbackSfx(enemy.kind, isDeath);
-      this.maybeShakeForEnemyFeedback(source, isDeath);
-      return;
-    }
-
-    if (isDeath) {
-      const ghost = this.add.image(sprite.x, sprite.y, sprite.texture.key)
-        .setDepth((sprite.depth ?? DEPTH_ENEMY) + 0.01)
-        .setScale(sprite.scaleX, sprite.scaleY)
-        .setAngle(sprite.angle)
-        .setFlip(sprite.flipX, sprite.flipY)
-        .setAlpha(sprite.alpha)
-        .setTintFill(0xffffff);
-      this.tweens.add({
-        targets: ghost,
-        duration: 120,
-        ease: 'Quad.Out',
-        scaleX: ghost.scaleX * 1.07,
-        scaleY: ghost.scaleY * 1.07,
-        alpha: { from: 0.95, to: 0.35 },
-        yoyo: true,
-        onComplete: () => {
-          ghost.clearTint();
-          ghost.destroy();
-        },
-      });
-    } else {
-      this.tweens.killTweensOf(sprite);
-      sprite.setTintFill(0xffffff);
-      this.tweens.add({
-        targets: sprite,
-        duration: 90,
-        ease: 'Sine.Out',
-        alpha: { from: 1, to: 0.7 },
-        yoyo: true,
-        onComplete: () => {
-          sprite.clearTint();
-          sprite.setAlpha(1);
-        },
-      });
-    }
-
-    this.playEnemyFeedbackSfx(enemy.kind, isDeath);
-    this.maybeShakeForEnemyFeedback(source, isDeath);
-  }
-
-  private maybeShakeForEnemyFeedback(source: 'explosion' | 'other', isDeath: boolean): void {
-    if (source !== 'explosion') return;
-    const now = this.time.now;
-    if (now - this.lastEnemyHitShakeAt < ENEMY_HIT_SHAKE_COOLDOWN_MS) return;
-    this.lastEnemyHitShakeAt = now;
-    this.cameras.main.shake(isDeath ? 120 : 90, isDeath ? 0.005 : 0.0035, true);
-  }
-
-  private playPlayerHitFeedback(): void {
-    const now = this.time.now;
-    if (now - this.lastPlayerHitFeedbackAt < PLAYER_HIT_FEEDBACK_COOLDOWN_MS) return;
-    this.lastPlayerHitFeedbackAt = now;
-
-    const camera = this.cameras?.main;
-    if (camera) {
-      camera.shake(90, 0.0035, true);
-    }
-
-    const sprite = this.playerSprite;
-    if (!sprite) return;
-
-    this.tweens.killTweensOf(sprite);
-    sprite.setAlpha(1);
-    this.tweens.add({
-      targets: sprite,
-      duration: 55,
-      alpha: 0.32,
-      yoyo: true,
-      repeat: 2,
-      onComplete: () => {
-        sprite.setAlpha(1);
-      },
-    });
-  }
-
-  private playEnemyFeedbackSfx(kind: EnemyKind, isDeath: boolean): void {
-    if (!this.audioSettings.sfxEnabled || !this.sound) return;
-    const phase = isDeath ? 'death' : 'hit';
-    const keysToTry = [`sfx_enemy_${phase}_${kind}`, `sfx_enemy_${phase}`];
-    const selectedKey = keysToTry.find((key) => this.cache.audio.exists(key));
-    if (!selectedKey) return;
-
-    const detuneByKind: Record<EnemyKind, number> = {
-      normal: 0,
-      fast: 140,
-      tank: -130,
-      elite: 220,
-    };
-
-    this.sound.play(selectedKey, {
-      volume: isDeath ? 0.22 : 0.16,
-      detune: detuneByKind[kind],
-    });
   }
 
   private hitPlayerAt(x: number, y: number): void {
@@ -2637,21 +1770,12 @@ export class GameScene extends Phaser.Scene {
     if (this.gameMode !== 'multiplayer' && (this.player.targetX === null || this.player.targetY === null)) {
       this.placeLocalPlayerSpriteAt(this.player.gridX, this.player.gridY);
     }
-    const localIsMoving = this.player.isMoving || this.player.targetX !== null || this.player.targetY !== null;
-    const bobTime = time * (localIsMoving ? 0.016 : 0.006) + this.localPlayerBobPhase;
-    const bobOffset = Math.sin(bobTime) * (localIsMoving ? 1.9 : 0.55);
-    const swayAngle = Math.sin(time * 0.02 + this.localPlayerBobPhase) * (localIsMoving ? 2.2 : 0.5);
-    const scalePulse = 1 + Math.sin(bobTime) * (localIsMoving ? 0.018 : 0.008);
-    const baseRenderX = (this.localRenderPos?.x ?? this.player.gridX) * tileSize + tileSize / 2;
-    const baseRenderY = (this.localRenderPos?.y ?? this.player.gridY) * tileSize + tileSize / 2;
-
     this.playerSprite
-      .setTexture(this.localPlayerSilhouetteTextureKey)
-      .setPosition(baseRenderX, baseRenderY + bobOffset)
-      .setAngle(this.getFacingAngle(this.player.facing) + swayAngle)
+      .setTexture('rr_player')
+      .setAngle(this.getFacingAngle(this.player.facing))
       .setDisplaySize(
-        tileSize * (playerStyle.scale ?? 0.74) * scalePulse,
-        tileSize * (playerStyle.scale ?? 0.74) * scalePulse,
+        tileSize * (playerStyle.scale ?? 0.74) * this.getPlayerBreathScale(time),
+        tileSize * (playerStyle.scale ?? 0.74) * this.getPlayerBreathScale(time),
       )
       .setOrigin(playerStyle.origin?.x ?? 0.5, playerStyle.origin?.y ?? 0.5)
       .setDepth(playerStyle.depth ?? DEPTH_PLAYER);
@@ -2792,22 +1916,11 @@ export class GameScene extends Phaser.Scene {
         enemy.moveStartedAtMs = 0;
       }
 
-      const baseScale = style.scale ?? 0.72;
-      const kindScaleMultiplier = enemy.kind === 'tank'
-        ? 1.15
-        : enemy.kind === 'fast'
-          ? 0.9
-          : 1;
-      const fastWidthMultiplier = enemy.kind === 'fast' ? 0.88 : 1;
-      const fastHeightMultiplier = enemy.kind === 'fast' ? 1.02 : 1;
       sprite
         .setPosition(renderGX * tileSize + tileSize / 2, renderGY * tileSize + tileSize / 2 + anim.hoverOffset)
-        .setTexture(this.getEnemyTextureKey(enemy.kind))
+        .setTexture(enemy.kind === 'elite' ? 'rr_enemy_elite' : 'rr_enemy_basic')
         .setAngle(this.getFacingAngle(enemy.facing) + anim.extraRotation)
-        .setDisplaySize(
-          tileSize * baseScale * anim.scale * kindScaleMultiplier * fastWidthMultiplier,
-          tileSize * baseScale * anim.scale * kindScaleMultiplier * fastHeightMultiplier,
-        )
+        .setDisplaySize(tileSize * (style.scale ?? 0.72) * anim.scale, tileSize * (style.scale ?? 0.72) * anim.scale)
         .setOrigin(style.origin?.x ?? 0.5, style.origin?.y ?? 0.5);
     }
 
@@ -2832,6 +1945,10 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private getPlayerBreathScale(time: number): number {
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
+    return Phaser.Math.Linear(1, 1.05, pulse);
+  }
 
   private getEnemyAnimationState(enemy: EnemyModel, time: number): { scale: number; hoverOffset: number; extraRotation: number } {
     const waveSeed = enemy.key.length * 0.3;
@@ -2843,23 +1960,6 @@ export class GameScene extends Phaser.Scene {
         scale: Phaser.Math.Linear(0.98, 1.08, pulse),
         hoverOffset: wave * 1.4,
         extraRotation: Math.sin(time * 0.0035 + waveSeed) * 6,
-      };
-    }
-
-    if (enemy.kind === 'fast') {
-      const pulse = 0.5 + 0.5 * Math.sin(time * 0.012 + waveSeed);
-      return {
-        scale: Phaser.Math.Linear(0.96, 1.04, pulse),
-        hoverOffset: wave * 1.9,
-        extraRotation: Math.sin(time * 0.006 + waveSeed) * 4,
-      };
-    }
-
-    if (enemy.kind === 'tank') {
-      return {
-        scale: 1,
-        hoverOffset: wave * 1.1,
-        extraRotation: Math.sin(time * 0.002 + waveSeed) * 2,
       };
     }
 
@@ -3136,16 +2236,6 @@ export class GameScene extends Phaser.Scene {
 
   public setLocalTgUserId(id?: string) {
     this.localTgUserId = id;
-    this.refreshLocalPlayerVisualIdentity();
-    if (this.playerSprite) {
-      this.playerSprite.setTexture(this.localPlayerSilhouetteTextureKey);
-    }
-  }
-
-  private refreshLocalPlayerVisualIdentity(): void {
-    const playerId = this.localTgUserId ?? 'local-player';
-    this.localPlayerSilhouetteTextureKey = getPlayerSilhouetteTextureKeyFromId(playerId);
-    this.localPlayerBobPhase = getBobPhaseFromId(playerId);
   }
 
   private enqueueLocalInput(input: { seq: number; dx: number; dy: number }) {
@@ -3710,7 +2800,6 @@ export class GameScene extends Phaser.Scene {
         state: enemy.isMoving ? 'move' : 'idle',
         kind: 'normal',
         moveIntervalMs: this.getScaledEnemyMoveInterval('normal'),
-        hp: 1,
       });
     }
 
@@ -3878,11 +2967,7 @@ export class GameScene extends Phaser.Scene {
 
   public applyAuthoritativePlayerDamaged(payload: { tgUserId: string; lives: number }, localTgUserId?: string): void {
     if (payload.tgUserId !== localTgUserId) return;
-    const previousLives = this.lives;
     this.lives = Math.max(0, payload.lives);
-    if (this.lives < previousLives) {
-      this.playPlayerHitFeedback();
-    }
     this.stats.lives = this.lives;
     this.multiplayerRespawning = this.lives > 0;
     this.emitLifeState();

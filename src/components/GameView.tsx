@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback, type CSSProperties, type FormEvent, type Ref } from 'react';
 import Phaser from 'phaser';
 import { GameScene } from '../game/GameScene';
-import { clearSoloResumeSnapshot, loadSoloResumeSnapshot, type SoloResumeSnapshotV1 } from '../game/soloResume';
 import { GAME_CONFIG } from '../game/config';
 
 import {
@@ -20,7 +19,6 @@ import {
 } from '../game/gameEvents';
 
 import {
-  createInitialCampaignState,
   fetchCampaignFromBackend,
   getCampaignSyncStatus,
   loadCampaignState,
@@ -45,7 +43,6 @@ import {
   fetchLedger,
   fetchWallet,
   joinRoom,
-  kickRoomMember,
   leaveRoom,
   requestFriend,
   setRoomReady,
@@ -182,9 +179,6 @@ function mapRoomError(error?: string): string {
 const JOYSTICK_RADIUS = 56;
 const JOYSTICK_DEADZONE = 10;
 const INTRO_PLACEHOLDER_MS = 5500;
-const MP_RESUME_COUNTDOWN_START = 5;
-const MP_RESUME_COUNTDOWN_STEP_MS = 1000;
-const MP_RESUME_COUNTDOWN_FAILSAFE_MS = 7000;
 const ONBOARDING_DONE_KEY = 'rift_onboarding_v1_done';
 const MOBILE_ROTATE_OVERLAY_BREAKPOINT = 700;
 const DISPLAY_NAME_KEY = 'rr_display_name_v1';
@@ -304,7 +298,7 @@ export default function GameView(): JSX.Element {
     eliminated: false,
     respawning: false,
   });
-  const [campaign, setCampaign] = useState<CampaignState>(() => loadCampaignState() ?? createInitialCampaignState());
+  const [campaign, setCampaign] = useState<CampaignState>(() => loadCampaignState());
   const [zoomBounds, setZoomBounds] = useState<{ min: number; max: number }>({ min: GAME_CONFIG.minZoom, max: GAME_CONFIG.maxZoom });
   const [zoom, setZoom] = useState<number>(GAME_CONFIG.minZoom);
   const [isRemoteDetonateUnlocked, setIsRemoteDetonateUnlocked] = useState(false);
@@ -349,8 +343,6 @@ export default function GameView(): JSX.Element {
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
   const [currentRoomMembers, setCurrentRoomMembers] = useState<RoomMember[]>([]);
   const [multiplayerLivesByUserId, setMultiplayerLivesByUserId] = useState<Record<string, number>>({});
-  const [multiplayerScoreByUserId, setMultiplayerScoreByUserId] = useState<Record<string, number>>({});
-  const [multiplayerSnapshotTeamScore, setMultiplayerSnapshotTeamScore] = useState<number | null>(null);
   const [multiplayerDisconnectedByUserId, setMultiplayerDisconnectedByUserId] = useState<Record<string, boolean>>({});
   const [multiplayerColorByUserId, setMultiplayerColorByUserId] = useState<Record<string, string>>({});
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
@@ -395,53 +387,6 @@ export default function GameView(): JSX.Element {
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
   const [resumeModal, setResumeModal] = useState<{ open: boolean; roomCode: string; matchId: string | null } | null>(null);
-  const [mpResumeCountdownActive, setMpResumeCountdownActive] = useState(false);
-  const [mpResumeCountdownValue, setMpResumeCountdownValue] = useState(0);
-  const mpResumeCountdownIntervalRef = useRef<number | null>(null);
-  const mpResumeCountdownFailsafeRef = useRef<number | null>(null);
-  const initialSoloResumeSnapshotRef = useRef<SoloResumeSnapshotV1 | null>(loadSoloResumeSnapshot());
-  const [isSoloResumeFlow] = useState<boolean>(() => {
-    const snapshot = initialSoloResumeSnapshotRef.current;
-    return Boolean(snapshot && snapshot.campaignState.soloGameOver !== true);
-  });
-  const [soloResumeModalOpen, setSoloResumeModalOpen] = useState<boolean>(() => {
-    const snapshot = initialSoloResumeSnapshotRef.current;
-    return Boolean(snapshot && snapshot.campaignState.soloGameOver !== true);
-  });
-  const [soloStartReady, setSoloStartReady] = useState<boolean>(() => !soloResumeModalOpen);
-
-  const stopMpResumeCountdown = useCallback((): void => {
-    if (mpResumeCountdownIntervalRef.current != null) {
-      window.clearInterval(mpResumeCountdownIntervalRef.current);
-      mpResumeCountdownIntervalRef.current = null;
-    }
-    if (mpResumeCountdownFailsafeRef.current != null) {
-      window.clearTimeout(mpResumeCountdownFailsafeRef.current);
-      mpResumeCountdownFailsafeRef.current = null;
-    }
-    setMpResumeCountdownActive(false);
-    setMpResumeCountdownValue(0);
-  }, []);
-
-  const startMpResumeCountdown = useCallback((): void => {
-    stopMpResumeCountdown();
-    setMpResumeCountdownActive(true);
-    setMpResumeCountdownValue(MP_RESUME_COUNTDOWN_START);
-
-    mpResumeCountdownIntervalRef.current = window.setInterval(() => {
-      setMpResumeCountdownValue((prev) => {
-        if (prev <= 1) {
-          stopMpResumeCountdown();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, MP_RESUME_COUNTDOWN_STEP_MS);
-
-    mpResumeCountdownFailsafeRef.current = window.setTimeout(() => {
-      stopMpResumeCountdown();
-    }, MP_RESUME_COUNTDOWN_FAILSAFE_MS);
-  }, [stopMpResumeCountdown]);
 
   const resetResumeAttemptState = useCallback((nextPhase: RejoinPhase = 'idle'): void => {
     if (resumeLifecycleActiveRef.current) {
@@ -469,22 +414,20 @@ export default function GameView(): JSX.Element {
       clearLastSession();
     }
     resetResumeAttemptState(options?.nextPhase ?? 'rejoin_failed');
-    stopMpResumeCountdown();
     setMultiplayerUiOpen(false);
     setDeepLinkJoinCode(null);
-  }, [resetResumeAttemptState, stopMpResumeCountdown]);
+  }, [resetResumeAttemptState]);
   const cancelResumeAttemptByUser = useCallback((): void => {
     const cancellable = rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying';
     if (!resumeJoinInProgress || !cancellable) return;
 
     resetResumeAttemptState('idle');
-    stopMpResumeCountdown();
     setMultiplayerUiOpen(false);
     setDeepLinkJoinCode(null);
     if (isDebugEnabled(window.location.search)) {
       diagnosticsStore.log('ROOM', 'INFO', 'rejoin:cancelled_by_user', { phase: rejoinPhase });
     }
-  }, [rejoinPhase, resetResumeAttemptState, resumeJoinInProgress, stopMpResumeCountdown]);
+  }, [rejoinPhase, resetResumeAttemptState, resumeJoinInProgress]);
   const resetMpMatchRuntimeForNewMatch = useCallback((nextMatchId: string): void => {
     expectedMatchIdRef.current = nextMatchId;
     setCurrentMatchId(nextMatchId);
@@ -563,10 +506,6 @@ export default function GameView(): JSX.Element {
   const [gameUserIdCopied, setGameUserIdCopied] = useState(false);
   const [registrationOpen, setRegistrationOpen] = useState<boolean>(() => !(localStorage.getItem(DISPLAY_NAME_KEY) ?? '').trim());
   const lastSubmittedLeaderboardMatchIdRef = useRef<string>('');
-  const prevMpMatchIdRef = useRef<string | null>(null);
-  const prevMpRoomCodeRef = useRef<string | null>(null);
-  const mpMatchWasActiveRef = useRef(false);
-  const lastMpTeamScoreRef = useRef<number | null>(null);
   const [gameFlowPhase, setGameFlowPhase] = useState<GameFlowPhase>('intro');
   const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
   const [tutorialActive, setTutorialActive] = useState(false);
@@ -635,8 +574,6 @@ export default function GameView(): JSX.Element {
       gateReason = 'world_not_ready';
     } else if (needsNetResync) {
       gateReason = 'await_net_resync';
-    } else if (mpResumeCountdownActive) {
-      gateReason = 'resume_countdown';
     } else if ((phase !== 'STARTED' && !phaseStartedByResumeEvidence) || gameFlowPhase !== 'playing') {
       gateReason = 'phase_not_started';
     }
@@ -684,7 +621,7 @@ export default function GameView(): JSX.Element {
         expectedMatchId,
       },
     );
-  }, [currentRoom?.phase, currentRoom?.roomCode, gameFlowPhase, lastSnapshotAt, mpResumeCountdownActive, ws]);
+  }, [currentRoom?.phase, currentRoom?.roomCode, gameFlowPhase, lastSnapshotAt, ws]);
 
   const isMultiplayerDebugEnabled = isDebugEnabled(window.location.search);
   const wsDiagnostics = {
@@ -719,6 +656,7 @@ export default function GameView(): JSX.Element {
   ];
   const currentTutorialStep = tutorialSteps[tutorialStepIndex] ?? null;
 
+  const myRoomMember = currentRoomMembers.find((member) => member.tgUserId === localTgUserId);
   const isMultiplayerMode = Boolean(currentRoom && currentRoomMembers.length >= 2);
   const isRoomOwner = Boolean(localTgUserId && currentRoom?.ownerTgUserId && localTgUserId === currentRoom.ownerTgUserId);
   const roomCanStart = Boolean(
@@ -729,9 +667,16 @@ export default function GameView(): JSX.Element {
       .filter((member) => member.tgUserId !== currentRoom?.ownerTgUserId)
       .every((member) => member.ready ?? false),
   );
+  const waitingForOtherPlayer = Boolean(
+    multiplayerUiOpen
+    && currentRoom
+    && !isRoomOwner
+    && ((myRoomMember?.ready ?? false) || startingRoom)
+    && (currentRoom.phase ?? 'LOBBY') !== 'STARTED',
+  );
+
   const rejoinOverlayActive = rejoinPhase !== 'idle' && rejoinPhase !== 'rejoin_complete' && rejoinPhase !== 'rejoin_failed';
-  const isMpResumeFlow = Boolean(resumeModal?.open || resumeJoinInProgress || rejoinOverlayActive);
-  const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive;
+  const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive || waitingForOtherPlayer;
   const isMobileViewport = Math.min(viewportSize.width, viewportSize.height) < MOBILE_ROTATE_OVERLAY_BREAKPOINT;
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
@@ -854,20 +799,13 @@ export default function GameView(): JSX.Element {
     const left = insets?.left ?? 0;
     const viewportHeight = tg?.viewportHeight ?? window.innerHeight;
     const stableHeight = tg?.viewportStableHeight ?? viewportHeight;
-    const root = document.documentElement;
-    const isAndroid = root.classList.contains('is-android');
-    const androidOverlayTop = isAndroid ? (top < 20 ? 48 : 0) : 0;
-    const androidOverlayRight = isAndroid ? (right < 20 ? 40 : 0) : 0;
 
-    root.style.setProperty('--tg-viewport-h', `${Math.floor(viewportHeight)}px`);
-    root.style.setProperty('--tg-viewport-stable-h', `${Math.floor(stableHeight)}px`);
-    root.style.setProperty('--tg-content-top', `${Math.floor(top)}px`);
-    root.style.setProperty('--tg-content-right', `${Math.floor(right)}px`);
-    root.style.setProperty('--tg-content-bottom', `${Math.floor(bottom)}px`);
-    root.style.setProperty('--tg-content-left', `${Math.floor(left)}px`);
-    root.style.setProperty('--android-overlay-top', `${androidOverlayTop}px`);
-    root.style.setProperty('--android-overlay-right', `${androidOverlayRight}px`);
-    root.style.setProperty('--android-overlay-bottom', '0px');
+    document.documentElement.style.setProperty('--tg-viewport-h', `${Math.floor(viewportHeight)}px`);
+    document.documentElement.style.setProperty('--tg-viewport-stable-h', `${Math.floor(stableHeight)}px`);
+    document.documentElement.style.setProperty('--tg-content-top', `${Math.floor(top)}px`);
+    document.documentElement.style.setProperty('--tg-content-right', `${Math.floor(right)}px`);
+    document.documentElement.style.setProperty('--tg-content-bottom', `${Math.floor(bottom)}px`);
+    document.documentElement.style.setProperty('--tg-content-left', `${Math.floor(left)}px`);
   }, []);
 
   useEffect(() => {
@@ -986,18 +924,6 @@ export default function GameView(): JSX.Element {
 
 
   const setMovementFromDirection = (direction: Direction | null): void => {
-    if (isMultiplayerMode && mpResumeCountdownActive) {
-      controlsRef.current.up = false;
-      controlsRef.current.down = false;
-      controlsRef.current.left = false;
-      controlsRef.current.right = false;
-      if (activeMoveDirRef.current !== null) {
-        activeMoveDirRef.current = null;
-        sendMatchMoveIntent(null);
-      }
-      return;
-    }
-
     controlsRef.current.up = direction === 'up';
     controlsRef.current.down = direction === 'down';
     controlsRef.current.left = direction === 'left';
@@ -1019,19 +945,6 @@ export default function GameView(): JSX.Element {
   const clearMovement = (): void => {
     setMovementFromDirection(null);
   };
-
-  useEffect(() => {
-    if (!mpResumeCountdownActive) return;
-    controlsRef.current.up = false;
-    controlsRef.current.down = false;
-    controlsRef.current.left = false;
-    controlsRef.current.right = false;
-    if (isMultiplayerMode && activeMoveDirRef.current !== null) {
-      activeMoveDirRef.current = null;
-      sendMatchMoveIntent(null);
-    }
-  }, [isMultiplayerMode, mpResumeCountdownActive, sendMatchMoveIntent]);
-
 
   const applyAudioSettings = useCallback((next: AudioSettings): void => {
     sceneRef.current?.setAudioSettings(next);
@@ -1240,7 +1153,7 @@ export default function GameView(): JSX.Element {
               saveCampaignState(remote.campaignState);
             } else {
               // backend empty → seed it from local cache once
-              const local = loadCampaignState() ?? createInitialCampaignState();
+              const local = loadCampaignState();
               saveCampaignState(local); // this will POST best-effort now that token exists
             }
           }
@@ -1382,9 +1295,9 @@ export default function GameView(): JSX.Element {
   }, [zoomBounds.max, zoomBounds.min]);
 
   useEffect(() => {
-    if (!mountRef.current || !soloStartReady) return;
+    if (!mountRef.current) return;
 
-    const scene = new GameScene(controlsRef.current, initialSoloResumeSnapshotRef.current);
+    const scene = new GameScene(controlsRef.current);
     sceneRef.current = scene;
 
     const game = new Phaser.Game({
@@ -1410,7 +1323,7 @@ export default function GameView(): JSX.Element {
       gameRef.current = null;
       sceneRef.current = null;
     };
-  }, [soloStartReady]);
+  }, []);
 
 
   useEffect(() => {
@@ -1464,8 +1377,6 @@ export default function GameView(): JSX.Element {
       setWrongMatchDrops(0);
       setDuplicateTickDrops(0);
       setMultiplayerLivesByUserId({});
-      setMultiplayerScoreByUserId({});
-      setMultiplayerSnapshotTeamScore(null);
       setMultiplayerDisconnectedByUserId({});
       setLastWorldInitAt(null);
       setLastSnapshotAt(null);
@@ -1497,8 +1408,6 @@ export default function GameView(): JSX.Element {
     lastAppliedSnapshotTickRef.current = null;
     setCurrentMatchId(null);
     setMultiplayerLivesByUserId({});
-    setMultiplayerScoreByUserId({});
-    setMultiplayerSnapshotTeamScore(null);
     setMultiplayerDisconnectedByUserId({});
     handledMatchEventIdsRef.current.clear();
   }, [currentRoom?.roomCode]);
@@ -1514,8 +1423,6 @@ export default function GameView(): JSX.Element {
       lastAppliedSnapshotTickRef.current = null;
       setCurrentMatchId(null);
       setMultiplayerLivesByUserId({});
-      setMultiplayerScoreByUserId({});
-      setMultiplayerSnapshotTeamScore(null);
       setMultiplayerDisconnectedByUserId({});
       handledMatchEventIdsRef.current.clear();
       rejoinAttemptIdRef.current = null;
@@ -2095,37 +2002,6 @@ export default function GameView(): JSX.Element {
         if (!player?.tgUserId) continue;
         next[player.tgUserId] = Math.max(0, Number(player.lives ?? 0));
       }
-      return next;
-    });
-    setMultiplayerScoreByUserId(() => {
-      const next: Record<string, number> = {};
-      for (const player of players) {
-        if (!player?.tgUserId) continue;
-        next[player.tgUserId] = Math.max(0, Number(player.score ?? 0));
-      }
-
-      const fallbackTeamScore = Object.values(next).reduce(
-        (sum, value) => sum + Math.max(0, Number(value ?? 0)),
-        0,
-      );
-      const snapshotTeamScore = typeof snapshot.score === 'number'
-        ? Math.max(0, Number(snapshot.score))
-        : fallbackTeamScore;
-      setMultiplayerSnapshotTeamScore(snapshotTeamScore);
-
-      if (isMultiplayerDebugEnabled) {
-        const localScore = localTgUserId ? next[localTgUserId] ?? 0 : null;
-        diagnosticsStore.log('ROOM', 'INFO', 'score:snapshot', {
-          roomCode: snapshot.roomCode ?? null,
-          matchId: snapshot.matchId ?? null,
-          tick: snapshot.tick ?? null,
-          localTgUserId: localTgUserId ?? null,
-          localScore,
-          teamScore: snapshotTeamScore,
-          snapshotScore: typeof snapshot.score === 'number' ? snapshot.score : null,
-        });
-      }
-
       return next;
     });
     setMultiplayerDisconnectedByUserId(() => {
@@ -2870,31 +2746,8 @@ export default function GameView(): JSX.Element {
     clearLastSession();
     pendingResumeIntentRef.current = null;
     setResumeModal(null);
-    stopMpResumeCountdown();
-    setGameFlowPhase('playing');
-    setMultiplayerUiOpen(true);
     resetResumeAttemptState('idle');
-  }, [isMultiplayerDebugEnabled, resetResumeAttemptState, resumeModal, stopMpResumeCountdown]);
-
-  const onSoloResumeAccept = useCallback((): void => {
-    setSoloResumeModalOpen(false);
-    setSoloStartReady(true);
-    setGameFlowPhase('playing');
-  }, []);
-
-  const onSoloResumeCancel = useCallback((): void => {
-    clearSoloResumeSnapshot();
-    initialSoloResumeSnapshotRef.current = null;
-    try {
-      const campaign = loadCampaignState() ?? createInitialCampaignState();
-      saveCampaignState({ ...campaign, soloGameOver: true, lastActiveAtMs: Date.now() });
-    } catch {
-      // ignore local persistence errors
-    }
-    setSoloResumeModalOpen(false);
-    setSoloStartReady(true);
-    setGameFlowPhase('playing');
-  }, []);
+  }, [isMultiplayerDebugEnabled, resetResumeAttemptState, resumeModal]);
 
   const onAcceptResumePrompt = useCallback((): void => {
     if (!resumeModal?.open) return;
@@ -2916,22 +2769,6 @@ export default function GameView(): JSX.Element {
     pendingResumeIntentRef.current = pendingIntent;
     resumeIntentExecutedRef.current = false;
     setResumeModal(null);
-    // Ensure Telegram returns to expanded/fullscreen mode on the user gesture (Resume click).
-    try {
-      const tg = (window as any)?.Telegram?.WebApp as TelegramWebApp | undefined;
-      tg?.ready?.();
-      tg?.expand?.();
-      tg?.disableVerticalSwipes?.();
-
-      const res = tg?.requestFullscreen?.();
-      if (res && typeof (res as any).catch === 'function') {
-        (res as Promise<void>).catch(() => {});
-      }
-    } catch {
-      // ignore
-    }
-    startMpResumeCountdown();
-    setGameFlowPhase('playing');
 
     if (!ws.connected) {
       if (isMultiplayerDebugEnabled) {
@@ -2943,11 +2780,7 @@ export default function GameView(): JSX.Element {
     resumeIntentExecutedRef.current = true;
     pendingResumeIntentRef.current = null;
     void resumeRoomByCode(pendingIntent.roomCode, pendingIntent.matchId);
-  }, [isMultiplayerDebugEnabled, resumeModal, resumeRoomByCode, startMpResumeCountdown, ws.connected]);
-
-  useEffect(() => () => {
-    stopMpResumeCountdown();
-  }, [stopMpResumeCountdown]);
+  }, [isMultiplayerDebugEnabled, resumeModal, resumeRoomByCode, ws.connected]);
 
   useEffect(() => {
     if (!ws.connected) return;
@@ -3028,8 +2861,6 @@ export default function GameView(): JSX.Element {
     setCurrentRoomMembers([]);
     setCurrentMatchId(null);
     setMultiplayerLivesByUserId({});
-    setMultiplayerScoreByUserId({});
-    setMultiplayerSnapshotTeamScore(null);
     setMultiplayerDisconnectedByUserId({});
     setRestartVote(null);
     setMatchEndState(null);
@@ -3150,35 +2981,6 @@ export default function GameView(): JSX.Element {
       setSettingReady(false);
     }
   }, [currentRoom?.roomCode, currentRoomMembers, isMultiplayerDebugEnabled, localTgUserId]);
-
-
-  const onKickRoomMember = useCallback(async (targetTgUserId: string): Promise<void> => {
-    if (!currentRoom?.roomCode || !targetTgUserId) return;
-
-    setRoomsError(null);
-    const result = await kickRoomMember(currentRoom.roomCode, targetTgUserId);
-    if (!result) {
-      setRoomsError('Kick failed');
-      return;
-    }
-
-    if (!result.ok) {
-      setRoomsError(mapRoomError(result.error));
-      return;
-    }
-
-    if (result.room) setCurrentRoom(result.room);
-    if (result.members) setCurrentRoomMembers(result.members);
-    if (localTgUserId && localTgUserId === targetTgUserId) {
-      ws.send({ type: 'room:leave' });
-      clearLastSession();
-      setCurrentRoom(null);
-      setCurrentRoomMembers([]);
-      setCurrentMatchId(null);
-      sceneRef.current?.resetMultiplayerNetState();
-      processedWsMessagesRef.current = 0;
-    }
-  }, [currentRoom?.roomCode, localTgUserId, ws]);
 
   const onStartRoom = useCallback(async (): Promise<void> => {
     if (!currentRoom?.roomCode) return;
@@ -3308,18 +3110,6 @@ export default function GameView(): JSX.Element {
     void loadStore();
   }, [isStoreOpen, loadStore]);
 
-  const fallbackTeamScoreFromPlayers = Object.values(multiplayerScoreByUserId).reduce(
-    (sum, value) => sum + Math.max(0, Number(value ?? 0)),
-    0,
-  );
-  const multiplayerTeamScore = typeof multiplayerSnapshotTeamScore === 'number'
-    ? Math.max(0, Number(multiplayerSnapshotTeamScore))
-    : fallbackTeamScoreFromPlayers;
-
-  useEffect(() => {
-    lastMpTeamScoreRef.current = Math.max(0, Number(multiplayerTeamScore ?? 0));
-  }, [multiplayerTeamScore]);
-
   useEffect(() => {
     if (!leaderboardOpen) return;
     void loadLeaderboard(leaderboardMode);
@@ -3331,89 +3121,19 @@ export default function GameView(): JSX.Element {
   }, [activeLeaderboardMode, leaderboardOpen]);
 
   useEffect(() => {
-    const isMpMode = activeLeaderboardMode !== 'solo';
-    const currentRoomCode = currentRoom?.roomCode ?? null;
-    const mpMatchIsActiveNow = Boolean(currentMatchId) && Boolean(currentRoomCode);
-
-    if (isMpMode && mpMatchIsActiveNow) {
-      mpMatchWasActiveRef.current = true;
-      if (currentMatchId) prevMpMatchIdRef.current = currentMatchId;
-      if (currentRoomCode) prevMpRoomCodeRef.current = currentRoomCode;
-    }
-
-    const mpEndedByExplicit = Boolean(matchEndState);
-    const mpEndedByTransition = mpMatchWasActiveRef.current && !mpMatchIsActiveNow;
-    const mpEndedByRoomChange = Boolean(
-      mpMatchWasActiveRef.current
-      && prevMpRoomCodeRef.current
-      && currentRoomCode
-      && currentRoomCode !== prevMpRoomCodeRef.current,
-    );
-    const mpEndedByMatchIdChange = Boolean(
-      mpMatchWasActiveRef.current
-      && prevMpMatchIdRef.current
-      && currentMatchId
-      && currentMatchId !== prevMpMatchIdRef.current,
-    );
-    const aliveMemberIds = currentRoomMembers
-      .map((member) => member.tgUserId)
-      .filter((tgUserId) => Boolean(tgUserId));
-    const mpEndedByElimination = aliveMemberIds.length > 0 && aliveMemberIds.every((tgUserId) => {
-      const lives = Number(multiplayerLivesByUserId[tgUserId] ?? 0);
-      return lives <= 0;
-    });
-
     const isTrueMatchEnd = lifeState.gameOver || Boolean(matchEndState);
-    const isTrueMpMatchEnd = mpEndedByExplicit
-      || mpEndedByTransition
-      || mpEndedByRoomChange
-      || mpEndedByMatchIdChange
-      || mpEndedByElimination;
-    const isTrueMatchEndFinal = isMpMode ? isTrueMpMatchEnd : isTrueMatchEnd;
-    if (!isTrueMatchEndFinal) {
+    if (!isTrueMatchEnd) {
       lastSubmittedLeaderboardMatchIdRef.current = '';
       return;
     }
 
-    const matchIdentity = activeLeaderboardMode === 'solo'
-      ? (currentMatchId ?? `${activeLeaderboardMode}:${currentRoomCode ?? 'solo'}`)
-      : (prevMpMatchIdRef.current
-        ?? currentMatchId
-        ?? `mp:${prevMpRoomCodeRef.current ?? currentRoomCode ?? 'unknown'}`);
+    const matchIdentity = currentMatchId ?? `${activeLeaderboardMode}:${currentRoom?.roomCode ?? 'solo'}`;
     if (lastSubmittedLeaderboardMatchIdRef.current === matchIdentity) return;
     lastSubmittedLeaderboardMatchIdRef.current = matchIdentity;
 
-    if (isMpMode) {
-      mpMatchWasActiveRef.current = false;
-    }
-
     void (async () => {
-      const finalScore = activeLeaderboardMode === 'solo'
-        ? stats.score
-        : Math.max(0, Number(lastMpTeamScoreRef.current ?? multiplayerTeamScore ?? 0));
-
-      if (isMultiplayerDebugEnabled) {
-        diagnosticsStore.log('ROOM', 'INFO', 'leaderboard:submit_attempt', {
-          activeLeaderboardMode,
-          matchIdentity,
-          roomCode: currentRoomCode,
-          prevRoomCode: prevMpRoomCodeRef.current,
-          currentMatchId,
-          prevMatchId: prevMpMatchIdRef.current,
-          mpEndedByExplicit,
-          mpEndedByTransition,
-          mpEndedByRoomChange,
-          mpEndedByMatchIdChange,
-          mpEndedByElimination,
-          localTgUserId: localTgUserId ?? null,
-          teamScore: multiplayerTeamScore,
-          lastMpTeamScore: lastMpTeamScoreRef.current,
-          score: finalScore,
-        });
-      }
-
       if (activeLeaderboardMode === 'solo') {
-        const submitResult = await submitLeaderboard('solo', finalScore);
+        const submitResult = await submitLeaderboard('solo', stats.score);
         if (!submitResult) return;
         await loadLeaderboard('solo');
         return;
@@ -3426,11 +3146,11 @@ export default function GameView(): JSX.Element {
         }))
         .sort((a, b) => a.tgUserId.localeCompare(b.tgUserId));
 
-      const submitResult = await submitTeamLeaderboard(activeLeaderboardMode, finalScore, members);
+      const submitResult = await submitTeamLeaderboard(activeLeaderboardMode, stats.score, members);
       if (!submitResult) return;
       await loadLeaderboard(activeLeaderboardMode);
     })();
-  }, [activeLeaderboardMode, currentMatchId, currentRoom?.roomCode, currentRoomMembers, isMultiplayerDebugEnabled, lifeState.gameOver, loadLeaderboard, localTgUserId, matchEndState, multiplayerLivesByUserId, multiplayerTeamScore, stats.score]);
+  }, [activeLeaderboardMode, currentMatchId, currentRoom?.roomCode, currentRoomMembers, lifeState.gameOver, loadLeaderboard, matchEndState, stats.score]);
 
   useEffect(() => {
     if (!multiplayerUiOpen) return;
@@ -3780,9 +3500,6 @@ export default function GameView(): JSX.Element {
   const hudSlots = isMultiplayerHud
     ? Array.from({ length: 4 }, (_, index) => currentRoomMembers[index] ?? null)
     : [{ tgUserId: localTgUserId ?? 'local', displayName: profileName, joinedAt: '', ready: true }];
-  const displayedScore = isMultiplayerHud
-    ? multiplayerTeamScore
-    : stats.score;
 
   const requestTelegramFullscreenBestEffort = async (): Promise<void> => {
     const w = window as Window & { Telegram?: { WebApp?: TelegramWebApp } };
@@ -3878,7 +3595,7 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {!showBootSplash && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && !isSoloResumeFlow && !isMpResumeFlow && (
+      {!showBootSplash && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && (
         <div className="game-flow-overlay" role="status" aria-live="polite">
           {gameFlowPhase === 'intro' ? (
             <div className="intro-layer" aria-label="Rift Runners intro animation">
@@ -3945,6 +3662,14 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
+      {gameFlowPhase === 'playing' && waitingForOtherPlayer && (
+        <div className="waiting-overlay" role="status" aria-live="polite">
+          <div className="waiting-overlay__card">
+            <strong>Waiting for other player…</strong>
+            <p>Вы готовы. Ждём, пока второй игрок нажмёт Ready.</p>
+          </div>
+        </div>
+      )}
       {gameFlowPhase === 'playing' && resumeJoinInProgress && (rejoinPhase === 'rejoin_wait_ack' || rejoinPhase === 'rejoin_resetting' || rejoinPhase === 'rejoin_applying') && (
         <div className="waiting-overlay" role="status" aria-live="polite">
           <div className="waiting-overlay__card">
@@ -3954,43 +3679,23 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {gameFlowPhase === 'playing' && mpResumeCountdownActive && isMultiplayerMode && (
-        <div className="mp-resume-countdown-overlay" role="status" aria-live="polite" aria-label="Back to the game countdown">
-          <div className="mp-resume-countdown-overlay__title">Back to the game</div>
-          <div key={mpResumeCountdownValue} className="mp-resume-countdown-overlay__value">{mpResumeCountdownValue}</div>
-        </div>
-      )}
-      {soloResumeModalOpen && !currentRoom?.roomCode && (
-        <RROverlayModal
-          title="Do you want to resume the run?"
-          tabs={[{ key: 'resume', label: 'Resume' }]}
-          activeTab="resume"
-          onTabChange={() => {}}
-          onClose={onSoloResumeCancel}
-        >
-          <div className="solo-resume-modal-content">
-            <div className="solo-resume-modal-actions">
-              <button type="button" className="rr-btn-neon-green" onClick={onSoloResumeAccept}>Resume</button>
-              <button type="button" className="rr-btn-neon-orange" onClick={onSoloResumeCancel}>Cancel</button>
-            </div>
-          </div>
-        </RROverlayModal>
-      )}
       {resumeModal?.open && !currentRoom?.roomCode && (
-        <RROverlayModal
-          title="Do you want to resume the match?"
-          tabs={[{ key: 'resume', label: 'Resume' }]}
-          activeTab="resume"
-          onTabChange={() => {}}
-          onClose={onCancelResumePrompt}
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Resume previous game"
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.6)', display: 'grid', placeItems: 'center', zIndex: 2500 }}
         >
-          <div className="solo-resume-modal-content">
-            <div className="solo-resume-modal-actions">
-              <button type="button" className="rr-btn-neon-green" onClick={onAcceptResumePrompt}>Resume</button>
-              <button type="button" className="rr-btn-neon-orange" onClick={onCancelResumePrompt}>Cancel</button>
+          <div className="rr-overlay-modal" style={{ width: 'min(420px, calc(100vw - 2rem))' }}>
+            <div className="settings-header">
+              <strong>Return to your previous game?</strong>
+            </div>
+            <div className="settings-panel" style={{ display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
+              <button type="button" onClick={onAcceptResumePrompt}>Resume</button>
+              <button type="button" className="ghost" onClick={onCancelResumePrompt}>Cancel</button>
             </div>
           </div>
-        </RROverlayModal>
+        </div>
       )}
       {gameFlowPhase === 'playing' && lifeState.awaitingContinue && (
         <div className="waiting-overlay" role="dialog" aria-modal="true" aria-label="Continue overlay">
@@ -4077,7 +3782,7 @@ export default function GameView(): JSX.Element {
               </div>
               <div className="hud-card hud-card--score">
                 <div className="hud-card__label">Score</div>
-                <div className="hud-card__value">{displayedScore}</div>
+                <div className="hud-card__value">{stats.score}</div>
               </div>
             </div>
           </div>
@@ -4394,7 +4099,6 @@ export default function GameView(): JSX.Element {
         onCloseRoom={onCloseRoom}
         onStartRoom={onStartRoom}
         onToggleReady={onToggleReady}
-        onKickRoomMember={onKickRoomMember}
         onCopyInviteLink={onCopyInviteLink}
         friendsLoading={friendsLoading}
         friendsError={friendsError}

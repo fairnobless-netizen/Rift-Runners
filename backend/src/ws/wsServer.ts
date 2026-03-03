@@ -80,19 +80,6 @@ const pendingRejoinHandshakes = new Map<string, PendingRejoinHandshake>(); // ke
 
 const STALE_CONNECTION_MS = 60_000;
 const INACTIVE_ROOM_MS = 90_000;
-const SNAPSHOT_LOGGING_ENABLED = process.env.RR_LOG_SNAPSHOT_BROADCAST === '1'; // Opt-in snapshot broadcast diagnostics
-const SNAPSHOT_LOG_SAMPLE_EVERY_TICKS = Math.max(1, Number.parseInt(process.env.RR_LOG_SNAPSHOT_BROADCAST_EVERY ?? '20', 10) || 20);
-const REJOIN_HANDSHAKE_ENABLED = process.env.RR_ENABLE_REJOIN_HANDSHAKE === '1'; // Keep handshake path behind explicit flag
-
-function shouldLogSnapshotBroadcastForTick(tick: number): boolean {
-  if (!SNAPSHOT_LOGGING_ENABLED) {
-    return false;
-  }
-  if (!Number.isFinite(tick)) {
-    return true;
-  }
-  return tick % SNAPSHOT_LOG_SAMPLE_EVERY_TICKS === 0;
-}
 
 
 function roomHasRejoinablePlayer(roomId: string, nowMs = Date.now()): boolean {
@@ -232,10 +219,6 @@ function isSocketAttachedToRoom(ctx: ClientCtx, room: RoomState): boolean {
   return room.players.get(ctx.tgUserId) === ctx.socket;
 }
 
-function getTeamScore(match: MatchState): number {
-  return Array.from(match.playerScores.values()).reduce((sum, value) => sum + Math.max(0, Number(value ?? 0)), 0);
-}
-
 function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, { type: 'match:snapshot' }>['snapshot'] {
   const now = Date.now();
   return {
@@ -258,7 +241,6 @@ function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, 
         explodeAtTick: bomb.explodeAtTick,
       })),
     },
-    score: getTeamScore(match),
     players: Array.from(match.players.values()).map((player) => ({
       tgUserId: player.tgUserId,
       displayName: player.displayName,
@@ -277,7 +259,6 @@ function buildSnapshotFromMatch(match: MatchState): Extract<MatchServerMessage, 
       moveStartServerTimeMs: now,
       moveDurationMs: 0,
       lives: match.playerLives.get(player.tgUserId) ?? 0,
-      score: match.playerScores.get(player.tgUserId) ?? 0,
       eliminated: match.eliminatedPlayers.has(player.tgUserId),
       disconnected: match.disconnectedPlayers.has(player.tgUserId),
     })),
@@ -322,8 +303,7 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
     return;
   }
 
-  const shouldLogSnapshotBroadcast = msg.type === 'match:snapshot' && shouldLogSnapshotBroadcastForTick(msg.snapshot.tick);
-  const skippedByReason = shouldLogSnapshotBroadcast ? new Map<string, number>() : null;
+  const skippedByReason = new Map<string, number>();
   let clientsConsidered = 0;
   let sentCount = 0;
   let clientMatchIdMismatchCount = 0;
@@ -334,9 +314,6 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
   }
 
   const addSkipReason = (reason: string) => {
-    if (!skippedByReason) {
-      return;
-    }
     skippedByReason.set(reason, (skippedByReason.get(reason) ?? 0) + 1);
   };
 
@@ -361,16 +338,14 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
 
     if (client.matchId !== matchId) {
       clientMatchIdMismatchCount += 1;
-      if (shouldLogSnapshotBroadcast) {
-        logWsEvent('ws_snapshot_recipient_mismatch', {
-          roomId,
-          roomCode: roomId,
-          matchId,
-          serverTick: msg.type === 'match:snapshot' ? msg.snapshot.tick : null,
-          tgUserId,
-          clientMatchId: client.matchId,
-        });
-      }
+      logWsEvent('ws_snapshot_recipient_mismatch', {
+        roomId,
+        roomCode: roomId,
+        matchId,
+        serverTick: msg.type === 'match:snapshot' ? msg.snapshot.tick : null,
+        tgUserId,
+        clientMatchId: client.matchId,
+      });
     }
 
     if (!isSocketAttachedToRoom(client, room)) {
@@ -382,7 +357,7 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
     sentCount += 1;
   }
 
-  if (msg.type === 'match:snapshot' && shouldLogSnapshotBroadcast) {
+  if (msg.type === 'match:snapshot') {
     const skippedCount = clientsConsidered - sentCount;
     logWsEvent('ws_snapshot_broadcast', {
       roomId,
@@ -396,7 +371,7 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
       clientMatchIdMismatchCount,
     });
 
-    if (skippedByReason && skippedByReason.size > 0) {
+    if (skippedByReason.size > 0) {
       logWsEvent('ws_snapshot_broadcast_skips', {
         roomId,
         roomCode: roomId,
@@ -628,20 +603,12 @@ function clearPendingRejoinHandshake(connectionId: string): void {
   pendingRejoinHandshakes.delete(connectionId);
 }
 
-function sendRejoinSnapshotBundle(
-  ctx: ClientCtx,
-  roomId: string,
-  match: MatchState,
-  reason: 'ready' | 'timeout' | 'immediate',
-  options?: { sendStarted?: boolean },
-): void {
-  if (options?.sendStarted !== false) {
-    send(ctx.socket, {
-      type: 'match:started',
-      roomCode: roomId,
-      matchId: match.matchId,
-    });
-  }
+function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchState, reason: 'ready' | 'timeout'): void {
+  send(ctx.socket, {
+    type: 'match:started',
+    roomCode: roomId,
+    matchId: match.matchId,
+  });
 
   send(ctx.socket, {
     type: 'mp:rejoin_sync',
@@ -673,18 +640,22 @@ function sendRejoinSnapshotBundle(
   });
 }
 
-function sendRejoinAck(
-  ctx: ClientCtx,
-  roomId: string,
-  matchId: string,
-  rejoinAttemptId: string,
-  serverTimeMs: number,
-): void {
+function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState): void {
+  clearPendingRejoinHandshake(ctx.connectionId);
+  const rejoinAttemptId = randomUUID();
+  const createdAtMs = Date.now();
+
+  send(ctx.socket, {
+    type: 'match:started',
+    roomCode: roomId,
+    matchId: match.matchId,
+  });
+
   send(ctx.socket, {
     type: 'mp:rejoin_ack',
     roomCode: roomId,
-    matchId,
-    serverTime: serverTimeMs,
+    matchId: match.matchId,
+    serverTime: createdAtMs,
     rejoinAttemptId,
   });
 
@@ -692,24 +663,8 @@ function sendRejoinAck(
     connectionId: ctx.connectionId,
     tgUserId: ctx.tgUserId,
     roomId,
-    matchId,
-    rejoinAttemptId,
-  });
-}
-
-function beginRejoinHandshake(
-  ctx: ClientCtx,
-  roomId: string,
-  match: MatchState,
-  rejoinAttemptId: string,
-  createdAtMs: number,
-): void {
-  clearPendingRejoinHandshake(ctx.connectionId);
-
-  send(ctx.socket, {
-    type: 'match:started',
-    roomCode: roomId,
     matchId: match.matchId,
+    rejoinAttemptId,
   });
 
   const timeoutId = setTimeout(() => {
@@ -730,7 +685,7 @@ function beginRejoinHandshake(
       return;
     }
 
-    sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'timeout', { sendStarted: false });
+    sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'timeout');
     logWsEvent('ws_rejoin_ready_timeout_fallback', {
       connectionId: ctx.connectionId,
       tgUserId: ctx.tgUserId,
@@ -753,7 +708,6 @@ function beginRejoinHandshake(
 function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
   const room = getRoom(roomId);
   if (!room) {
-    clearPendingRejoinHandshake(ctx.connectionId);
     logWsEvent('ws_rejoin_sync_skipped_no_match', {
       tgUserId: ctx.tgUserId,
       roomId,
@@ -766,7 +720,6 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
   const activeMatch = getMatchByRoom(roomId);
 
   if (!roomMatchId || !activeMatch) {
-    clearPendingRejoinHandshake(ctx.connectionId);
     logWsEvent('ws_rejoin_sync_skipped_no_match', {
       tgUserId: ctx.tgUserId,
       roomId,
@@ -777,7 +730,6 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
   }
 
   if (activeMatch.matchId !== roomMatchId) {
-    clearPendingRejoinHandshake(ctx.connectionId);
     logWsEvent('ws_rejoin_sync_skipped_no_match', {
       tgUserId: ctx.tgUserId,
       roomId,
@@ -791,23 +743,7 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
     return;
   }
 
-  const rejoinAttemptId = randomUUID();
-  const createdAtMs = Date.now();
-
-  if (REJOIN_HANDSHAKE_ENABLED) {
-    beginRejoinHandshake(ctx, roomId, activeMatch, rejoinAttemptId, createdAtMs);
-    sendRejoinAck(ctx, roomId, activeMatch.matchId, rejoinAttemptId, createdAtMs);
-    return;
-  }
-
-  clearPendingRejoinHandshake(ctx.connectionId);
-  send(ctx.socket, {
-    type: 'match:started',
-    roomCode: roomId,
-    matchId: activeMatch.matchId,
-  });
-  sendRejoinAck(ctx, roomId, activeMatch.matchId, rejoinAttemptId, createdAtMs);
-  sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'immediate', { sendStarted: false });
+  beginRejoinHandshake(ctx, roomId, activeMatch);
 }
 
 async function detachClientFromRoomDb(roomCode: string, tgUserId: string) {
@@ -947,12 +883,6 @@ async function startMatchInRoom(room: RoomState): Promise<void> {
       broadcastToRoomMatch(activeRoom.roomId, snapshot.matchId, event);
 
       if (event.type === 'match:end') {
-        logWsEvent('ws_match_end_scores', {
-          roomId: activeRoom.roomId,
-          matchId: event.matchId,
-          scores: Array.from(match.playerScores.entries()).map(([tgUserId, score]) => ({ tgUserId, score })),
-        });
-
         endMatch(event.matchId);
         activeRoom.matchId = null;
         clearRestartVote(activeRoom.roomId);
@@ -1213,7 +1143,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 
       const pending = pendingRejoinHandshakes.get(ctx.connectionId);
       if (!pending) {
-        logWsEvent('ws_rejoin_ready_ignored_no_handshake', {
+        logWsEvent('ws_rejoin_ready_drop_no_pending', {
           connectionId: ctx.connectionId,
           tgUserId: ctx.tgUserId,
           roomId: ctx.roomId,
@@ -1254,7 +1184,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         rejoinAttemptId: msg.rejoinAttemptId,
       });
 
-      sendRejoinSnapshotBundle(ctx, ctx.roomId, activeMatch, 'ready', { sendStarted: false });
+      sendRejoinSnapshotBundle(ctx, ctx.roomId, activeMatch, 'ready');
       return;
     }
 
