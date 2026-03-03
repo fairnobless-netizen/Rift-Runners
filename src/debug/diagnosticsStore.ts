@@ -77,33 +77,6 @@ const state: DiagnosticsSnapshot = {
 
 const listeners = new Set<() => void>();
 
-
-function resolveDiagnosticsEnabled(): boolean {
-  if (import.meta.env.DEV) {
-    return true;
-  }
-
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  try {
-    const search = new URLSearchParams(window.location.search);
-    if (search.get('diag') === '1') {
-      return true;
-    }
-  } catch {}
-
-  try {
-    return window.localStorage.getItem('rr_diag') === '1';
-  } catch {
-    return false;
-  }
-}
-
-const DIAGNOSTICS_ENABLED = resolveDiagnosticsEnabled();
-
-
 function notify(): void {
   listeners.forEach((listener) => listener());
 }
@@ -137,15 +110,7 @@ function sanitizeData(data: unknown): unknown {
 }
 
 export const diagnosticsStore = {
-  isEnabled(): boolean {
-    return DIAGNOSTICS_ENABLED;
-  },
-
   log(cat: DiagnosticsCategory, level: DiagnosticsLevel, msg: string, data?: unknown): void {
-    if (!DIAGNOSTICS_ENABLED) {
-      return;
-    }
-
     state.events = [
       ...state.events,
       {

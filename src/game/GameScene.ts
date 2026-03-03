@@ -3501,10 +3501,6 @@ export class GameScene extends Phaser.Scene {
     this.worldHashClient = null;
   }
 
-  public resetMultiplayerSmoothingForResume(): void {
-    this.triggerNetResync('resume_runtime_reset');
-  }
-
   public forceEnterMatchStarted(): void {
     const prevState = {
       awaitingSoloContinue: this.awaitingSoloContinue,

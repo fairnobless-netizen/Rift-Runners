@@ -582,40 +582,6 @@ export default function GameView(): JSX.Element {
     height: window.innerHeight,
   }));
   const ws = useWsClient(token || undefined);
-
-  const resetMpResumeRuntimeState = useCallback((params: { roomCode: string | null; matchId: string | null }): void => {
-    const previousLastAppliedTick = lastAppliedSnapshotTickRef.current;
-    const processedIndexBefore = processedWsMessagesRef.current;
-    const wsMessageCount = ws.messages.length;
-
-    worldReadyRef.current = false;
-    firstSnapshotReadyRef.current = false;
-    pendingWorldInitRef.current = null;
-    pendingSnapshotRef.current = null;
-    lastAppliedSnapshotTickRef.current = null;
-    resumeInputUnblockedLoggedRef.current = false;
-    resumeFirstSnapshotLoggedRef.current = false;
-    resumeWorldReadyLoggedRef.current = false;
-    resumedActiveMatchIdRef.current = null;
-
-    sceneRef.current?.resetMultiplayerSmoothingForResume();
-
-    processedWsMessagesRef.current = wsMessageCount;
-
-    diagnosticsStore.log('ROOM', 'INFO', 'mp_resume_runtime_reset', {
-      roomCode: params.roomCode,
-      matchId: params.matchId,
-      previousLastAppliedTick,
-    });
-    diagnosticsStore.log('ROOM', 'INFO', 'mp_resume_skip_ws_history', {
-      roomCode: params.roomCode,
-      matchId: params.matchId,
-      processedIndexBefore,
-      processedIndexAfter: processedWsMessagesRef.current,
-      wsMessagesLength: wsMessageCount,
-    });
-  }, [ws.messages.length]);
-
   const markUserInteracted = useCallback((): void => {
     userInteractedRef.current = true;
   }, []);
@@ -797,33 +763,6 @@ export default function GameView(): JSX.Element {
     && !isRestartVoteActive
     && !spectatorRestartPromptDismissed;
   const shellSizeRef = useRef<{ width: number; height: number }>({ width: window.innerWidth, height: window.innerHeight });
-
-  useEffect(() => {
-    const hasMultiplayerRoom = Boolean(currentRoom?.roomCode);
-    const shouldAutoClearSoloResume = hasMultiplayerRoom || isMultiplayerMode;
-    if (!shouldAutoClearSoloResume) {
-      return;
-    }
-
-    if (!soloResumeModalOpen && soloStartReady) {
-      return;
-    }
-
-    diagnosticsStore.log('UI', 'INFO', 'solo_resume:auto_clear_for_multiplayer', {
-      hasMultiplayerRoom,
-      isMultiplayerMode,
-      roomCode: currentRoom?.roomCode ?? null,
-      soloResumeModalOpen,
-      soloStartReady,
-    });
-
-    if (soloResumeModalOpen) {
-      setSoloResumeModalOpen(false);
-    }
-    if (!soloStartReady) {
-      setSoloStartReady(true);
-    }
-  }, [currentRoom?.roomCode, isMultiplayerMode, soloResumeModalOpen, soloStartReady]);
 
   useEffect(() => {
     if (!isMultiplayerDebugEnabled) return;
@@ -1616,12 +1555,12 @@ export default function GameView(): JSX.Element {
     worldReadyRef.current = false;
     firstSnapshotReadyRef.current = false;
     rejoinCompletionSentRef.current = false;
+    pendingWorldInitRef.current = null;
+    pendingSnapshotRef.current = null;
+    lastAppliedSnapshotTickRef.current = null;
     handledMatchEventIdsRef.current.clear();
     sceneRef.current?.setActiveMultiplayerSession(lastAck.roomCode, lastAck.matchId);
-    resetMpResumeRuntimeState({
-      roomCode: lastAck.roomCode,
-      matchId: lastAck.matchId,
-    });
+    sceneRef.current?.resetMultiplayerNetState();
 
     ws.send({
       type: 'mp:rejoin_ready',
@@ -1646,7 +1585,7 @@ export default function GameView(): JSX.Element {
     });
 
     setRejoinPhase('rejoin_ready');
-  }, [handleResumeFailure, rejoinPhase, resetMpMatchRuntimeForNewMatch, resumeJoinInProgress, ws, ws.messages, resetMpResumeRuntimeState]);
+  }, [handleResumeFailure, rejoinPhase, resetMpMatchRuntimeForNewMatch, resumeJoinInProgress, ws, ws.messages]);
 
 
   useEffect(() => {
@@ -2243,11 +2182,6 @@ export default function GameView(): JSX.Element {
       resumeFirstSnapshotLoggedRef.current = true;
       resumedActiveMatchIdRef.current = snapshot.matchId;
       diagnosticsStore.log('ROOM', 'INFO', 'resume_first_valid_snapshot', {
-        roomCode: snapshot.roomCode ?? null,
-        matchId: snapshot.matchId ?? null,
-        tick: snapshot.tick,
-      });
-      diagnosticsStore.log('ROOM', 'INFO', 'mp_resume_first_snapshot_applied', {
         roomCode: snapshot.roomCode ?? null,
         matchId: snapshot.matchId ?? null,
         tick: snapshot.tick,
