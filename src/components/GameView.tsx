@@ -372,6 +372,7 @@ export default function GameView(): JSX.Element {
   const authReadyAtRef = useRef<number | null>(null);
   const userInteractedRef = useRef(false);
   const resumePromptShownRef = useRef(false);
+  const resumePromptSuppressedRef = useRef(false);
   const pendingResumeIntentRef = useRef<{ roomCode: string; matchId: string | null } | null>(null);
   const resumeServerCheckDoneRef = useRef(false);
   const resumeIntentExecutedRef = useRef(false);
@@ -386,6 +387,7 @@ export default function GameView(): JSX.Element {
   const rejoinCompletionSentRef = useRef(false);
   const [resumeJoinInProgress, setResumeJoinInProgress] = useState(false);
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
+  const [pendingResumePrompt, setPendingResumePrompt] = useState<{ roomCode: string; matchId: string | null } | null>(null);
   const [resumeModal, setResumeModal] = useState<{ open: boolean; roomCode: string; matchId: string | null } | null>(null);
 
   const resetResumeAttemptState = useCallback((nextPhase: RejoinPhase = 'idle'): void => {
@@ -2673,7 +2675,7 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     if (!token || !localTgUserId) return;
-    if (currentRoom?.roomCode || resumePromptShownRef.current || resumeServerCheckDoneRef.current) return;
+    if (currentRoom?.roomCode || resumePromptShownRef.current || resumePromptSuppressedRef.current || resumeServerCheckDoneRef.current) return;
 
     resumeServerCheckDoneRef.current = true;
 
@@ -2708,19 +2710,19 @@ export default function GameView(): JSX.Element {
           return;
         }
 
-        resumePromptShownRef.current = true;
+        const nextPrompt = {
+          roomCode: String(payload.roomCode),
+          matchId: payload.matchId == null ? null : String(payload.matchId),
+        };
+
         if (isMultiplayerDebugEnabled) {
-          diagnosticsStore.log('ROOM', 'INFO', 'resume:server_prompt_shown_server_driven', {
-            roomCode: payload.roomCode,
-            matchId: payload.matchId ?? null,
+          diagnosticsStore.log('ROOM', 'INFO', 'resume:pending_prompt_set', {
+            roomCode: nextPrompt.roomCode,
+            matchId: nextPrompt.matchId,
           });
         }
 
-        setResumeModal({
-          open: true,
-          roomCode: String(payload.roomCode),
-          matchId: payload.matchId == null ? null : String(payload.matchId),
-        });
+        setPendingResumePrompt(nextPrompt);
       } catch (error) {
         if (isMultiplayerDebugEnabled) {
           diagnosticsStore.log('ROOM', 'WARN', 'resume:server_check_failed', {
@@ -2733,6 +2735,26 @@ export default function GameView(): JSX.Element {
     void runServerResumeCheck();
   }, [currentRoom?.roomCode, isMultiplayerDebugEnabled, localTgUserId, token]);
 
+  useEffect(() => {
+    if (!pendingResumePrompt) return;
+    if (resumePromptShownRef.current || resumePromptSuppressedRef.current) return;
+    if (showBootSplash || gameFlowPhase !== 'playing' || currentRoom?.roomCode) {
+      return;
+    }
+
+    resumePromptShownRef.current = true;
+    setResumeModal({ open: true, roomCode: pendingResumePrompt.roomCode, matchId: pendingResumePrompt.matchId });
+    setPendingResumePrompt(null);
+
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('ROOM', 'INFO', 'resume:prompt_shown_after_full_view', {
+        gameFlowPhase,
+        showBootSplash,
+        roomCode: currentRoom?.roomCode ?? null,
+      });
+    }
+  }, [currentRoom?.roomCode, gameFlowPhase, isMultiplayerDebugEnabled, pendingResumePrompt, showBootSplash]);
+
   const onCancelResumePrompt = useCallback((): void => {
     if (!resumeModal?.open) return;
 
@@ -2744,7 +2766,9 @@ export default function GameView(): JSX.Element {
     }
 
     clearLastSession();
+    resumePromptSuppressedRef.current = true;
     pendingResumeIntentRef.current = null;
+    setPendingResumePrompt(null);
     setResumeModal(null);
     resetResumeAttemptState('idle');
   }, [isMultiplayerDebugEnabled, resetResumeAttemptState, resumeModal]);
@@ -2766,6 +2790,7 @@ export default function GameView(): JSX.Element {
       roomCode: resumeModal.roomCode,
       matchId: resumeModal.matchId,
     };
+    setPendingResumePrompt(null);
     pendingResumeIntentRef.current = pendingIntent;
     resumeIntentExecutedRef.current = false;
     setResumeModal(null);
@@ -3680,19 +3705,12 @@ export default function GameView(): JSX.Element {
         </div>
       )}
       {resumeModal?.open && !currentRoom?.roomCode && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Resume previous game"
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.6)', display: 'grid', placeItems: 'center', zIndex: 2500 }}
-        >
-          <div className="rr-overlay-modal" style={{ width: 'min(420px, calc(100vw - 2rem))' }}>
-            <div className="settings-header">
-              <strong>Return to your previous game?</strong>
-            </div>
-            <div className="settings-panel" style={{ display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
-              <button type="button" onClick={onAcceptResumePrompt}>Resume</button>
-              <button type="button" className="ghost" onClick={onCancelResumePrompt}>Cancel</button>
+        <div className="rr-resume-overlay" role="dialog" aria-modal="true" aria-label="Resume previous game">
+          <div className="rr-overlay-modal rr-resume-modal">
+            <p className="rr-resume-title">Do you want to resume the match?</p>
+            <div className="rr-resume-actions">
+              <button type="button" className="rr-resume-btn rr-resume-btn--accept" onClick={onAcceptResumePrompt}>Resume</button>
+              <button type="button" className="rr-resume-btn rr-resume-btn--cancel" onClick={onCancelResumePrompt}>Cancel</button>
             </div>
           </div>
         </div>
