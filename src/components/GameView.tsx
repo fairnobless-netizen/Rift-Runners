@@ -583,6 +583,39 @@ export default function GameView(): JSX.Element {
   }));
   const ws = useWsClient(token || undefined);
 
+  const resetMpResumeRuntimeState = useCallback((params: { roomCode: string | null; matchId: string | null }): void => {
+    const previousLastAppliedTick = lastAppliedSnapshotTickRef.current;
+    const processedIndexBefore = processedWsMessagesRef.current;
+    const wsMessageCount = ws.messages.length;
+
+    worldReadyRef.current = false;
+    firstSnapshotReadyRef.current = false;
+    pendingWorldInitRef.current = null;
+    pendingSnapshotRef.current = null;
+    lastAppliedSnapshotTickRef.current = null;
+    resumeInputUnblockedLoggedRef.current = false;
+    resumeFirstSnapshotLoggedRef.current = false;
+    resumeWorldReadyLoggedRef.current = false;
+    resumedActiveMatchIdRef.current = null;
+
+    sceneRef.current?.resetMultiplayerSmoothingForResume();
+
+    processedWsMessagesRef.current = wsMessageCount;
+
+    diagnosticsStore.log('ROOM', 'INFO', 'mp_resume_runtime_reset', {
+      roomCode: params.roomCode,
+      matchId: params.matchId,
+      previousLastAppliedTick,
+    });
+    diagnosticsStore.log('ROOM', 'INFO', 'mp_resume_skip_ws_history', {
+      roomCode: params.roomCode,
+      matchId: params.matchId,
+      processedIndexBefore,
+      processedIndexAfter: processedWsMessagesRef.current,
+      wsMessagesLength: wsMessageCount,
+    });
+  }, [ws.messages.length]);
+
   const markUserInteracted = useCallback((): void => {
     userInteractedRef.current = true;
   }, []);
@@ -1585,6 +1618,10 @@ export default function GameView(): JSX.Element {
     rejoinCompletionSentRef.current = false;
     handledMatchEventIdsRef.current.clear();
     sceneRef.current?.setActiveMultiplayerSession(lastAck.roomCode, lastAck.matchId);
+    resetMpResumeRuntimeState({
+      roomCode: lastAck.roomCode,
+      matchId: lastAck.matchId,
+    });
 
     ws.send({
       type: 'mp:rejoin_ready',
@@ -1601,7 +1638,6 @@ export default function GameView(): JSX.Element {
       matchId: lastAck.matchId,
       serverTime: lastAck.serverTime,
       attemptId: lastAck.rejoinAttemptId,
-      runtimeResetStep: 'skipped_working_mode',
     });
     diagnosticsStore.log('ROOM', 'INFO', 'rejoin:ready_sent', {
       roomCode: lastAck.roomCode,
@@ -1610,7 +1646,7 @@ export default function GameView(): JSX.Element {
     });
 
     setRejoinPhase('rejoin_ready');
-  }, [handleResumeFailure, rejoinPhase, resumeJoinInProgress, ws, ws.messages]);
+  }, [handleResumeFailure, rejoinPhase, resetMpMatchRuntimeForNewMatch, resumeJoinInProgress, ws, ws.messages, resetMpResumeRuntimeState]);
 
 
   useEffect(() => {
