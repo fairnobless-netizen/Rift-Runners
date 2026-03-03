@@ -85,11 +85,6 @@ const restartVotes = new Map<string, RestartVoteState>();
 const roomRegistry = new RoomRegistry();
 const pendingRejoinHandshakes = new Map<string, PendingRejoinHandshake>(); // key: connectionId
 const inputRateLimitByConnectionId = new Map<string, InputRateLimitState>();
-const outboundDropCounters = new Map<string, number>();
-const rejoinBundleSentCounters = {
-  timeout_fallback: 0,
-  implicit_input_fallback: 0,
-};
 
 const INPUT_RATE_LIMIT_PER_SECOND = 30;
 const INPUT_QUEUE_MAX_LEN = 500;
@@ -283,24 +278,6 @@ function isSocketAttachedToRoom(ctx: ClientCtx, room: RoomState): boolean {
   return room.players.get(ctx.tgUserId) === ctx.socket;
 }
 
-function incrementCounter(counter: Map<string, number>, key: string): number {
-  const value = (counter.get(key) ?? 0) + 1;
-  counter.set(key, value);
-  return value;
-}
-
-function recordOutboundDrop(
-  reason: 'room_match_mismatch' | 'stale_socket' | 'room_mismatch' | 'match_mismatch',
-  payload: Record<string, unknown>,
-): void {
-  const count = incrementCounter(outboundDropCounters, reason);
-  logWsEvent('ws_drop_outbound', {
-    drop_reason: reason,
-    drop_count: count,
-    ...payload,
-  });
-}
-
 function getTeamScore(match: MatchState): number {
   return Array.from(match.playerScores.values()).reduce((sum, value) => sum + Math.max(0, Number(value ?? 0)), 0);
 }
@@ -381,7 +358,8 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
   }
 
   if (room.matchId !== matchId) {
-    recordOutboundDrop('room_match_mismatch', {
+    logWsEvent('ws_drop_outbound', {
+      reason: 'room_match_mismatch',
       roomId,
       roomMatchId: room.matchId,
       targetMatchId: matchId,
@@ -423,26 +401,12 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
     }
 
     if (client.roomId !== roomId) {
-      recordOutboundDrop('room_mismatch', {
-        roomId,
-        matchId,
-        msgType: msg.type,
-        tgUserId,
-        clientRoomId: client.roomId,
-      });
       addSkipReason('client_not_in_room');
       continue;
     }
 
     if (client.matchId !== matchId) {
       clientMatchIdMismatchCount += 1;
-      recordOutboundDrop('match_mismatch', {
-        roomId,
-        matchId,
-        msgType: msg.type,
-        tgUserId,
-        clientMatchId: client.matchId,
-      });
       if (shouldLogSnapshotBroadcast) {
         logWsEvent('ws_snapshot_recipient_mismatch', {
           roomId,
@@ -453,17 +417,9 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
           clientMatchId: client.matchId,
         });
       }
-      addSkipReason('client_match_mismatch');
-      continue;
     }
 
     if (!isSocketAttachedToRoom(client, room)) {
-      recordOutboundDrop('stale_socket', {
-        roomId,
-        matchId,
-        msgType: msg.type,
-        tgUserId,
-      });
       addSkipReason('socket_not_attached_to_room_players');
       continue;
     }
@@ -718,26 +674,7 @@ function clearPendingRejoinHandshake(connectionId: string): void {
   pendingRejoinHandshakes.delete(connectionId);
 }
 
-function consumePendingRejoinHandshake(ctx: ClientCtx, trigger: 'ready' | 'timeout' | 'implicit_input'): PendingRejoinHandshake | null {
-  const pending = pendingRejoinHandshakes.get(ctx.connectionId);
-  if (!pending) {
-    return null;
-  }
-
-  clearPendingRejoinHandshake(ctx.connectionId);
-
-  logWsEvent('ws_rejoin_handshake_cleared', {
-    connectionId: ctx.connectionId,
-    tgUserId: ctx.tgUserId,
-    roomId: pending.roomCode,
-    matchId: pending.matchId,
-    trigger,
-  });
-
-  return pending;
-}
-
-function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchState, reason: 'ready' | 'timeout' | 'implicit_input'): void {
+function sendRejoinSnapshotBundle(ctx: ClientCtx, roomId: string, match: MatchState, reason: 'ready' | 'timeout'): void {
   send(ctx.socket, {
     type: 'match:started',
     roomCode: roomId,
@@ -812,7 +749,7 @@ function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState)
       return;
     }
 
-    consumePendingRejoinHandshake(ctx, 'timeout');
+    pendingRejoinHandshakes.delete(ctx.connectionId);
 
     const activeMatch = getMatch(match.matchId);
     if (!activeMatch || activeMatch.roomId !== roomId) {
@@ -820,7 +757,6 @@ function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState)
     }
 
     sendRejoinSnapshotBundle(ctx, roomId, activeMatch, 'timeout');
-    rejoinBundleSentCounters.timeout_fallback += 1;
     logWsEvent('ws_rejoin_ready_timeout_fallback', {
       connectionId: ctx.connectionId,
       tgUserId: ctx.tgUserId,
@@ -828,7 +764,6 @@ function beginRejoinHandshake(ctx: ClientCtx, roomId: string, match: MatchState)
       matchId: match.matchId,
       rejoinAttemptId,
       createdAtMs,
-      timeoutFallbackCount: rejoinBundleSentCounters.timeout_fallback,
     });
   }, 4_000);
 
@@ -880,44 +815,6 @@ function sendRejoinSyncIfActiveMatch(ctx: ClientCtx, roomId: string) {
   }
 
   beginRejoinHandshake(ctx, roomId, activeMatch);
-}
-
-function maybeSendRejoinBundleFromImplicitInput(ctx: ClientCtx): void {
-  const pending = pendingRejoinHandshakes.get(ctx.connectionId);
-  if (!pending) {
-    return;
-  }
-
-  if (ctx.roomId !== pending.roomCode || ctx.matchId !== pending.matchId) {
-    logWsEvent('ws_rejoin_implicit_input_drop_mismatch', {
-      connectionId: ctx.connectionId,
-      tgUserId: ctx.tgUserId,
-      pendingRoomCode: pending.roomCode,
-      pendingMatchId: pending.matchId,
-      ctxRoomId: ctx.roomId,
-      ctxMatchId: ctx.matchId,
-      drop_reason: 'handshake_pending_mismatch',
-    });
-    consumePendingRejoinHandshake(ctx, 'implicit_input');
-    return;
-  }
-
-  const activeMatch = getMatch(pending.matchId);
-  if (!activeMatch || activeMatch.roomId !== pending.roomCode) {
-    consumePendingRejoinHandshake(ctx, 'implicit_input');
-    return;
-  }
-
-  consumePendingRejoinHandshake(ctx, 'implicit_input');
-  sendRejoinSnapshotBundle(ctx, pending.roomCode, activeMatch, 'implicit_input');
-  rejoinBundleSentCounters.implicit_input_fallback += 1;
-  logWsEvent('ws_rejoin_ready_implicit_input_fallback', {
-    connectionId: ctx.connectionId,
-    tgUserId: ctx.tgUserId,
-    roomId: pending.roomCode,
-    matchId: pending.matchId,
-    implicitInputFallbackCount: rejoinBundleSentCounters.implicit_input_fallback,
-  });
 }
 
 async function detachClientFromRoomDb(roomCode: string, tgUserId: string) {
@@ -1160,35 +1057,6 @@ function detachClientFromRoom(ctx: ClientCtx, reason: 'intentional_leave' | 'dis
   void handlePlayerLeftInActiveMatch(roomId, leavingTgUserId);
 }
 
-function detachExistingSocketForUser(roomId: string, tgUserId: string, nextSocket: WebSocket, replacementConnectionId: string): void {
-  const room = rooms.get(roomId);
-  const existingSocket = room?.players.get(tgUserId);
-  if (!room || !existingSocket || existingSocket === nextSocket) {
-    return;
-  }
-
-  room.players.delete(tgUserId);
-
-  for (const client of clients) {
-    if (client.tgUserId !== tgUserId || client.roomId !== roomId || client.socket !== existingSocket) {
-      continue;
-    }
-
-    logWsEvent('ws_stale_socket_detached', {
-      roomId,
-      tgUserId,
-      staleConnectionId: client.connectionId,
-      replacementConnectionId,
-    });
-
-    detachClientFromRoom(client, 'disconnect');
-    try {
-      existingSocket.terminate();
-    } catch {}
-    break;
-  }
-}
-
 function parseMessage(raw: RawData): ClientMessage | null {
   try {
     const parsed = JSON.parse(String(raw));
@@ -1210,11 +1078,6 @@ function logInboundDrop(ctx: ClientCtx, msg: ClientMessage, reason: string, room
     roomMatchId: room?.matchId ?? null,
     msgType: msg.type,
   });
-}
-
-function isConnectionTrackedInRoom(ctx: ClientCtx, roomId: string): boolean {
-  const registryRoom = roomRegistry.getRoom(roomId);
-  return Boolean(registryRoom?.activeConnectionIds.has(ctx.connectionId));
 }
 
 async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
@@ -1294,7 +1157,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         } catch {}
       }
 
-      detachExistingSocketForUser(msg.roomId, ctx.tgUserId, ctx.socket, ctx.connectionId);
       attachClientToRoom(ctx, msg.roomId);
       touchLastMpSession({
         tgUserId: ctx.tgUserId,
@@ -1381,7 +1243,7 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return;
       }
 
-      consumePendingRejoinHandshake(ctx, 'ready');
+      clearPendingRejoinHandshake(ctx.connectionId);
       const activeMatch = getMatch(ctx.matchId);
       if (!activeMatch || activeMatch.roomId !== ctx.roomId) {
         return;
@@ -1472,11 +1334,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return;
       }
 
-      if (!isConnectionTrackedInRoom(ctx, ctx.roomId)) {
-        logInboundDrop(ctx, msg, 'registry_room_mismatch', room);
-        return;
-      }
-
       if (!isSocketAttachedToRoom(ctx, room)) {
         logInboundDrop(ctx, msg, 'socket_not_attached', room);
         return;
@@ -1486,8 +1343,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         logInboundDrop(ctx, msg, 'match_mismatch', room);
         return;
       }
-
-      maybeSendRejoinBundleFromImplicitInput(ctx);
 
       const matchId = ctx.matchId;
 
@@ -1553,11 +1408,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       const room = rooms.get(ctx.roomId);
       if (!room || !isSocketAttachedToRoom(ctx, room) || room.matchId !== ctx.matchId) {
         logInboundDrop(ctx, msg, 'bomb_place_room_mismatch', room);
-        return;
-      }
-
-      if (!isConnectionTrackedInRoom(ctx, ctx.roomId)) {
-        logInboundDrop(ctx, msg, 'bomb_place_registry_room_mismatch', room);
         return;
       }
 
@@ -1789,7 +1639,6 @@ export function registerWsHandlers(wss: WebSocketServer) {
 
           logWsEvent('ws_player_disconnect', { tgUserId, roomId: roomCode });
           detachClientFromRoom(ctx, 'disconnect');
-          clearPendingRejoinHandshake(ctx.connectionId);
           inputRateLimitByConnectionId.delete(ctx.connectionId);
           clients.delete(ctx);
         });
