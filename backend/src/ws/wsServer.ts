@@ -14,7 +14,6 @@ import {
 } from '../mp/match';
 import { createMatch, endMatch, getMatch, getMatchByRoom } from '../mp/matchManager';
 import { touchLastMpSession } from '../mp/lastSessionStore';
-import { authenticateWsConnection } from '../auth/wsAuth';
 
 // ✅ add DB cleanup
 import { closeRoomTx, getRoomByCode, leaveRoomV2, removeRoomCascade, setRoomPhase } from '../db/repos';
@@ -27,12 +26,6 @@ type ClientCtx = {
   roomId: string | null; // (roomCode)
   matchId: string | null;
   lastSeenMs: number; // ✅ for idle timeout
-};
-
-type InputRateLimitState = {
-  windowStartMs: number;
-  count: number;
-  dropped: number;
 };
 
 type RoomState = {
@@ -84,25 +77,9 @@ const clients = new Set<ClientCtx>();
 const restartVotes = new Map<string, RestartVoteState>();
 const roomRegistry = new RoomRegistry();
 const pendingRejoinHandshakes = new Map<string, PendingRejoinHandshake>(); // key: connectionId
-const inputRateLimitByConnectionId = new Map<string, InputRateLimitState>();
-
-const INPUT_RATE_LIMIT_PER_SECOND = 30;
-const INPUT_QUEUE_MAX_LEN = 500;
 
 const STALE_CONNECTION_MS = 60_000;
 const INACTIVE_ROOM_MS = 90_000;
-const SNAPSHOT_LOGGING_ENABLED = process.env.RR_LOG_SNAPSHOT_BROADCAST === '1'; // Opt-in snapshot broadcast diagnostics
-const SNAPSHOT_LOG_SAMPLE_EVERY_TICKS = Math.max(1, Number.parseInt(process.env.RR_LOG_SNAPSHOT_BROADCAST_EVERY ?? '20', 10) || 20);
-
-function shouldLogSnapshotBroadcastForTick(tick: number): boolean {
-  if (!SNAPSHOT_LOGGING_ENABLED) {
-    return false;
-  }
-  if (!Number.isFinite(tick)) {
-    return true;
-  }
-  return tick % SNAPSHOT_LOG_SAMPLE_EVERY_TICKS === 0;
-}
 
 
 function roomHasRejoinablePlayer(roomId: string, nowMs = Date.now()): boolean {
@@ -238,42 +215,6 @@ function logWsEvent(evt: string, payload: Record<string, unknown>) {
   );
 }
 
-function shouldAcceptInputForRateLimit(ctx: ClientCtx): boolean {
-  const nowMs = Date.now();
-  const current = inputRateLimitByConnectionId.get(ctx.connectionId);
-  const state: InputRateLimitState =
-    current ?? {
-      windowStartMs: nowMs,
-      count: 0,
-      dropped: 0,
-    };
-
-  if (nowMs - state.windowStartMs >= 1_000) {
-    state.windowStartMs = nowMs;
-    state.count = 0;
-    state.dropped = 0;
-  }
-
-  if (state.count >= INPUT_RATE_LIMIT_PER_SECOND) {
-    state.dropped += 1;
-    inputRateLimitByConnectionId.set(ctx.connectionId, state);
-    logWsEvent('ws_input_rate_limited', {
-      tgUserId: ctx.tgUserId,
-      roomId: ctx.roomId,
-      matchId: ctx.matchId,
-      windowStartMs: state.windowStartMs,
-      count: state.count,
-      limit: INPUT_RATE_LIMIT_PER_SECOND,
-      dropped: state.dropped,
-    });
-    return false;
-  }
-
-  state.count += 1;
-  inputRateLimitByConnectionId.set(ctx.connectionId, state);
-  return true;
-}
-
 function isSocketAttachedToRoom(ctx: ClientCtx, room: RoomState): boolean {
   return room.players.get(ctx.tgUserId) === ctx.socket;
 }
@@ -368,8 +309,7 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
     return;
   }
 
-  const shouldLogSnapshotBroadcast = msg.type === 'match:snapshot' && shouldLogSnapshotBroadcastForTick(msg.snapshot.tick);
-  const skippedByReason = shouldLogSnapshotBroadcast ? new Map<string, number>() : null;
+  const skippedByReason = new Map<string, number>();
   let clientsConsidered = 0;
   let sentCount = 0;
   let clientMatchIdMismatchCount = 0;
@@ -380,9 +320,6 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
   }
 
   const addSkipReason = (reason: string) => {
-    if (!skippedByReason) {
-      return;
-    }
     skippedByReason.set(reason, (skippedByReason.get(reason) ?? 0) + 1);
   };
 
@@ -407,16 +344,14 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
 
     if (client.matchId !== matchId) {
       clientMatchIdMismatchCount += 1;
-      if (shouldLogSnapshotBroadcast) {
-        logWsEvent('ws_snapshot_recipient_mismatch', {
-          roomId,
-          roomCode: roomId,
-          matchId,
-          serverTick: msg.type === 'match:snapshot' ? msg.snapshot.tick : null,
-          tgUserId,
-          clientMatchId: client.matchId,
-        });
-      }
+      logWsEvent('ws_snapshot_recipient_mismatch', {
+        roomId,
+        roomCode: roomId,
+        matchId,
+        serverTick: msg.type === 'match:snapshot' ? msg.snapshot.tick : null,
+        tgUserId,
+        clientMatchId: client.matchId,
+      });
     }
 
     if (!isSocketAttachedToRoom(client, room)) {
@@ -428,7 +363,7 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
     sentCount += 1;
   }
 
-  if (msg.type === 'match:snapshot' && shouldLogSnapshotBroadcast) {
+  if (msg.type === 'match:snapshot') {
     const skippedCount = clientsConsidered - sentCount;
     logWsEvent('ws_snapshot_broadcast', {
       roomId,
@@ -442,7 +377,7 @@ function broadcastToRoomMatch(roomId: string, matchId: string, msg: MatchServerM
       clientMatchIdMismatchCount,
     });
 
-    if (skippedByReason && skippedByReason.size > 0) {
+    if (skippedByReason.size > 0) {
       logWsEvent('ws_snapshot_broadcast_skips', {
         roomId,
         roomCode: roomId,
@@ -1099,6 +1034,10 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         return send(ctx.socket, { type: 'match:error', error: 'invalid_room_id' });
       }
 
+      if (msg.tgUserId && typeof msg.tgUserId === 'string') {
+        ctx.tgUserId = msg.tgUserId;
+      }
+
       const dbRoom = await getRoomByCode(msg.roomId);
       if (!dbRoom) {
         return send(ctx.socket, { type: 'match:error', error: 'room_not_found' });
@@ -1368,21 +1307,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
         const dir = payload.dir;
         if (dir !== null && dir !== 'up' && dir !== 'down' && dir !== 'left' && dir !== 'right') return;
 
-        if (!shouldAcceptInputForRateLimit(ctx)) {
-          return;
-        }
-
-        if (match.inputQueue.length >= INPUT_QUEUE_MAX_LEN) {
-          logWsEvent('ws_input_queue_overflow', {
-            roomId: ctx.roomId,
-            matchId: match.matchId,
-            queueLen: match.inputQueue.length,
-            maxQueueLen: INPUT_QUEUE_MAX_LEN,
-            tgUserId: ctx.tgUserId,
-          });
-          return;
-        }
-
         match.inputQueue.push({
           tgUserId: ctx.tgUserId,
           seq,
@@ -1414,10 +1338,6 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       const match = getMatch(ctx.matchId);
       if (!match || match.roomId !== ctx.roomId) {
         logInboundDrop(ctx, msg, 'bomb_place_match_mismatch', room);
-        return;
-      }
-
-      if (!shouldAcceptInputForRateLimit(ctx)) {
         return;
       }
 
@@ -1592,64 +1512,40 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
 export function registerWsHandlers(wss: WebSocketServer) {
   wss.on('connection', (socket, req) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
+    const tgUserId = url.searchParams.get('tgUserId') ?? `guest_${Math.random().toString(36).slice(2, 10)}`;
 
-    void (async () => {
-      try {
-        const authResult = await authenticateWsConnection(req, url);
-        if (!authResult.ok) {
-          logWsEvent('ws_auth_failed', {
-            reason: authResult.reason,
-            hasCredential: authResult.hasCredential,
-          });
-          socket.close(4401, 'ws_auth_failed');
-          return;
-        }
+    const ctx: ClientCtx = {
+      connectionId: randomUUID(),
+      socket,
+      tgUserId,
+      roomId: null,
+      matchId: null,
+      lastSeenMs: Date.now(),
+    };
+    clients.add(ctx);
 
-        const ctx: ClientCtx = {
-          connectionId: randomUUID(),
-          socket,
-          tgUserId: authResult.tgUserId,
-          roomId: null,
-          matchId: null,
-          lastSeenMs: Date.now(),
-        };
-        clients.add(ctx);
 
-        logWsEvent('ws_auth_ok', {
-          tgUserId: authResult.tgUserId,
-          mode: authResult.mode,
-        });
+    send(socket, { type: 'connected' });
 
-        send(socket, { type: 'connected' });
-
-        socket.on('message', (raw) => {
-          const msg = parseMessage(raw);
-          if (!msg) {
-            send(socket, { type: 'match:error', error: 'invalid_message' });
-            return;
-          }
-          ctx.lastSeenMs = Date.now();
-          roomRegistry.heartbeat(ctx.connectionId, ctx.lastSeenMs);
-          void handleMessage(ctx, msg);
-        });
-
-        socket.on('close', () => {
-          const roomCode = ctx.roomId;
-          const tgUserId = ctx.tgUserId;
-
-          logWsEvent('ws_player_disconnect', { tgUserId, roomId: roomCode });
-          detachClientFromRoom(ctx, 'disconnect');
-          inputRateLimitByConnectionId.delete(ctx.connectionId);
-          clients.delete(ctx);
-        });
-      } catch (error) {
-        logWsEvent('ws_auth_error', {
-          reason: 'internal_error',
-          error: error instanceof Error ? error.message : String(error),
-        });
-        socket.close(4500, 'ws_auth_error');
+    socket.on('message', (raw) => {
+      const msg = parseMessage(raw);
+      if (!msg) {
+        send(socket, { type: 'match:error', error: 'invalid_message' });
         return;
       }
-    })();
+      ctx.lastSeenMs = Date.now();
+      roomRegistry.heartbeat(ctx.connectionId, ctx.lastSeenMs);
+      void handleMessage(ctx, msg);
+    });
+
+    socket.on('close', () => {
+      const roomCode = ctx.roomId;
+      const tgUserId = ctx.tgUserId;
+
+      logWsEvent('ws_player_disconnect', { tgUserId, roomId: roomCode });
+      detachClientFromRoom(ctx, 'disconnect');
+      clients.delete(ctx);
+
+    });
   });
 }
