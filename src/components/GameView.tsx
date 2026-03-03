@@ -2757,7 +2757,7 @@ export default function GameView(): JSX.Element {
 
   useEffect(() => {
     const roomCode = currentRoom?.roomCode;
-    if (!pendingResumePrompt || !roomCode || resumePromptShownRef.current) {
+    if (!pendingResumePrompt || !roomCode || resumePromptShownRef.current || resumePromptSuppressedRef.current) {
       return;
     }
 
