@@ -678,6 +678,12 @@ export default function GameView(): JSX.Element {
   );
 
   const rejoinOverlayActive = rejoinPhase !== 'idle' && rejoinPhase !== 'rejoin_complete' && rejoinPhase !== 'rejoin_failed';
+  const shouldBypassBootForResume = Boolean(
+    pendingResumePrompt
+    && !resumePromptShownRef.current
+    && !resumePromptSuppressedRef.current
+    && !currentRoom?.roomCode,
+  );
   const isInputLocked = gameFlowPhase !== 'playing' || tutorialActive || waitingForOtherPlayer;
   const isMobileViewport = Math.min(viewportSize.width, viewportSize.height) < MOBILE_ROTATE_OVERLAY_BREAKPOINT;
   const isPortraitViewport = viewportSize.height >= viewportSize.width;
@@ -2736,6 +2742,14 @@ export default function GameView(): JSX.Element {
   }, [currentRoom?.roomCode, isMultiplayerDebugEnabled, localTgUserId, token]);
 
   useEffect(() => {
+    if (!shouldBypassBootForResume) return;
+    if (!showBootSplash && gameFlowPhase === 'playing') return;
+
+    setShowBootSplash(false);
+    enterFullViewMode(true);
+  }, [gameFlowPhase, shouldBypassBootForResume, showBootSplash]);
+
+  useEffect(() => {
     if (!pendingResumePrompt) return;
     if (resumePromptShownRef.current || resumePromptSuppressedRef.current) return;
     if (showBootSplash || gameFlowPhase !== 'playing' || currentRoom?.roomCode) {
@@ -3583,10 +3597,10 @@ export default function GameView(): JSX.Element {
     }
   };
 
-  const onStartGame = (): void => {
-    markUserInteracted();
+  function enterFullViewMode(skipTutorial = false): void {
     void requestTelegramFullscreenBestEffort();
     if (shouldShowRotateOverlay) return;
+
     const minZoom = zoomBounds.min;
     setZoom(minZoom);
     setGameFlowPhase('playing');
@@ -3595,10 +3609,16 @@ export default function GameView(): JSX.Element {
         zoomApiRef.current?.setZoom(minZoom);
       });
     });
-    if (!onboardingDone) {
+
+    if (!skipTutorial && !onboardingDone) {
       setTutorialStepIndex(0);
       setTutorialActive(true);
     }
+  }
+
+  const onStartGame = (): void => {
+    markUserInteracted();
+    enterFullViewMode(false);
   };
 
   const onTutorialNext = (): void => {
@@ -3613,7 +3633,7 @@ export default function GameView(): JSX.Element {
 
   return (
     <main ref={pageRef} className="page" onContextMenu={(event) => event.preventDefault()}>
-      {showBootSplash && (
+      {showBootSplash && !shouldBypassBootForResume && (
         <div className={`boot-splash ${bootSplashClosing ? 'boot-splash--closing' : ''}`} role="status" aria-live="polite">
           <div className="boot-splash-card">
             {/* Future swap hook: replace inline SVG with <img src="/assets/ui/splash/logo_rift_runners.png" alt="Rift Runners" /> when binary assets are available. */}
@@ -3637,7 +3657,7 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {!showBootSplash && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && (
+      {!showBootSplash && !shouldBypassBootForResume && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && (
         <div className="game-flow-overlay" role="status" aria-live="polite">
           {gameFlowPhase === 'intro' ? (
             <div className="intro-layer" aria-label="Rift Runners intro animation">
