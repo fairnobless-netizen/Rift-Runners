@@ -389,6 +389,10 @@ export default function GameView(): JSX.Element {
   const [rejoinPhase, setRejoinPhase] = useState<RejoinPhase>('idle');
   const [pendingResumePrompt, setPendingResumePrompt] = useState<{ roomCode: string; matchId: string | null } | null>(null);
   const [resumeModal, setResumeModal] = useState<{ open: boolean; roomCode: string; matchId: string | null } | null>(null);
+  const [resumeCountdownActive, setResumeCountdownActive] = useState(false);
+  const [resumeCountdownSeconds, setResumeCountdownSeconds] = useState(5);
+  const resumeCountdownIntervalRef = useRef<number | null>(null);
+  const resumeCountdownEndTimeoutRef = useRef<number | null>(null);
 
   const resetResumeAttemptState = useCallback((nextPhase: RejoinPhase = 'idle'): void => {
     if (resumeLifecycleActiveRef.current) {
@@ -518,6 +522,8 @@ export default function GameView(): JSX.Element {
   const [bootSplashProgress, setBootSplashProgress] = useState<number>(() => (bootSplashSeen ? 1 : 0));
   const [bootSplashFileKey, setBootSplashFileKey] = useState<string>('');
   const [bootSplashClosing, setBootSplashClosing] = useState(false);
+  const shouldBypassBootForResume = !currentRoom?.roomCode && (pendingResumePrompt != null || Boolean(resumeModal?.open) || resumeJoinInProgress);
+  const effectiveShowBootSplash = showBootSplash && !shouldBypassBootForResume;
   const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>(() => ({
     width: window.innerWidth,
     height: window.innerHeight,
@@ -2627,6 +2633,33 @@ export default function GameView(): JSX.Element {
     }
   }, [handleResumeFailure, isMultiplayerDebugEnabled, localTgUserId]);
 
+  const stopResumeCountdown = useCallback((): void => {
+    if (resumeCountdownIntervalRef.current !== null) {
+      window.clearInterval(resumeCountdownIntervalRef.current);
+      resumeCountdownIntervalRef.current = null;
+    }
+    if (resumeCountdownEndTimeoutRef.current !== null) {
+      window.clearTimeout(resumeCountdownEndTimeoutRef.current);
+      resumeCountdownEndTimeoutRef.current = null;
+    }
+    setResumeCountdownActive(false);
+    setResumeCountdownSeconds(5);
+  }, []);
+
+  const startResumeCountdown = useCallback((): void => {
+    stopResumeCountdown();
+    setResumeCountdownActive(true);
+    setResumeCountdownSeconds(5);
+
+    resumeCountdownIntervalRef.current = window.setInterval(() => {
+      setResumeCountdownSeconds((prev) => (prev > 1 ? prev - 1 : 1));
+    }, 1000);
+
+    resumeCountdownEndTimeoutRef.current = window.setTimeout(() => {
+      stopResumeCountdown();
+    }, 5000);
+  }, [stopResumeCountdown]);
+
   const persistSessionActivity = useCallback((atMs = Date.now()): void => {
     if (!currentRoom?.roomCode || !localTgUserId) {
       return;
@@ -2738,7 +2771,7 @@ export default function GameView(): JSX.Element {
   useEffect(() => {
     if (!pendingResumePrompt) return;
     if (resumePromptShownRef.current || resumePromptSuppressedRef.current) return;
-    if (showBootSplash || gameFlowPhase !== 'playing' || currentRoom?.roomCode) {
+    if (effectiveShowBootSplash || gameFlowPhase !== 'playing' || currentRoom?.roomCode) {
       return;
     }
 
@@ -2749,11 +2782,11 @@ export default function GameView(): JSX.Element {
     if (isMultiplayerDebugEnabled) {
       diagnosticsStore.log('ROOM', 'INFO', 'resume:prompt_shown_after_full_view', {
         gameFlowPhase,
-        showBootSplash,
+        showBootSplash: effectiveShowBootSplash,
         roomCode: currentRoom?.roomCode ?? null,
       });
     }
-  }, [currentRoom?.roomCode, gameFlowPhase, isMultiplayerDebugEnabled, pendingResumePrompt, showBootSplash]);
+  }, [currentRoom?.roomCode, effectiveShowBootSplash, gameFlowPhase, isMultiplayerDebugEnabled, pendingResumePrompt]);
 
   useEffect(() => {
     const roomCode = currentRoom?.roomCode;
@@ -2783,12 +2816,13 @@ export default function GameView(): JSX.Element {
     }
 
     clearLastSession();
+    stopResumeCountdown();
     resumePromptSuppressedRef.current = true;
     pendingResumeIntentRef.current = null;
     setPendingResumePrompt(null);
     setResumeModal(null);
     resetResumeAttemptState('idle');
-  }, [isMultiplayerDebugEnabled, resetResumeAttemptState, resumeModal]);
+  }, [isMultiplayerDebugEnabled, resetResumeAttemptState, resumeModal, stopResumeCountdown]);
 
   const onAcceptResumePrompt = useCallback((): void => {
     if (!resumeModal?.open) return;
@@ -2807,6 +2841,7 @@ export default function GameView(): JSX.Element {
       roomCode: resumeModal.roomCode,
       matchId: resumeModal.matchId,
     };
+    startResumeCountdown();
     setPendingResumePrompt(null);
     pendingResumeIntentRef.current = pendingIntent;
     resumeIntentExecutedRef.current = false;
@@ -2822,7 +2857,7 @@ export default function GameView(): JSX.Element {
     resumeIntentExecutedRef.current = true;
     pendingResumeIntentRef.current = null;
     void resumeRoomByCode(pendingIntent.roomCode, pendingIntent.matchId);
-  }, [isMultiplayerDebugEnabled, resumeModal, resumeRoomByCode, ws.connected]);
+  }, [isMultiplayerDebugEnabled, resumeModal, resumeRoomByCode, startResumeCountdown, ws.connected]);
 
   useEffect(() => {
     if (!ws.connected) return;
@@ -2851,6 +2886,15 @@ export default function GameView(): JSX.Element {
     setCurrentRoomMembers([]);
     setCurrentMatchId(null);
   }, [handleResumeFailure, resumeJoinInProgress, ws.lastError]);
+
+  useEffect(() => {
+    if (!currentRoom?.roomCode) return;
+    stopResumeCountdown();
+  }, [currentRoom?.roomCode, stopResumeCountdown]);
+
+  useEffect(() => () => {
+    stopResumeCountdown();
+  }, [stopResumeCountdown]);
 
   useEffect(() => {
     const appliedTick = lastAppliedSnapshotTickRef.current;
@@ -3499,6 +3543,19 @@ export default function GameView(): JSX.Element {
   }, [bootSplashProgress, showBootSplash]);
 
   useEffect(() => {
+    if (!shouldBypassBootForResume) return;
+
+    if (showBootSplash || bootSplashClosing) {
+      setShowBootSplash(false);
+      setBootSplashClosing(false);
+    }
+
+    if (gameFlowPhase !== 'playing') {
+      void enterFullViewMode(true);
+    }
+  }, [bootSplashClosing, enterFullViewMode, gameFlowPhase, shouldBypassBootForResume, showBootSplash]);
+
+  useEffect(() => {
     if (showBootSplash) return;
 
     updateTgMetrics();
@@ -3583,9 +3640,9 @@ export default function GameView(): JSX.Element {
     }
   };
 
-  const onStartGame = (): void => {
+  async function enterFullViewMode(skipTutorial: boolean): Promise<void> {
     markUserInteracted();
-    void requestTelegramFullscreenBestEffort();
+    await requestTelegramFullscreenBestEffort();
     if (shouldShowRotateOverlay) return;
     const minZoom = zoomBounds.min;
     setZoom(minZoom);
@@ -3595,10 +3652,15 @@ export default function GameView(): JSX.Element {
         zoomApiRef.current?.setZoom(minZoom);
       });
     });
-    if (!onboardingDone) {
+    if (!skipTutorial && !onboardingDone) {
       setTutorialStepIndex(0);
       setTutorialActive(true);
     }
+  }
+
+  const onStartGame = (): void => {
+    markUserInteracted();
+    void enterFullViewMode(false);
   };
 
   const onTutorialNext = (): void => {
@@ -3613,7 +3675,7 @@ export default function GameView(): JSX.Element {
 
   return (
     <main ref={pageRef} className="page" onContextMenu={(event) => event.preventDefault()}>
-      {showBootSplash && (
+      {effectiveShowBootSplash && (
         <div className={`boot-splash ${bootSplashClosing ? 'boot-splash--closing' : ''}`} role="status" aria-live="polite">
           <div className="boot-splash-card">
             {/* Future swap hook: replace inline SVG with <img src="/assets/ui/splash/logo_rift_runners.png" alt="Rift Runners" /> when binary assets are available. */}
@@ -3637,7 +3699,7 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {!showBootSplash && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && (
+      {!effectiveShowBootSplash && !shouldBypassBootForResume && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && (
         <div className="game-flow-overlay" role="status" aria-live="polite">
           {gameFlowPhase === 'intro' ? (
             <div className="intro-layer" aria-label="Rift Runners intro animation">
@@ -3729,6 +3791,14 @@ export default function GameView(): JSX.Element {
               <button type="button" className="rr-resume-btn rr-resume-btn--accept" onClick={onAcceptResumePrompt}>Resume</button>
               <button type="button" className="rr-resume-btn rr-resume-btn--cancel" onClick={onCancelResumePrompt}>Cancel</button>
             </div>
+          </div>
+        </div>
+      )}
+      {resumeCountdownActive && (
+        <div className="rr-returning-overlay" role="status" aria-live="polite" aria-label="Returning to match countdown">
+          <div className="rr-returning-overlay__content">
+            <p className="rr-returning-overlay__title">RETURNING TO MATCH</p>
+            <span key={resumeCountdownSeconds} className="rr-returning-overlay__digit">{resumeCountdownSeconds}</span>
           </div>
         </div>
       )}
