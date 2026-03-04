@@ -2599,3 +2599,57 @@ html[data-orient="landscape"] .right-panel {
   background: linear-gradient(145deg, rgba(119, 72, 27, 0.98), rgba(166, 99, 37, 0.95)) !important;
   box-shadow: 0 0 0 1px rgba(255, 183, 116, 0.4), 0 0 16px rgba(236, 150, 65, 0.32) !important;
 }
+
+.rr-returning-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2400;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(70% 55% at 50% 44%, rgba(75, 72, 196, 0.34), rgba(38, 66, 152, 0.17) 45%, rgba(4, 9, 22, 0.58) 100%),
+    rgba(8, 11, 28, 0.52);
+}
+
+.rr-returning-overlay__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.rr-returning-overlay__title {
+  margin: 0;
+  color: #d7dcff;
+  font-size: clamp(0.92rem, 2.2vw, 1.15rem);
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  text-shadow: 0 0 10px rgba(150, 139, 255, 0.72), 0 0 24px rgba(74, 136, 255, 0.48);
+}
+
+.rr-returning-overlay__digit {
+  min-width: 1.25em;
+  text-align: center;
+  color: #f2f4ff;
+  font-size: clamp(4.2rem, 17vw, 8rem);
+  line-height: 0.9;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 24px rgba(188, 146, 255, 0.7), 0 0 48px rgba(87, 141, 255, 0.54);
+  animation: rrReturningDigitPulse 1s ease-out both;
+}
+
+@keyframes rrReturningDigitPulse {
+  0% {
+    opacity: 0;
+    transform: scale(1.22);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.2;
+    transform: scale(0.92);
+  }
+}
