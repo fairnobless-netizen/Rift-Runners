@@ -390,9 +390,14 @@ export default function GameView(): JSX.Element {
   const [pendingResumePrompt, setPendingResumePrompt] = useState<{ roomCode: string; matchId: string | null } | null>(null);
   const [resumeModal, setResumeModal] = useState<{ open: boolean; roomCode: string; matchId: string | null } | null>(null);
   const [resumeCountdownActive, setResumeCountdownActive] = useState(false);
-  const [resumeCountdownSeconds, setResumeCountdownSeconds] = useState(5);
+  const [resumeCountdownSeconds, setResumeCountdownSeconds] = useState(3);
+  const resumeCountdownActiveRef = useRef(false);
   const resumeCountdownIntervalRef = useRef<number | null>(null);
   const resumeCountdownEndTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    resumeCountdownActiveRef.current = resumeCountdownActive;
+  }, [resumeCountdownActive]);
 
   const resetResumeAttemptState = useCallback((nextPhase: RejoinPhase = 'idle'): void => {
     if (resumeLifecycleActiveRef.current) {
@@ -529,6 +534,11 @@ export default function GameView(): JSX.Element {
     height: window.innerHeight,
   }));
   const ws = useWsClient(token || undefined);
+  const wsSendRef = useRef(ws.send);
+
+  useEffect(() => {
+    wsSendRef.current = ws.send;
+  }, [ws.send]);
   const markUserInteracted = useCallback((): void => {
     userInteractedRef.current = true;
   }, []);
@@ -690,7 +700,7 @@ export default function GameView(): JSX.Element {
   const shouldShowRotateOverlay = isMobileViewport && isPortraitViewport;
   const deathOverlayVisible = lifeState.awaitingContinue || lifeState.gameOver;
   const isEliminatedSpectator = isMultiplayerMode && lifeState.eliminated && currentRoom?.phase === 'STARTED';
-  const isInteractionBlocked = isInputLocked || shouldShowRotateOverlay || deathOverlayVisible || lifeState.eliminated || lifeState.respawning;
+  const isInteractionBlocked = resumeCountdownActive || isInputLocked || shouldShowRotateOverlay || deathOverlayVisible || lifeState.eliminated || lifeState.respawning;
   const isRestartVoteActive = restartVote?.active === true;
   const restartVoteRemainingMs = isRestartVoteActive && restartVote?.expiresAt
     ? Math.max(0, restartVote.expiresAt - restartVoteNowMs)
@@ -2642,14 +2652,20 @@ export default function GameView(): JSX.Element {
       window.clearTimeout(resumeCountdownEndTimeoutRef.current);
       resumeCountdownEndTimeoutRef.current = null;
     }
+    if (resumeCountdownActiveRef.current && isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('ROOM', 'INFO', 'resume_countdown_end');
+    }
     setResumeCountdownActive(false);
-    setResumeCountdownSeconds(5);
-  }, []);
+    setResumeCountdownSeconds(3);
+  }, [isMultiplayerDebugEnabled, resumeCountdownActive]);
 
   const startResumeCountdown = useCallback((): void => {
     stopResumeCountdown();
     setResumeCountdownActive(true);
-    setResumeCountdownSeconds(5);
+    setResumeCountdownSeconds(3);
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('ROOM', 'INFO', 'resume_countdown_start');
+    }
 
     resumeCountdownIntervalRef.current = window.setInterval(() => {
       setResumeCountdownSeconds((prev) => (prev > 1 ? prev - 1 : 1));
@@ -2657,8 +2673,8 @@ export default function GameView(): JSX.Element {
 
     resumeCountdownEndTimeoutRef.current = window.setTimeout(() => {
       stopResumeCountdown();
-    }, 5000);
-  }, [stopResumeCountdown]);
+    }, 3000);
+  }, [isMultiplayerDebugEnabled, stopResumeCountdown]);
 
   const persistSessionActivity = useCallback((atMs = Date.now()): void => {
     if (!currentRoom?.roomCode || !localTgUserId) {
@@ -2887,14 +2903,75 @@ export default function GameView(): JSX.Element {
     setCurrentMatchId(null);
   }, [handleResumeFailure, resumeJoinInProgress, ws.lastError]);
 
-  useEffect(() => {
-    if (!currentRoom?.roomCode) return;
-    stopResumeCountdown();
-  }, [currentRoom?.roomCode, stopResumeCountdown]);
-
   useEffect(() => () => {
     stopResumeCountdown();
   }, [stopResumeCountdown]);
+
+  useEffect(() => {
+    const roomCode = currentRoom?.roomCode ?? null;
+    const shouldHeartbeat = Boolean(
+      ws.connected
+      && localTgUserId
+      && roomCode
+      && (currentRoom?.phase === 'STARTED' || resumeJoinInProgress),
+    );
+
+    if (!shouldHeartbeat) {
+      return;
+    }
+
+    let heartbeatIntervalId: number | null = null;
+
+    const stopPresenceHeartbeat = (): void => {
+      if (heartbeatIntervalId !== null) {
+        window.clearInterval(heartbeatIntervalId);
+        heartbeatIntervalId = null;
+      }
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'presence_hb_stop', { roomCode, atMs: Date.now() });
+      }
+    };
+
+    const sendHeartbeat = (): void => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      wsSendRef.current({ type: 'mp:presence_heartbeat' }, { roomCode, matchId: currentMatchId });
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'presence_hb_sent', { roomCode, atMs: Date.now() });
+      }
+    };
+
+    const startPresenceHeartbeat = (): void => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      if (heartbeatIntervalId !== null) {
+        return;
+      }
+      if (isMultiplayerDebugEnabled) {
+        diagnosticsStore.log('ROOM', 'INFO', 'presence_hb_start', { roomCode, atMs: Date.now() });
+      }
+      sendHeartbeat();
+      heartbeatIntervalId = window.setInterval(sendHeartbeat, 12_000);
+    };
+
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') {
+        startPresenceHeartbeat();
+        return;
+      }
+      stopPresenceHeartbeat();
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    startPresenceHeartbeat();
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      stopPresenceHeartbeat();
+    };
+  }, [currentMatchId, currentRoom?.phase, currentRoom?.roomCode, isMultiplayerDebugEnabled, localTgUserId, resumeJoinInProgress, ws.connected]);
 
   useEffect(() => {
     const appliedTick = lastAppliedSnapshotTickRef.current;

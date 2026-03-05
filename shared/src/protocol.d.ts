@@ -11,6 +11,7 @@ export type MatchClientMessage =
   | { type: 'match:start' }
   | { type: 'match:input'; seq: number; payload: MatchInputPayload }
   | { type: 'match:bomb_place'; payload: { x: number; y: number } }
+  | { type: 'mp:presence_heartbeat' }
   | { type: 'mp:rejoin_ready'; roomCode: string; matchId: string; rejoinAttemptId: string }
   | { type: 'mp:snapshot_applied'; matchId: string; rejoinAttemptId?: string }
   | { type: 'room:restart_propose' }
