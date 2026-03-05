@@ -2657,7 +2657,7 @@ export default function GameView(): JSX.Element {
     }
     setResumeCountdownActive(false);
     setResumeCountdownSeconds(3);
-  }, [isMultiplayerDebugEnabled, resumeCountdownActive]);
+  }, [isMultiplayerDebugEnabled]);
 
   const startResumeCountdown = useCallback((): void => {
     stopResumeCountdown();
@@ -2936,7 +2936,7 @@ export default function GameView(): JSX.Element {
       if (document.visibilityState !== 'visible') {
         return;
       }
-      wsSendRef.current({ type: 'mp:presence_heartbeat' }, { roomCode, matchId: currentMatchId });
+      wsSendRef.current({ type: 'mp:presence_heartbeat' }, { roomCode, expectedMatchId: currentMatchId ?? undefined });
       if (isMultiplayerDebugEnabled) {
         diagnosticsStore.log('ROOM', 'INFO', 'presence_hb_sent', { roomCode, atMs: Date.now() });
       }
