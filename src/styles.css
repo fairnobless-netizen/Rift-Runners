@@ -2608,13 +2608,13 @@ html[data-orient="landscape"] .right-panel {
   display: grid;
   place-items: center;
   opacity: 0;
-  --rr-returning-duration: 3s;
+  transition: opacity 240ms ease;
   background: rgba(8, 11, 28, 0.56);
 }
 
 .rr-returning-overlay--active {
   opacity: 1;
-  animation: rrReturningOverlayFade var(--rr-returning-duration) linear both;
+  animation: rrReturningOverlayFade 3s linear both;
   background:
     radial-gradient(70% 55% at 50% 44%, rgba(75, 72, 196, 0.32), rgba(38, 66, 152, 0.16) 45%, rgba(4, 9, 22, 0.6) 100%),
     rgba(8, 11, 28, 0.56);
