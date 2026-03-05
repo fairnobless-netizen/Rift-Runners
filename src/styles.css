@@ -1204,6 +1204,28 @@ html[data-orient="landscape"] .right-panel {
   color: #ffffff;
 }
 
+.game-flow-mode-actions {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.game-flow-start-btn--secondary {
+  border-color: #4e5d88;
+  background: linear-gradient(180deg, #5b6896, #424f7a);
+}
+
+.rr-mode-exit-modal {
+  max-width: min(92vw, 420px);
+}
+
+.rr-mode-exit-body {
+  margin: 0;
+  color: #bec8ea;
+  text-align: center;
+}
+
 .settings-overlay {
   position: absolute;
   inset: 0;
