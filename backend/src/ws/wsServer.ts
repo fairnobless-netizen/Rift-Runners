@@ -80,6 +80,9 @@ const pendingRejoinHandshakes = new Map<string, PendingRejoinHandshake>(); // ke
 
 const STALE_CONNECTION_MS = 60_000;
 const INACTIVE_ROOM_MS = 90_000;
+const PRESENCE_HEARTBEAT_LOG_COOLDOWN_MS = 30_000;
+
+const lastPresenceHeartbeatLogByUser = new Map<string, number>();
 
 
 function roomHasRejoinablePlayer(roomId: string, nowMs = Date.now()): boolean {
@@ -213,6 +216,23 @@ function logWsEvent(evt: string, payload: Record<string, unknown>) {
       ts: Date.now(),
     }),
   );
+}
+
+function maybeLogPresenceHeartbeat(ctx: ClientCtx, status: 'accepted' | 'ignored', details: Record<string, unknown>): void {
+  const now = Date.now();
+  const key = `${ctx.tgUserId}:${status}`;
+  const lastLoggedAt = lastPresenceHeartbeatLogByUser.get(key) ?? 0;
+  if (now - lastLoggedAt < PRESENCE_HEARTBEAT_LOG_COOLDOWN_MS) {
+    return;
+  }
+  lastPresenceHeartbeatLogByUser.set(key, now);
+  logWsEvent('ws_presence_heartbeat', {
+    status,
+    tgUserId: ctx.tgUserId,
+    roomId: ctx.roomId,
+    matchId: ctx.matchId,
+    ...details,
+  });
 }
 
 function isSocketAttachedToRoom(ctx: ClientCtx, room: RoomState): boolean {
@@ -1102,6 +1122,43 @@ async function handleMessage(ctx: ClientCtx, msg: ClientMessage) {
       return;
     }
 
+
+    case 'mp:presence_heartbeat': {
+      if (!ctx.roomId || !ctx.matchId) {
+        maybeLogPresenceHeartbeat(ctx, 'ignored', { reason: 'missing_room_or_match' });
+        return;
+      }
+
+      const room = rooms.get(ctx.roomId);
+      if (!room) {
+        maybeLogPresenceHeartbeat(ctx, 'ignored', { reason: 'room_missing' });
+        return;
+      }
+
+      if (!isSocketAttachedToRoom(ctx, room)) {
+        maybeLogPresenceHeartbeat(ctx, 'ignored', { reason: 'socket_not_attached' });
+        return;
+      }
+
+      if (room.matchId !== ctx.matchId) {
+        maybeLogPresenceHeartbeat(ctx, 'ignored', { reason: 'ctx_room_match_mismatch', roomMatchId: room.matchId });
+        return;
+      }
+
+      const activeMatch = getMatch(ctx.matchId);
+      if (!activeMatch || activeMatch.roomId !== ctx.roomId) {
+        maybeLogPresenceHeartbeat(ctx, 'ignored', { reason: 'active_match_mismatch' });
+        return;
+      }
+
+      touchLastMpSession({
+        tgUserId: ctx.tgUserId,
+        roomCode: ctx.roomId,
+        matchId: ctx.matchId,
+      });
+      maybeLogPresenceHeartbeat(ctx, 'accepted', { roomCode: ctx.roomId, matchId: ctx.matchId });
+      return;
+    }
 
     case 'mp:rejoin_ready': {
       if (!ctx.roomId || !ctx.matchId) {
