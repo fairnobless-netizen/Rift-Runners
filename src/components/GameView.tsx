@@ -3872,10 +3872,10 @@ export default function GameView(): JSX.Element {
         </div>
       )}
       {resumeCountdownActive && (
-        <div className="rr-returning-overlay" role="status" aria-live="polite" aria-label="Returning to match countdown">
-          <div className="rr-returning-overlay__content">
+        <div className="rr-returning-overlay rr-returning-overlay--active" role="status" aria-live="polite" aria-label="Returning to match countdown">
+          <div className="rr-returning-overlay__content rr-returning-overlay__content--focused">
             <p className="rr-returning-overlay__title">RETURNING TO MATCH</p>
-            <span key={resumeCountdownSeconds} className="rr-returning-overlay__digit">{resumeCountdownSeconds}</span>
+            <span key={resumeCountdownSeconds} className="rr-returning-overlay__digit rr-returning-overlay__digit--pop">{resumeCountdownSeconds}</span>
           </div>
         </div>
       )}
