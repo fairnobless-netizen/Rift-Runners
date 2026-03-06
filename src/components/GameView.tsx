@@ -3084,7 +3084,7 @@ export default function GameView(): JSX.Element {
     sceneRef.current?.setGameMode('solo');
     sceneRef.current?.restartSoloRun();
     void enterFullViewMode(true);
-  }, [clearMultiplayerSessionForModeSwitch, currentRoom?.roomCode, enterFullViewMode]);
+  }, [clearMultiplayerSessionForModeSwitch, currentRoom?.roomCode, enterFullViewMode, leaveRoom]);
 
   const onSelectSingleplayerMode = useCallback((): void => {
     markUserInteracted();
