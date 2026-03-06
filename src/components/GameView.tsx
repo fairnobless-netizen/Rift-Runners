@@ -121,6 +121,7 @@ type AccountInfo = {
 };
 
 type GameFlowPhase = 'intro' | 'start' | 'playing';
+type GameMode = 'sp' | 'mp';
 type RejoinPhase = 'idle' | 'rejoin_wait_ack' | 'rejoin_resetting' | 'rejoin_ready' | 'rejoin_applying' | 'rejoin_complete' | 'rejoin_failed';
 type NicknameCheckState =
   | 'idle'
@@ -334,6 +335,8 @@ export default function GameView(): JSX.Element {
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const [multiplayerUiOpen, setMultiplayerUiOpen] = useState(false);
+  const [gameMode, setGameMode] = useState<GameMode | null>(null);
+  const [mpExitConfirmOpen, setMpExitConfirmOpen] = useState(false);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [joiningRoomCode, setJoiningRoomCode] = useState<string | null>(null);
@@ -3015,11 +3018,24 @@ export default function GameView(): JSX.Element {
   }, [isMultiplayerDebugEnabled, joinRoomByCode, markUserInteracted]);
 
 
-  const clearMultiplayerSessionState = useCallback((): void => {
+  const clearSingleplayerSessionForModeSwitch = useCallback((): void => {
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('UI', 'INFO', 'mode:switch_sp_to_mp', {
+        cleared: [],
+      });
+    }
+  }, [isMultiplayerDebugEnabled]);
+
+  const clearMultiplayerSessionForModeSwitch = useCallback((): void => {
     ws.send({ type: 'room:leave' });
     clearLastSession();
+    stopResumeCountdown();
     setMultiplayerUiOpen(false);
     setDeepLinkJoinCode(null);
+    setPendingResumePrompt(null);
+    setResumeModal(null);
+    resumePromptShownRef.current = false;
+    resumePromptSuppressedRef.current = false;
     setCurrentRoom(null);
     setCurrentRoomMembers([]);
     setCurrentMatchId(null);
@@ -3040,25 +3056,75 @@ export default function GameView(): JSX.Element {
     wsJoinedRoomCodeRef.current = null;
     sceneRef.current?.setActiveMultiplayerSession(null, null);
     sceneRef.current?.resetMultiplayerNetState();
-  }, [resetResumeAttemptState, ws]);
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('UI', 'INFO', 'mode:switch_mp_to_sp', {
+        cleared: ['last_session', 'room_state', 'rejoin_state', 'resume_prompt_state'],
+      });
+    }
+  }, [isMultiplayerDebugEnabled, resetResumeAttemptState, stopResumeCountdown, ws]);
 
-  const onLeaveMultiplayerMatch = useCallback(async (): Promise<void> => {
+  const switchToSingleplayerAfterModeSelect = useCallback((): void => {
+    sceneRef.current?.setGameMode('solo');
+    sceneRef.current?.restartSoloRun();
+    void enterFullViewMode(false);
+  }, [enterFullViewMode]);
+
+  const switchToSingleplayerFromMultiplayer = useCallback(async (): Promise<void> => {
     const roomCode = currentRoom?.roomCode;
-    clearMultiplayerSessionState();
-    clearLastSession();
-
+    clearMultiplayerSessionForModeSwitch();
     if (roomCode) {
       try {
         await leaveRoom();
       } catch {
-        // best effort: ws detach already executed
+        // best-effort cleanup
       }
     }
-
+    setGameMode('sp');
+    setMpExitConfirmOpen(false);
     sceneRef.current?.setGameMode('solo');
     sceneRef.current?.restartSoloRun();
-    setGameFlowPhase('start');
-  }, [clearMultiplayerSessionState, currentRoom?.roomCode]);
+    void enterFullViewMode(true);
+  }, [clearMultiplayerSessionForModeSwitch, currentRoom?.roomCode, enterFullViewMode, leaveRoom]);
+
+  const onSelectSingleplayerMode = useCallback((): void => {
+    markUserInteracted();
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('UI', 'INFO', 'mode:select_sp');
+    }
+    if (gameMode === 'mp' || currentRoom?.roomCode || multiplayerUiOpen || resumeJoinInProgress || deepLinkJoinCode) {
+      clearMultiplayerSessionForModeSwitch();
+    }
+    setGameMode('sp');
+    switchToSingleplayerAfterModeSelect();
+  }, [clearMultiplayerSessionForModeSwitch, currentRoom?.roomCode, deepLinkJoinCode, gameMode, isMultiplayerDebugEnabled, markUserInteracted, multiplayerUiOpen, resumeJoinInProgress, switchToSingleplayerAfterModeSelect]);
+
+  const onSelectMultiplayerMode = useCallback((): void => {
+    markUserInteracted();
+    if (isMultiplayerDebugEnabled) {
+      diagnosticsStore.log('UI', 'INFO', 'mode:select_mp');
+    }
+    if (gameMode === 'sp') {
+      clearSingleplayerSessionForModeSwitch();
+    }
+    setGameMode('mp');
+    setMultiplayerUiOpen(true);
+  }, [clearSingleplayerSessionForModeSwitch, gameMode, isMultiplayerDebugEnabled, markUserInteracted]);
+
+  const onRequestExitMultiplayerContext = useCallback((): void => {
+    if (gameMode !== 'mp') {
+      setMultiplayerUiOpen(false);
+      return;
+    }
+    setMpExitConfirmOpen(true);
+  }, [gameMode]);
+
+  const onCancelExitMultiplayerContext = useCallback((): void => {
+    setMpExitConfirmOpen(false);
+  }, []);
+
+  const onLeaveMultiplayerMatch = useCallback(async (): Promise<void> => {
+    onRequestExitMultiplayerContext();
+  }, [onRequestExitMultiplayerContext]);
 
   const onLeaveRoom = useCallback(async (): Promise<void> => {
     if (!currentRoom) return;
@@ -3352,9 +3418,13 @@ export default function GameView(): JSX.Element {
     const deepLinkRoomCode = startParam.replace('room_', '').trim().toUpperCase();
     if (!deepLinkRoomCode) return;
 
+    if (gameMode === 'sp') {
+      clearSingleplayerSessionForModeSwitch();
+    }
+    setGameMode('mp');
     setDeepLinkJoinCode(deepLinkRoomCode);
     setMultiplayerUiOpen(true);
-  }, [token]);
+  }, [clearSingleplayerSessionForModeSwitch, gameMode, token]);
 
   const onBuy = async (sku: string): Promise<void> => {
     if (purchaseBusySku) return;
@@ -3735,11 +3805,6 @@ export default function GameView(): JSX.Element {
     }
   }
 
-  const onStartGame = (): void => {
-    markUserInteracted();
-    void enterFullViewMode(false);
-  };
-
   const onTutorialNext = (): void => {
     if (tutorialStepIndex >= tutorialSteps.length - 1) {
       setTutorialActive(false);
@@ -3776,7 +3841,7 @@ export default function GameView(): JSX.Element {
           </div>
         </div>
       )}
-      {!effectiveShowBootSplash && !shouldBypassBootForResume && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && (
+      {!effectiveShowBootSplash && !shouldBypassBootForResume && gameFlowPhase !== 'playing' && !resumeJoinInProgress && !rejoinOverlayActive && gameMode === null && (
         <div className="game-flow-overlay" role="status" aria-live="polite">
           {gameFlowPhase === 'intro' ? (
             <div className="intro-layer" aria-label="Rift Runners intro animation">
@@ -3787,10 +3852,25 @@ export default function GameView(): JSX.Element {
             </div>
           ) : (
             <div className="game-flow-card">
-              <h2>Ready to start?</h2>
-              <button type="button" className="game-flow-start-btn" disabled={shouldShowRotateOverlay} onClick={onStartGame}>Start</button>
+              <h2>Choose mode</h2>
+              <div className="game-flow-mode-actions">
+                <button type="button" className="game-flow-start-btn" disabled={shouldShowRotateOverlay} onClick={onSelectSingleplayerMode}>Singleplayer</button>
+                <button type="button" className="game-flow-start-btn game-flow-start-btn--secondary" disabled={shouldShowRotateOverlay} onClick={onSelectMultiplayerMode}>Multiplayer</button>
+              </div>
             </div>
           )}
+        </div>
+      )}
+      {mpExitConfirmOpen && (
+        <div className="rr-resume-overlay" role="dialog" aria-modal="true" aria-label="Leave Multiplayer?">
+          <div className="rr-overlay-modal rr-resume-modal rr-mode-exit-modal">
+            <p className="rr-resume-title">Leave Multiplayer?</p>
+            <p className="rr-mode-exit-body">Switch to Singleplayer?</p>
+            <div className="rr-resume-actions">
+              <button type="button" className="rr-resume-btn rr-resume-btn--accept" onClick={switchToSingleplayerFromMultiplayer}>OK</button>
+              <button type="button" className="rr-resume-btn rr-resume-btn--cancel" onClick={onCancelExitMultiplayerContext}>Cancel</button>
+            </div>
+          </div>
         </div>
       )}
       {registrationOpen && (
@@ -4004,8 +4084,7 @@ export default function GameView(): JSX.Element {
                   </button>
                 ) : (
                   <button ref={multiplayerBtnRef} type="button" className="nav-btn nav-btn--multiplayer" aria-label="Multiplayer" onClick={() => {
-                    markUserInteracted();
-                    setMultiplayerUiOpen(true);
+                    onSelectMultiplayerMode();
                   }}>
                     <span className="nav-btn__plate" aria-hidden="true">
                       <span className="nav-btn__icon" aria-hidden="true">👥</span>
@@ -4259,7 +4338,7 @@ export default function GameView(): JSX.Element {
         open={multiplayerUiOpen}
         onClose={() => {
           cancelResumeAttemptByUser();
-          setMultiplayerUiOpen(false);
+          onRequestExitMultiplayerContext();
         }}
         initialTab={deepLinkJoinCode ? 'room' : undefined}
         initialRoomTab={deepLinkJoinCode ? 'join' : undefined}
