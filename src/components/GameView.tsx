@@ -3019,10 +3019,9 @@ export default function GameView(): JSX.Element {
 
 
   const clearSingleplayerSessionForModeSwitch = useCallback((): void => {
-    clearLastSession();
     if (isMultiplayerDebugEnabled) {
       diagnosticsStore.log('UI', 'INFO', 'mode:switch_sp_to_mp', {
-        cleared: ['last_session'],
+        cleared: [],
       });
     }
   }, [isMultiplayerDebugEnabled]);
@@ -3070,14 +3069,22 @@ export default function GameView(): JSX.Element {
     void enterFullViewMode(false);
   }, [enterFullViewMode]);
 
-  const switchToSingleplayerFromMultiplayer = useCallback((): void => {
+  const switchToSingleplayerFromMultiplayer = useCallback(async (): Promise<void> => {
+    const roomCode = currentRoom?.roomCode;
     clearMultiplayerSessionForModeSwitch();
+    if (roomCode) {
+      try {
+        await leaveRoom();
+      } catch {
+        // best-effort cleanup
+      }
+    }
     setGameMode('sp');
     setMpExitConfirmOpen(false);
     sceneRef.current?.setGameMode('solo');
     sceneRef.current?.restartSoloRun();
     void enterFullViewMode(true);
-  }, [clearMultiplayerSessionForModeSwitch, enterFullViewMode]);
+  }, [clearMultiplayerSessionForModeSwitch, currentRoom?.roomCode, enterFullViewMode, leaveRoom]);
 
   const onSelectSingleplayerMode = useCallback((): void => {
     markUserInteracted();
